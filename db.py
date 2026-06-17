@@ -96,6 +96,7 @@ def project_statuses():
 
 
 # ---- projects -------------------------------------------------------------
+@st.cache_data(ttl=30)
 def my_projects():
     res = client().table("project").select(
         "id,name,status_id,visibility,estimated_hours,category_id,"
@@ -287,6 +288,7 @@ def my_app_user_id():
     return me["id"] if me else None
 
 
+@st.cache_data(ttl=60)
 def projects_i_participate_in():
     """Projects where I am a lead or participant (via project_lead).
     Returns [{id, name}] for use in the milestones overview and selectors."""
@@ -409,6 +411,7 @@ def project_history(project_id):
             .order("changed_at", desc=True).limit(50).execute().data or [])
 
 
+@st.cache_data(ttl=30)
 def project_milestones(project_id):
     rows = (client().table("project_milestone")
             .select("id,title,detail,due_on,start_on,status,sort_order,"
@@ -483,7 +486,7 @@ def refresh_shared_percent_from_hours(milestone_id, owner_id):
     if not planned:
         return None
     # the owner's own logged hours toward this milestone
-    hrs = my_milestone_hours().get(milestone_id) or 0
+    hrs = _my_milestone_hours_uncached().get(milestone_id) or 0
     pct = max(0, min(100, int(round(100 * hrs / planned))))
     set_milestone_shared_percent(milestone_id, pct)
     return pct
@@ -572,6 +575,7 @@ def milestone_percent(m, my_hours=None):
     return int(round(sp)) if sp is not None else None
 
 
+@st.cache_data(ttl=120)
 def group_members():
     """Active people who can be milestone contributors."""
     return (client().table("app_user")
@@ -653,11 +657,20 @@ def delete_milestone(milestone_id):
             .delete().eq("id", milestone_id).execute())
 
 
-def my_milestone_hours():
-    """Map of milestone_id -> the current user's own hours toward it."""
+def _my_milestone_hours_uncached():
+    """Fresh (uncached) map of milestone_id -> the caller's own hours toward it.
+    Used by the shared-% recompute, which runs right after a session write and
+    must see the just-written hours, not a cached snapshot."""
     rows = client().table("v_my_milestone_hours") \
         .select("milestone_id,my_hours").execute().data or []
     return {r["milestone_id"]: r["my_hours"] for r in rows}
+
+
+@st.cache_data(ttl=30)
+def my_milestone_hours():
+    """Map of milestone_id -> the current user's own hours toward it.
+    Cached briefly for UI rendering; cleared on writes."""
+    return _my_milestone_hours_uncached()
 
 
 # ---- sessions -------------------------------------------------------------
@@ -766,6 +779,7 @@ def duplicate_session(session_id, new_date=None):
 
 
 # ---- inference (views + RPC functions) ------------------------------------
+@st.cache_data(ttl=30)
 def project_tracker():
     return client().table("v_project_tracker").select("*").execute().data or []
 
