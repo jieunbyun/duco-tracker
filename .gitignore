@@ -1,0 +1,16 @@
+# --- Secrets: never upload these ---
+# Your Supabase keys live here. Keeping this out of the repo is the whole
+# point — the code can be shared, the keys stay on your machine.
+.streamlit/secrets.toml
+secrets.toml
+**/secrets.toml
+
+# Service-role key or any local environment file, just in case
+.env
+*.env
+
+# --- Python clutter (safe to ignore) ---
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.DS_Store

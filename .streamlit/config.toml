@@ -1,0 +1,12 @@
+[theme]
+# Palette: ink-on-paper with a measured blueprint-slate accent.
+# Drawn from the subject's world (structural/reliability engineering): quiet
+# paper ground, deep ink text, one considered slate-blue accent for action.
+primaryColor = "#3A5A78"           # blueprint slate — actions, highlights
+backgroundColor = "#FBFAF7"        # warm paper, not stark white
+secondaryBackgroundColor = "#F0EEE8"  # panel ground, a shade deeper
+textColor = "#1F2933"              # near-ink, not pure black
+font = "serif"
+
+[server]
+headless = true
