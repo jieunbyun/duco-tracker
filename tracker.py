@@ -401,9 +401,7 @@ def view_log(me):
                     db.set_project_importance(proj_labels[proj], new_imp)
                     st.cache_data.clear()
                     st.rerun()
-        day = st.date_input("Date", value=dt.date.today())
         # optional milestone, filtered to the chosen existing project.
-        # Includes "+ New milestone" to create one inline.
         new_ms_name = ""
         if not life_mode and proj not in ("— none —", "+ New project…"):
             chosen_pid = proj_labels[proj]
@@ -423,21 +421,29 @@ def view_log(me):
                 milestone_id = "__new__"
             else:
                 milestone_id = ms_labels[ms_pick]
+
+    # The selectors above stay live (category filters projects, etc). The
+    # fields you TYPE into go in a form, so typing no longer re-runs the page
+    # on every keystroke — the page only re-runs when you click Save.
     with col2:
-        mode = st.radio("Duration", ["Start & end time", "Just minutes"],
-                        horizontal=True)
-        if mode == "Start & end time":
+        with st.form("log_entry_form"):
+            day = st.date_input("Date", value=dt.date.today())
+            mode = st.radio("Duration", ["Start & end time", "Just minutes"],
+                            horizontal=True)
             t_start = time_field("Start", dt.time(9, 0), "log_start")
             t_end = time_field("End", dt.time(10, 0), "log_end")
+            minutes_val = st.number_input(
+                "Minutes (used if 'Just minutes' is chosen)", min_value=1,
+                max_value=960, value=30, step=5)
+            desc = st.text_input("Note (optional)")
+            submitted = st.form_submit_button("Save session", type="primary")
+        if mode == "Start & end time":
             minutes = None
         else:
-            minutes = st.number_input("Minutes", min_value=1, max_value=960,
-                                      value=30, step=5)
-            t_start = dt.time(9, 0)
+            minutes = minutes_val
             t_end = None
-    desc = st.text_input("Note (optional)")
 
-    if st.button("Save session", type="primary"):
+    if submitted:
         if t_end is not None:
             # timed mode: resolve with midnight-aware helper
             started, ended, err = resolve_block_times(day, t_start, t_end)
