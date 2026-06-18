@@ -16,21 +16,54 @@ import streamlit as st
 from supabase import create_client, Client
 
 
-@st.cache_resource
-def _client() -> Client:
+def _new_client() -> Client:
     url = st.secrets["SUPABASE_URL"]
     key = st.secrets["SUPABASE_ANON_KEY"]
     return create_client(url, key)
 
 
 def client() -> Client:
-    return _client()
+    """Return a Supabase client that is UNIQUE to this browser session.
+
+    A shared (st.cache_resource) client would hold one auth session in server
+    memory and leak it across all visitors — so a new/incognito visitor would
+    inherit whoever last signed in. Instead we keep one client per Streamlit
+    session in st.session_state, and re-apply this session's saved auth tokens
+    to it on every run so the client always acts as THIS user (and nobody
+    else)."""
+    c = st.session_state.get("_sb_client")
+    if c is None:
+        c = _new_client()
+        st.session_state["_sb_client"] = c
+    # re-apply this browser session's tokens (survives Streamlit reruns)
+    tokens = st.session_state.get("_sb_tokens")
+    if tokens:
+        try:
+            c.auth.set_session(tokens["access_token"], tokens["refresh_token"])
+        except Exception:
+            # tokens expired/invalid: drop them so the user is treated as
+            # signed out rather than wrongly authenticated
+            st.session_state.pop("_sb_tokens", None)
+    return c
+
+
+def _store_tokens(resp):
+    """Persist the access/refresh tokens from a sign-in into this session."""
+    sess = getattr(resp, "session", None)
+    if sess and getattr(sess, "access_token", None):
+        st.session_state["_sb_tokens"] = {
+            "access_token": sess.access_token,
+            "refresh_token": sess.refresh_token,
+        }
 
 
 # ---- auth -----------------------------------------------------------------
 def sign_in(email: str, password: str):
-    """Sign in; returns the auth response or raises."""
-    return client().auth.sign_in_with_password({"email": email, "password": password})
+    """Sign in; store this session's tokens; returns the auth response."""
+    resp = client().auth.sign_in_with_password(
+        {"email": email, "password": password})
+    _store_tokens(resp)
+    return resp
 
 
 def sign_up(email: str, password: str):
@@ -42,13 +75,29 @@ def sign_out():
         client().auth.sign_out()
     except Exception:
         pass
+    # clear this browser session's auth so the next run shows the login page
+    st.session_state.pop("_sb_tokens", None)
+    st.session_state.pop("_sb_client", None)
 
 
 def current_session():
+    # only consider ourselves signed in if THIS session has stored tokens
+    if not st.session_state.get("_sb_tokens"):
+        return None
     try:
         return client().auth.get_session()
     except Exception:
         return None
+
+
+def _uid():
+    """Current auth user id for THIS browser session, or '' if signed out.
+    Used as a per-user cache key so cached reads never leak across users."""
+    sess = current_session()
+    if sess and getattr(sess, "user", None):
+        return sess.user.id or ""
+    return ""
+
 
 
 # ---- app_user resolution --------------------------------------------------
@@ -97,12 +146,16 @@ def project_statuses():
 
 # ---- projects -------------------------------------------------------------
 @st.cache_data(ttl=30)
-def my_projects():
+def _my_projects(_u):
     res = client().table("project").select(
         "id,name,status_id,visibility,estimated_hours,category_id,"
         "high_importance") \
         .order("name").execute()
     return res.data or []
+
+
+def my_projects():
+    return _my_projects(_uid())
 
 
 def projects_for_category(category_id):
@@ -289,7 +342,7 @@ def my_app_user_id():
 
 
 @st.cache_data(ttl=60)
-def projects_i_participate_in():
+def _projects_i_participate_in(_u):
     """Projects where I am a lead or participant (via project_lead).
     Returns [{id, name}] for use in the milestones overview and selectors."""
     me_id = my_app_user_id()
@@ -302,6 +355,10 @@ def projects_i_participate_in():
              .select("id,name,status_id").execute().data or [])
     return [{"id": p["id"], "name": p["name"]}
             for p in projs if p["id"] in my_pids]
+
+
+def projects_i_participate_in():
+    return _projects_i_participate_in(_uid())
 
 
 def milestones_for_projects(project_ids):
@@ -412,7 +469,7 @@ def project_history(project_id):
 
 
 @st.cache_data(ttl=30)
-def project_milestones(project_id):
+def _project_milestones(project_id, _u):
     rows = (client().table("project_milestone")
             .select("id,title,detail,due_on,start_on,status,sort_order,"
                     "hypothesis,success_measure,"
@@ -425,6 +482,10 @@ def project_milestones(project_id):
     rows.sort(key=lambda m: (m.get("due_on") is None,
                              m.get("due_on") or ""))
     return rows
+
+
+def project_milestones(project_id):
+    return _project_milestones(project_id, _uid())
 
 
 def my_milestone_plans():
@@ -576,11 +637,15 @@ def milestone_percent(m, my_hours=None):
 
 
 @st.cache_data(ttl=120)
-def group_members():
+def _group_members(_u):
     """Active people who can be milestone contributors."""
     return (client().table("app_user")
             .select("id,full_name,role,is_active")
             .eq("is_active", True).order("full_name").execute().data or [])
+
+
+def group_members():
+    return _group_members(_uid())
 
 
 def project_milestone_audit(project_id):
@@ -667,10 +732,14 @@ def _my_milestone_hours_uncached():
 
 
 @st.cache_data(ttl=30)
-def my_milestone_hours():
+def _my_milestone_hours_cached(_u):
     """Map of milestone_id -> the current user's own hours toward it.
-    Cached briefly for UI rendering; cleared on writes."""
+    Cached per-user; cleared on writes."""
     return _my_milestone_hours_uncached()
+
+
+def my_milestone_hours():
+    return _my_milestone_hours_cached(_uid())
 
 
 # ---- sessions -------------------------------------------------------------
@@ -780,8 +849,12 @@ def duplicate_session(session_id, new_date=None):
 
 # ---- inference (views + RPC functions) ------------------------------------
 @st.cache_data(ttl=30)
-def project_tracker():
+def _project_tracker(_u):
     return client().table("v_project_tracker").select("*").execute().data or []
+
+
+def project_tracker():
+    return _project_tracker(_uid())
 
 
 def milestone_progress(project_id):
