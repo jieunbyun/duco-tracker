@@ -877,13 +877,14 @@ def view_week(me):
                     wk_milestone_id = "__new__"
                 else:
                     wk_milestone_id = wms_labels[wms_pick]
-        # clear the note from a previous successful add (must happen BEFORE
-        # the widget is instantiated, not after)
-        if st.session_state.get("wk_clear_note"):
-            st.session_state["wk_note"] = ""
-            del st.session_state["wk_clear_note"]
-        b_note = st.text_input("What will you work on?", key="wk_note")
-    if st.button("Add block", type="primary"):
+        # the selectors and time pickers above stay live (category switches
+        # work/life and filters projects). The note goes in a form so typing
+        # it doesn't re-run the page each keystroke.
+        with st.form("wk_addblock_form", clear_on_submit=True):
+            b_note = st.text_input("What will you work on?", key="wk_note")
+            addblock_submit = st.form_submit_button("Add block",
+                                                    type="primary")
+    if addblock_submit:
         started, ended, time_err = resolve_block_times(b_day, b_start, b_end)
         if sep_picked:
             st.error("That's a divider, not a category — pick a real category.")
@@ -934,9 +935,6 @@ def view_week(me):
                                    description=b_note or None,
                                    milestone_id=ms_id)
                     st.success("Block added.")
-                    # signal to clear the note field on the next run (can't
-                    # assign to a widget key after the widget exists)
-                    st.session_state["wk_clear_note"] = True
                     st.cache_data.clear()
                     st.rerun()
                 except Exception as e:
@@ -1494,55 +1492,61 @@ def view_projects(me):
             statuses = db.project_statuses()
             st_labels = {s["label"]: s["id"] for s in statuses}
             det = db.project_detail(pid) or {}
-            new_name = st.text_input("Project name",
-                                     value=r.get("project_name") or "",
-                                     key=f"name_{pid}")
-            # category (one per project) — used to filter the logging dropdown
-            all_cats = db.categories(domain="work")
-            cat_by_id = {c["id"]: c["label"] for c in all_cats}
-            cat_label_to_id = {c["label"]: c["id"] for c in all_cats}
-            cur_cat_id = det.get("category_id")
-            cat_options = ["— none —"] + list(cat_label_to_id.keys())
-            cur_cat_label = cat_by_id.get(cur_cat_id, "— none —")
-            cat_index = cat_options.index(cur_cat_label) \
-                if cur_cat_label in cat_options else 0
-            new_proj_cat = st.selectbox(
-                "Category (one per project)", cat_options, index=cat_index,
-                key=f"projcat_{pid}",
-                help="Determines which category this project appears under "
-                     "when logging.")
-            new_importance = st.checkbox(
-                "⭐ High importance", value=bool(det.get("high_importance")),
-                key=f"projimp_{pid}",
-                help="Highlights this project's hours in the Time tab.")
-            ec1, ec2 = st.columns(2)
-            with ec1:
-                # estimate (hours) shown to the lead only
-                if is_lead:
-                    if est:
-                        st.metric("Estimate (from milestones)", f"{est:g} h")
-                    else:
-                        st.caption("Estimate: set milestone planned hours below")
-            with ec2:
-                cur_status = r.get("status") or list(st_labels.keys())[0]
-                idx = list(st_labels.keys()).index(cur_status) \
-                    if cur_status in st_labels else 0
-                new_status = st.selectbox("Status", list(st_labels.keys()),
-                                          index=idx, key=f"status_{pid}")
-            dc1, dc2 = st.columns(2)
-            with dc1:
-                cur_started = det.get("started_on")
-                new_started = st.date_input(
-                    "Start date",
-                    value=dt.date.fromisoformat(cur_started) if cur_started
-                    else None, key=f"start_{pid}")
-            with dc2:
-                cur_due = det.get("due_on")
-                new_due = st.date_input(
-                    "Due date",
-                    value=dt.date.fromisoformat(cur_due) if cur_due
-                    else None, key=f"due_{pid}")
-            if st.button("Save details", key=f"savedet_{pid}"):
+            det = db.project_detail(pid) or {}
+            with st.form(f"projdet_form_{pid}"):
+                new_name = st.text_input("Project name",
+                                         value=r.get("project_name") or "",
+                                         key=f"name_{pid}")
+                # category (one per project) — filters the logging dropdown
+                all_cats = db.categories(domain="work")
+                cat_by_id = {c["id"]: c["label"] for c in all_cats}
+                cat_label_to_id = {c["label"]: c["id"] for c in all_cats}
+                cur_cat_id = det.get("category_id")
+                cat_options = ["— none —"] + list(cat_label_to_id.keys())
+                cur_cat_label = cat_by_id.get(cur_cat_id, "— none —")
+                cat_index = cat_options.index(cur_cat_label) \
+                    if cur_cat_label in cat_options else 0
+                new_proj_cat = st.selectbox(
+                    "Category (one per project)", cat_options, index=cat_index,
+                    key=f"projcat_{pid}",
+                    help="Determines which category this project appears under "
+                         "when logging.")
+                new_importance = st.checkbox(
+                    "⭐ High importance",
+                    value=bool(det.get("high_importance")),
+                    key=f"projimp_{pid}",
+                    help="Highlights this project's hours in the Time tab.")
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    if is_lead:
+                        if est:
+                            st.metric("Estimate (from milestones)",
+                                      f"{est:g} h")
+                        else:
+                            st.caption("Estimate: set milestone planned hours "
+                                       "below")
+                with ec2:
+                    cur_status = r.get("status") or list(st_labels.keys())[0]
+                    idx = list(st_labels.keys()).index(cur_status) \
+                        if cur_status in st_labels else 0
+                    new_status = st.selectbox(
+                        "Status", list(st_labels.keys()),
+                        index=idx, key=f"status_{pid}")
+                dc1, dc2 = st.columns(2)
+                with dc1:
+                    cur_started = det.get("started_on")
+                    new_started = st.date_input(
+                        "Start date",
+                        value=dt.date.fromisoformat(cur_started)
+                        if cur_started else None, key=f"start_{pid}")
+                with dc2:
+                    cur_due = det.get("due_on")
+                    new_due = st.date_input(
+                        "Due date",
+                        value=dt.date.fromisoformat(cur_due) if cur_due
+                        else None, key=f"due_{pid}")
+                savedet_submit = st.form_submit_button("Save details")
+            if savedet_submit:
                 if not new_name.strip():
                     st.error("Project name can't be empty.")
                 else:
@@ -1567,18 +1571,21 @@ def view_projects(me):
             # ---- planning fields ----
             det = db.project_detail(pid) or {}
             st.markdown("**Planning**")
-            purpose = st.text_area("Purpose", value=det.get("purpose") or "",
-                                   key=f"purpose_{pid}",
-                                   help="Why the project exists.")
-            outcomes = st.text_area("Final outcomes",
-                                    value=det.get("final_outcomes") or "",
-                                    key=f"outcomes_{pid}")
-            stake = st.text_area("Stakeholders / users",
-                                 value=det.get("stakeholders") or "",
-                                 key=f"stake_{pid}")
-            risks = st.text_area("Risks", value=det.get("risks") or "",
-                                 key=f"risks_{pid}")
-            if st.button("Save planning", key=f"saveplan_{pid}"):
+            with st.form(f"projplan_form_{pid}"):
+                purpose = st.text_area("Purpose",
+                                       value=det.get("purpose") or "",
+                                       key=f"purpose_{pid}",
+                                       help="Why the project exists.")
+                outcomes = st.text_area("Final outcomes",
+                                        value=det.get("final_outcomes") or "",
+                                        key=f"outcomes_{pid}")
+                stake = st.text_area("Stakeholders / users",
+                                     value=det.get("stakeholders") or "",
+                                     key=f"stake_{pid}")
+                risks = st.text_area("Risks", value=det.get("risks") or "",
+                                     key=f"risks_{pid}")
+                saveplan_submit = st.form_submit_button("Save planning")
+            if saveplan_submit:
                 try:
                     db.update_project(pid, {
                         "purpose": purpose or None,
@@ -1780,11 +1787,14 @@ def view_projects(me):
                                     st.cache_data.clear()
                                     st.rerun()
                         with st.popover("Add note"):
-                            un = st.text_input("Progress note",
-                                               key=f"upnote_{m['id']}",
-                                               placeholder="e.g. first pass done")
-                            if st.button("Save note", key=f"upsave_{m['id']}",
-                                         type="primary"):
+                            with st.form(f"upnote_form_{m['id']}",
+                                         clear_on_submit=True):
+                                un = st.text_input(
+                                    "Progress note", key=f"upnote_{m['id']}",
+                                    placeholder="e.g. first pass done")
+                                upnote_submit = st.form_submit_button(
+                                    "Save note", type="primary")
+                            if upnote_submit:
                                 if un.strip():
                                     try:
                                         db.add_milestone_update(
@@ -2089,10 +2099,12 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
                         st.caption(f"✎ {when} · {who} · "
                                    f"{(h.get('action') or '').lower()}")
         with st.popover("Add note", use_container_width=False):
-            un = st.text_input("Progress note", key=f"msv_note_{m['id']}",
-                               placeholder="e.g. first pass done")
-            if st.button("Save note", key=f"msv_notesave_{m['id']}",
-                         type="primary"):
+            with st.form(f"msvnote_form_{m['id']}", clear_on_submit=True):
+                un = st.text_input("Progress note", key=f"msv_note_{m['id']}",
+                                   placeholder="e.g. first pass done")
+                msvnote_submit = st.form_submit_button(
+                    "Save note", type="primary")
+            if msvnote_submit:
                 if un.strip():
                     db.add_milestone_update(m["id"], me["id"], un.strip())
                     st.cache_data.clear()
