@@ -111,31 +111,38 @@ def edit_session_widget(s, key_prefix):
         # no project selected -> no milestone
         new_ms_id = None
 
-    ec1, ec2, ec3 = st.columns(3)
-    with ec1:
-        new_date = st.date_input(
-            "Date", value=(cur_start.date() if cur_start
-                           else dt.date.fromisoformat(s["session_date"])),
-            key=f"{key_prefix}_date_{sid}")
-    with ec2:
-        _sp = st.time_input(
-            "Start", value=(cur_start.time() if cur_start else dt.time(9, 0)),
-            key=f"{key_prefix}_start_{sid}")
-        _st_raw = st.text_input("or type", key=f"{key_prefix}_starttype_{sid}",
-                                placeholder="0930")
-        new_start = parse_time_str(_st_raw) or _sp
-    with ec3:
-        _ep = st.time_input(
-            "End", value=(cur_end.time() if cur_end else dt.time(10, 0)),
-            key=f"{key_prefix}_end_{sid}")
-        _et_raw = st.text_input("or type", key=f"{key_prefix}_endtype_{sid}",
-                                placeholder="1100")
-        new_end = parse_time_str(_et_raw) or _ep
+    # the selectors above stay live (category filters projects -> milestones).
+    # the date/time fields you type into go in a form, so typing doesn't re-run
+    # the page on every keystroke.
+    with st.form(f"{key_prefix}_editform_{sid}"):
+        ec1, ec2, ec3 = st.columns(3)
+        with ec1:
+            new_date = st.date_input(
+                "Date", value=(cur_start.date() if cur_start
+                               else dt.date.fromisoformat(s["session_date"])),
+                key=f"{key_prefix}_date_{sid}")
+        with ec2:
+            _sp = st.time_input(
+                "Start", value=(cur_start.time() if cur_start
+                                else dt.time(9, 0)),
+                key=f"{key_prefix}_start_{sid}")
+            _st_raw = st.text_input(
+                "or type", key=f"{key_prefix}_starttype_{sid}",
+                placeholder="0930")
+            new_start = parse_time_str(_st_raw) or _sp
+        with ec3:
+            _ep = st.time_input(
+                "End", value=(cur_end.time() if cur_end else dt.time(10, 0)),
+                key=f"{key_prefix}_end_{sid}")
+            _et_raw = st.text_input(
+                "or type", key=f"{key_prefix}_endtype_{sid}",
+                placeholder="1100")
+            new_end = parse_time_str(_et_raw) or _ep
+        save_change = st.form_submit_button("Save change", type="primary")
 
     b1, b2 = st.columns(2)
     with b1:
-        if st.button("Save change", key=f"{key_prefix}_save_{sid}",
-                     type="primary"):
+        if save_change:
             started, ended, err = resolve_block_times(
                 new_date, new_start, new_end)
             if err:
@@ -713,27 +720,28 @@ def view_week(me):
                         st.cache_data.clear()
                         st.rerun()
                 with edit_pop:
-                    e_title = st.text_input("Title", value=t["title"],
-                                            key=f"tded_title_{t['id']}")
-                    e_note = st.text_area("Note", value=t.get("note") or "",
-                                          key=f"tded_note_{t['id']}",
-                                          height=70)
-                    e_hours = st.number_input(
-                        "Estimated hours", min_value=0.0, step=0.5,
-                        value=float(t.get("est_hours") or 0),
-                        key=f"tded_hours_{t['id']}")
-                    e_projs = {"— no project —": None}
-                    e_projs.update({p["name"]: p["id"]
-                                    for p in db.my_projects()})
-                    cur_pn = proj_name.get(t.get("project_id")) \
-                        or "— no project —"
-                    e_keys = list(e_projs.keys())
-                    e_idx = e_keys.index(cur_pn) if cur_pn in e_keys else 0
-                    e_proj = st.selectbox("Project", e_keys, index=e_idx,
-                                          key=f"tded_proj_{t['id']}")
-                    if st.button("Save", key=f"tded_save_{t['id']}",
-                                 type="primary"):
-                        if e_title.strip():
+                    with st.form(f"tded_form_{t['id']}"):
+                        e_title = st.text_input("Title", value=t["title"],
+                                                key=f"tded_title_{t['id']}")
+                        e_note = st.text_area("Note", value=t.get("note") or "",
+                                              key=f"tded_note_{t['id']}",
+                                              height=70)
+                        e_hours = st.number_input(
+                            "Estimated hours", min_value=0.0, step=0.5,
+                            value=float(t.get("est_hours") or 0),
+                            key=f"tded_hours_{t['id']}")
+                        e_projs = {"— no project —": None}
+                        e_projs.update({p["name"]: p["id"]
+                                        for p in db.my_projects()})
+                        cur_pn = proj_name.get(t.get("project_id")) \
+                            or "— no project —"
+                        e_keys = list(e_projs.keys())
+                        e_idx = e_keys.index(cur_pn) if cur_pn in e_keys else 0
+                        e_proj = st.selectbox("Project", e_keys, index=e_idx,
+                                              key=f"tded_proj_{t['id']}")
+                        tded_submit = st.form_submit_button(
+                            "Save", type="primary")
+                        if tded_submit and e_title.strip():
                             db.update_todo(t["id"], {
                                 "title": e_title.strip(),
                                 "note": e_note.strip() or None,
@@ -741,7 +749,7 @@ def view_week(me):
                                 "project_id": e_projs[e_proj]})
                             st.cache_data.clear()
                             st.rerun()
-                        else:
+                        elif tded_submit:
                             st.error("Title can't be empty.")
         # estimated-hours totals (all, and just what's still open)
         est_all = sum((t.get("est_hours") or 0) for t in todos)
@@ -1834,63 +1842,64 @@ def view_projects(me):
                             st.cache_data.clear()
                             st.rerun()
                         with st.popover("✎", help="Edit milestone"):
-                            e_title = st.text_input(
-                                "Title", value=m["title"],
-                                key=f"editms_title_{m['id']}")
-                            cur_start = m.get("start_on")
-                            e_start = st.date_input(
-                                "Start (optional)",
-                                value=dt.date.fromisoformat(cur_start)
-                                if cur_start else None,
-                                key=f"editms_start_{m['id']}",
-                                help="If set, used as the window start for "
-                                     "occupancy and the Gantt segment. "
-                                     "Otherwise falls back to the prior "
-                                     "milestone's due, then the project start.")
-                            cur_due = m.get("due_on")
-                            e_due = st.date_input(
-                                "Due (optional)",
-                                value=dt.date.fromisoformat(cur_due)
-                                if cur_due else None,
-                                key=f"editms_due_{m['id']}")
-                            # contributor (one person)
-                            contrib_labels = {"— none —": None}
-                            contrib_labels.update(
-                                {u["full_name"]: u["id"] for u in members})
-                            cur_contrib = member_name.get(
-                                m.get("contributor_id"), "— none —")
-                            ck = list(contrib_labels.keys())
-                            e_contrib = st.selectbox(
-                                "Contributor", ck,
-                                index=ck.index(cur_contrib)
-                                if cur_contrib in ck else 0,
-                                key=f"editms_contrib_{m['id']}")
-                            # precondition (another milestone in this project)
-                            pre_labels = {"— none —": None}
-                            pre_labels.update(
-                                {mm["title"]: mm["id"]
-                                 for mm in db.project_milestones(pid)
-                                 if mm["id"] != m["id"]})
-                            cur_pre = ms_title.get(m.get("precondition_id"),
-                                                   "— none —")
-                            pk = list(pre_labels.keys())
-                            e_pre = st.selectbox(
-                                "Depends on (precondition)", pk,
-                                index=pk.index(cur_pre) if cur_pre in pk else 0,
-                                key=f"editms_pre_{m['id']}")
-                            e_hyp = st.text_input(
-                                "Hypothesis / expected outcome",
-                                value=m.get("hypothesis") or "",
-                                key=f"editms_hyp_{m['id']}")
-                            e_sm = st.text_input(
-                                "Success measure",
-                                value=m.get("success_measure") or "",
-                                key=f"editms_sm_{m['id']}")
-                            st.caption("Estimated hours and tracking choice are "
-                                       "private — set them in the Planning tab.")
-                            if st.button("Save", key=f"editms_save_{m['id']}",
-                                         type="primary"):
-                                if e_title.strip():
+                            with st.form(f"editms_form_{m['id']}"):
+                                e_title = st.text_input(
+                                    "Title", value=m["title"],
+                                    key=f"editms_title_{m['id']}")
+                                cur_start = m.get("start_on")
+                                e_start = st.date_input(
+                                    "Start (optional)",
+                                    value=dt.date.fromisoformat(cur_start)
+                                    if cur_start else None,
+                                    key=f"editms_start_{m['id']}",
+                                    help="If set, used as the window start for "
+                                         "occupancy and the Gantt segment. "
+                                         "Otherwise falls back to the prior "
+                                         "milestone's due, then the project start.")
+                                cur_due = m.get("due_on")
+                                e_due = st.date_input(
+                                    "Due (optional)",
+                                    value=dt.date.fromisoformat(cur_due)
+                                    if cur_due else None,
+                                    key=f"editms_due_{m['id']}")
+                                # contributor (one person)
+                                contrib_labels = {"— none —": None}
+                                contrib_labels.update(
+                                    {u["full_name"]: u["id"] for u in members})
+                                cur_contrib = member_name.get(
+                                    m.get("contributor_id"), "— none —")
+                                ck = list(contrib_labels.keys())
+                                e_contrib = st.selectbox(
+                                    "Contributor", ck,
+                                    index=ck.index(cur_contrib)
+                                    if cur_contrib in ck else 0,
+                                    key=f"editms_contrib_{m['id']}")
+                                # precondition (another milestone in this project)
+                                pre_labels = {"— none —": None}
+                                pre_labels.update(
+                                    {mm["title"]: mm["id"]
+                                     for mm in db.project_milestones(pid)
+                                     if mm["id"] != m["id"]})
+                                cur_pre = ms_title.get(m.get("precondition_id"),
+                                                       "— none —")
+                                pk = list(pre_labels.keys())
+                                e_pre = st.selectbox(
+                                    "Depends on (precondition)", pk,
+                                    index=pk.index(cur_pre) if cur_pre in pk else 0,
+                                    key=f"editms_pre_{m['id']}")
+                                e_hyp = st.text_input(
+                                    "Hypothesis / expected outcome",
+                                    value=m.get("hypothesis") or "",
+                                    key=f"editms_hyp_{m['id']}")
+                                e_sm = st.text_input(
+                                    "Success measure",
+                                    value=m.get("success_measure") or "",
+                                    key=f"editms_sm_{m['id']}")
+                                st.caption("Estimated hours and tracking choice are "
+                                           "private — set them in the Planning tab.")
+                                editms_submit = st.form_submit_button(
+                                    "Save", type="primary")
+                                if editms_submit and e_title.strip():
                                     db.update_milestone(m["id"], {
                                         "title": e_title.strip(),
                                         "due_on": e_due.isoformat()
@@ -1905,7 +1914,7 @@ def view_projects(me):
                                     })
                                     st.cache_data.clear()
                                     st.rerun()
-                                else:
+                                elif editms_submit:
                                     st.error("Title can't be empty.")
             else:
                 st.caption("No milestones yet.")
@@ -2100,80 +2109,81 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
             st.cache_data.clear()
             st.rerun()
         with st.popover("✎", help="Edit milestone"):
-            e_title = st.text_input("Title", value=m["title"],
-                                    key=f"msv_title_{m['id']}")
-            cur_start = m.get("start_on")
-            e_start = st.date_input(
-                "Start (optional)",
-                value=dt.date.fromisoformat(cur_start) if cur_start else None,
-                key=f"msv_start_{m['id']}",
-                help="If set, used as the window start for occupancy and the "
-                     "Gantt segment. Otherwise falls back to the prior "
-                     "milestone's due, then the project start.")
-            cur_due = m.get("due_on")
-            e_due = st.date_input(
-                "Due (optional)",
-                value=dt.date.fromisoformat(cur_due) if cur_due else None,
-                key=f"msv_due_{m['id']}")
-            contrib_labels = {"— none —": None}
-            contrib_labels.update({u["full_name"]: u["id"] for u in members})
-            cur_contrib = member_name.get(m.get("contributor_id"), "— none —")
-            ck = list(contrib_labels.keys())
-            e_contrib = st.selectbox(
-                "Contributor", ck,
-                index=ck.index(cur_contrib) if cur_contrib in ck else 0,
-                key=f"msv_contrib_{m['id']}")
-            pre_labels = {"— none —": None}
-            pre_labels.update({mm["title"]: mm["id"]
-                               for mm in db.project_milestones(project_id)
-                               if mm["id"] != m["id"]})
-            cur_pre = ms_title_map.get(m.get("precondition_id"), "— none —")
-            pk = list(pre_labels.keys())
-            e_pre = st.selectbox(
-                "Depends on (precondition)", pk,
-                index=pk.index(cur_pre) if cur_pre in pk else 0,
-                key=f"msv_pre_{m['id']}")
-            # optional category override
-            cat_labels = {"— inherit project —": None}
-            cat_labels.update({c["label"]: c["id"]
-                               for c in db.categories(domain="work")})
-            cur_cat_label = next((lbl for lbl, cid in cat_labels.items()
-                                  if cid == m.get("category_id")),
-                                 "— inherit project —")
-            cak = list(cat_labels.keys())
-            e_cat = st.selectbox(
-                "Category (overrides project)", cak,
-                index=cak.index(cur_cat_label)
-                if cur_cat_label in cak else 0,
-                key=f"msv_cat_{m['id']}")
-            e_kind = st.radio(
-                "Kind", ["deliverable", "internal"],
-                index=0 if m.get("kind") == "deliverable" else 1,
-                horizontal=True, key=f"msv_kind_{m['id']}",
-                help="Deliverable (external, blue) or internal (grey).")
-            # which days you work on this milestone (Sat..Fri), for occupancy
-            st.caption("Days you work on this (for occupancy):")
-            day_order = [("Sat", 5), ("Sun", 6), ("Mon", 0), ("Tue", 1),
-                         ("Wed", 2), ("Thu", 3), ("Fri", 4)]
-            cur_days = set(m.get("work_days") or [])
-            dcols = st.columns(7)
-            chosen_days = []
-            for (lbl, num), dc in zip(day_order, dcols):
-                with dc:
-                    on = st.checkbox(lbl, value=(num in cur_days),
-                                     key=f"msv_day_{m['id']}_{num}")
-                    if on:
-                        chosen_days.append(num)
-            e_hyp = st.text_input("Hypothesis / expected outcome",
-                                  value=m.get("hypothesis") or "",
-                                  key=f"msv_hyp_{m['id']}")
-            e_sm = st.text_input("Success measure",
-                                 value=m.get("success_measure") or "",
-                                 key=f"msv_sm_{m['id']}")
-            st.caption("Estimated hours and the percent/hours tracking choice "
-                       "are private — set them in the Planning tab.")
-            if st.button("Save", key=f"msv_save_{m['id']}", type="primary"):
-                if e_title.strip():
+            with st.form(f"msv_editform_{m['id']}"):
+                e_title = st.text_input("Title", value=m["title"],
+                                        key=f"msv_title_{m['id']}")
+                cur_start = m.get("start_on")
+                e_start = st.date_input(
+                    "Start (optional)",
+                    value=dt.date.fromisoformat(cur_start) if cur_start else None,
+                    key=f"msv_start_{m['id']}",
+                    help="If set, used as the window start for occupancy and the "
+                         "Gantt segment. Otherwise falls back to the prior "
+                         "milestone's due, then the project start.")
+                cur_due = m.get("due_on")
+                e_due = st.date_input(
+                    "Due (optional)",
+                    value=dt.date.fromisoformat(cur_due) if cur_due else None,
+                    key=f"msv_due_{m['id']}")
+                contrib_labels = {"— none —": None}
+                contrib_labels.update({u["full_name"]: u["id"] for u in members})
+                cur_contrib = member_name.get(m.get("contributor_id"), "— none —")
+                ck = list(contrib_labels.keys())
+                e_contrib = st.selectbox(
+                    "Contributor", ck,
+                    index=ck.index(cur_contrib) if cur_contrib in ck else 0,
+                    key=f"msv_contrib_{m['id']}")
+                pre_labels = {"— none —": None}
+                pre_labels.update({mm["title"]: mm["id"]
+                                   for mm in db.project_milestones(project_id)
+                                   if mm["id"] != m["id"]})
+                cur_pre = ms_title_map.get(m.get("precondition_id"), "— none —")
+                pk = list(pre_labels.keys())
+                e_pre = st.selectbox(
+                    "Depends on (precondition)", pk,
+                    index=pk.index(cur_pre) if cur_pre in pk else 0,
+                    key=f"msv_pre_{m['id']}")
+                # optional category override
+                cat_labels = {"— inherit project —": None}
+                cat_labels.update({c["label"]: c["id"]
+                                   for c in db.categories(domain="work")})
+                cur_cat_label = next((lbl for lbl, cid in cat_labels.items()
+                                      if cid == m.get("category_id")),
+                                     "— inherit project —")
+                cak = list(cat_labels.keys())
+                e_cat = st.selectbox(
+                    "Category (overrides project)", cak,
+                    index=cak.index(cur_cat_label)
+                    if cur_cat_label in cak else 0,
+                    key=f"msv_cat_{m['id']}")
+                e_kind = st.radio(
+                    "Kind", ["deliverable", "internal"],
+                    index=0 if m.get("kind") == "deliverable" else 1,
+                    horizontal=True, key=f"msv_kind_{m['id']}",
+                    help="Deliverable (external, blue) or internal (grey).")
+                # which days you work on this milestone (Sat..Fri), for occupancy
+                st.caption("Days you work on this (for occupancy):")
+                day_order = [("Sat", 5), ("Sun", 6), ("Mon", 0), ("Tue", 1),
+                             ("Wed", 2), ("Thu", 3), ("Fri", 4)]
+                cur_days = set(m.get("work_days") or [])
+                dcols = st.columns(7)
+                chosen_days = []
+                for (lbl, num), dc in zip(day_order, dcols):
+                    with dc:
+                        on = st.checkbox(lbl, value=(num in cur_days),
+                                         key=f"msv_day_{m['id']}_{num}")
+                        if on:
+                            chosen_days.append(num)
+                e_hyp = st.text_input("Hypothesis / expected outcome",
+                                      value=m.get("hypothesis") or "",
+                                      key=f"msv_hyp_{m['id']}")
+                e_sm = st.text_input("Success measure",
+                                     value=m.get("success_measure") or "",
+                                     key=f"msv_sm_{m['id']}")
+                st.caption("Estimated hours and the percent/hours tracking choice "
+                           "are private — set them in the Planning tab.")
+                msv_submit = st.form_submit_button("Save", type="primary")
+                if msv_submit and e_title.strip():
                     db.update_milestone(m["id"], {
                         "title": e_title.strip(),
                         "due_on": e_due.isoformat() if e_due else None,
@@ -2187,7 +2197,7 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
                         "success_measure": e_sm.strip() or None})
                     st.cache_data.clear()
                     st.rerun()
-                else:
+                elif msv_submit:
                     st.error("Title can't be empty.")
 
 
