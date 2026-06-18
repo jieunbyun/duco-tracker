@@ -2064,9 +2064,11 @@ def view_time(me):
 # Main
 # ---------------------------------------------------------------------------
 def render_milestone_block(m, me, members, member_name, ms_title_map,
-                           project_id, my_hours):
+                           project_id, my_hours, hist=None):
     """Render one milestone with progress, edit popover, and combined history
-    (audit + notes, last 5). Used by the Milestones tab."""
+    (audit + notes, last 5). Used by the Milestones tab. `hist` may be passed
+    in pre-fetched (bulk) to avoid a per-milestone query; if None, it is
+    fetched individually."""
     done = m["status"] == "done"
     c1, c2, c3 = st.columns([4, 2, 1])
     with c1:
@@ -2087,7 +2089,8 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
         if pctv is not None:
             st.progress(min(pctv / 100, 1.0))
         # combined history: last 5 of (edits + notes)
-        hist = db.milestone_history_combined(m["id"], limit=5)
+        if hist is None:
+            hist = db.milestone_history_combined(m["id"], limit=5)
         if hist:
             with st.expander("Recent history (5)"):
                 for h in hist:
@@ -2229,6 +2232,9 @@ def view_milestones(me):
     member_name = {u["id"]: u["full_name"] for u in members}
     ms_title = {m["id"]: m["title"] for m in all_ms}
     my_ms_hours = db.my_milestone_hours()
+    # fetch all milestones' recent history in two queries (not two per
+    # milestone), keyed by id, to avoid the first-load N+1 slowdown
+    hist_by_ms = db.milestone_history_bulk([m["id"] for m in all_ms], limit=5)
 
     # ---- bar chart: MY milestones' completion % (filtered to me) ----
     mine = [m for m in all_ms if m.get("contributor_id") == me["id"]]
@@ -2270,7 +2276,8 @@ def view_milestones(me):
         for m in sorted(mlist, key=lambda x: (x.get("due_on") is None,
                                               x.get("due_on") or "")):
             render_milestone_block(m, me, members, member_name, ms_title,
-                                   proj_id, my_ms_hours.get(m["id"]) or 0)
+                                   proj_id, my_ms_hours.get(m["id"]) or 0,
+                                   hist=hist_by_ms.get(m["id"], []))
         st.markdown("<hr>", unsafe_allow_html=True)
 
     # ---- milestone history (reconstructed from the audit log) ----
@@ -2576,6 +2583,9 @@ def view_help(me):
         "milestone progress together. Here is the most important thing to "
         "know first.")
 
+    st.markdown("### Recording your work")
+    st.markdown("How to put information into the tracker.")
+
     with st.expander("1. Record your week's work"):
         st.markdown(
             "Use the **Log** tab to record a block of time you have worked. "
@@ -2680,9 +2690,6 @@ def view_help(me):
         "Projects are private to the people involved in them. You see a "
         "project only if you own it or have been added to it. You can keep "
         "your own projects to yourself simply by not adding anyone else.")
-
-    st.markdown("### Recording your work")
-    st.markdown("How to put information into the tracker.")
 
     st.markdown("#### A note on what others see")
     st.markdown(

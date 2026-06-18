@@ -613,6 +613,45 @@ def milestone_history_combined(milestone_id, limit=5):
     return items[:limit]
 
 
+@st.cache_data(ttl=30)
+def _milestone_history_bulk(milestone_ids_key, _u, limit=5):
+    """Combined edit+note history for MANY milestones in just two queries.
+    Returns {milestone_id: [history items]} (each capped at `limit`, newest
+    first). Replaces calling milestone_history_combined once per milestone,
+    which was two queries each (the main first-load slowdown)."""
+    ids = list(milestone_ids_key)
+    if not ids:
+        return {}
+    audits = (client().table("audit_log")
+              .select("row_id,action,changed_by,changed_at,old_row,new_row")
+              .eq("table_name", "project_milestone")
+              .in_("row_id", ids)
+              .order("changed_at", desc=True).execute().data or [])
+    notes = (client().table("milestone_update")
+             .select("milestone_id,note,author_id,created_at")
+             .in_("milestone_id", ids)
+             .order("created_at", desc=True).execute().data or [])
+    by_ms = {i: [] for i in ids}
+    for a in audits:
+        by_ms.setdefault(a["row_id"], []).append({
+            "kind": "edit", "when": a.get("changed_at") or "",
+            "who": a.get("changed_by"), "action": a.get("action"),
+            "old_row": a.get("old_row"), "new_row": a.get("new_row")})
+    for u in notes:
+        by_ms.setdefault(u["milestone_id"], []).append({
+            "kind": "note", "when": u.get("created_at") or "",
+            "who": u.get("author_id"), "note": u.get("note")})
+    for mid in by_ms:
+        by_ms[mid].sort(key=lambda x: x["when"], reverse=True)
+        by_ms[mid] = by_ms[mid][:limit]
+    return by_ms
+
+
+def milestone_history_bulk(milestone_ids, limit=5):
+    # tuple key so st.cache_data can hash it; per-user via _uid()
+    return _milestone_history_bulk(tuple(sorted(milestone_ids)), _uid(), limit)
+
+
 def add_milestone_update(milestone_id, author_id, note):
     return client().table("milestone_update").insert({
         "milestone_id": milestone_id, "author_id": author_id,
