@@ -2576,20 +2576,6 @@ def view_help(me):
         "milestone progress together. Here is the most important thing to "
         "know first.")
 
-    st.markdown("#### Your privacy")
-    st.markdown(
-        "Your exact hours are private to you. The estimated hours you set for "
-        "a milestone, and whether you track it in hours or percent, live in "
-        "the **Planning** tab and only you can see them. Not even the group "
-        "lead sees your hours. What everyone in a project sees is each "
-        "milestone's **completion percentage**, never the hours behind it.\n\n"
-        "Projects are private to the people involved in them. You see a "
-        "project only if you own it or have been added to it. You can keep "
-        "your own projects to yourself simply by not adding anyone else.")
-
-    st.markdown("### Recording your work")
-    st.markdown("How to put information into the tracker.")
-
     with st.expander("1. Record your week's work"):
         st.markdown(
             "Use the **Log** tab to record a block of time you have worked. "
@@ -2683,6 +2669,20 @@ def view_help(me):
                 "items per project, record payments against them, and compare "
                 "how much is spent against how far the work has progressed and "
                 "how much of the timeline has passed.")
+
+    st.markdown("#### Your privacy")
+    st.markdown(
+        "Your exact hours are private to you. The estimated hours you set for "
+        "a milestone, and whether you track it in hours or percent, live in "
+        "the **Planning** tab and only you can see them. Not even the group "
+        "lead sees your hours. What everyone in a project sees is each "
+        "milestone's **completion percentage**, never the hours behind it.\n\n"
+        "Projects are private to the people involved in them. You see a "
+        "project only if you own it or have been added to it. You can keep "
+        "your own projects to yourself simply by not adding anyone else.")
+
+    st.markdown("### Recording your work")
+    st.markdown("How to put information into the tracker.")
 
     st.markdown("#### A note on what others see")
     st.markdown(
