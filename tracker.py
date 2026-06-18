@@ -2587,48 +2587,99 @@ def view_help(me):
         "project only if you own it or have been added to it. You can keep "
         "your own projects to yourself simply by not adding anyone else.")
 
-    with st.expander("Logging your time"):
-        st.markdown(
-            "Use the **Log** tab to record time you have worked. Pick the "
-            "category, optionally a project and milestone, set the start and "
-            "end (you can type a time like 0930 or 9:30), and save. The "
-            "**Week** tab shows the same week at a glance, with your hours "
-            "split by category and a weekly to-do list.")
+    st.markdown("### Recording your work")
+    st.markdown("How to put information into the tracker.")
 
-    with st.expander("Setting up a milestone"):
+    with st.expander("1. Record your week's work"):
         st.markdown(
-            "In a project's details (**Projects** tab) or the **Milestones** "
-            "tab, add a milestone with a title and an optional due date. You "
-            "can also set who is in charge of it, whether it depends on "
-            "another milestone finishing first, an optional start date, and "
-            "which days of the week you plan to work on it. A milestone marked "
-            "as a *deliverable* shows in blue on the timeline; *internal* "
-            "milestones show in grey.")
+            "Use the **Log** tab to record a block of time you have worked. "
+            "Choose the category, and (for work) optionally the project and "
+            "milestone it belongs to. Set the day and either a start and end "
+            "time, or just a number of minutes. You can type a time directly, "
+            "for example 0930 or 9:30. Add a short note if you like, then "
+            "click **Save session**.\n\n"
+            "The **Week** tab is a faster way to fill in a whole week. Pick a "
+            "day, a category, the times, and what you worked on, then **Add "
+            "block**. It also keeps a weekly to-do list, where you can jot "
+            "tasks, give each an estimated number of hours, tick them off, and "
+            "carry unfinished ones into next week.")
 
-    with st.expander("Recording your progress"):
+    with st.expander("2. Record a new project with milestones"):
         st.markdown(
-            "Use the **Planning** tab to record how far along your milestones "
-            "are. You can either type a percentage directly, or choose to "
-            "track in hours, in which case the percentage is worked out from "
-            "your logged hours against your estimate. Either way, only the "
-            "resulting percentage is shared with the group; your hours and "
-            "estimate stay private. If you track in hours, the shared "
-            "percentage updates automatically as you log time.")
+            "You can create a project on the fly while logging (choose **+ New "
+            "project…** in the project dropdown), or in the **Projects** tab. "
+            "In the project's **Details & milestones** panel you can set its "
+            "name, category, status, start and due dates, and who is involved. "
+            "A project is visible only to its owner and the people added to "
+            "it, so a project you keep to yourself stays private.\n\n"
+            "Within the same panel, add **milestones** to the project. Each "
+            "milestone has a title and an optional due date, and you can also "
+            "set who is in charge of it, whether it depends on another "
+            "milestone finishing first, an optional start date, and whether it "
+            "is a *deliverable* (shown in blue on the timeline) or an "
+            "*internal* step (shown in grey).")
 
-    with st.expander("Seeing how a project is going"):
+    with st.expander("3. Plan and track each milestone"):
+        st.markdown(
+            "Use the **Planning** tab to plan and follow your own milestones. "
+            "For each one you set an estimated number of hours and choose how "
+            "to track it.\n\n"
+            "If you track by **percent**, you simply type how far along you "
+            "are. If you track by **hours**, the percentage is worked out "
+            "automatically from the hours you have logged against your "
+            "estimate, and it updates as you log more time.\n\n"
+            "Either way, only the resulting **percentage** is shared with the "
+            "group. Your estimated hours, your logged hours, and your choice "
+            "of tracking method stay private to you.")
+
+    st.markdown("### Monitoring progress")
+    st.markdown("Where to look to see how things are going.")
+
+    with st.expander("Week — your week at a glance"):
+        st.markdown(
+            "The **Week** tab shows the selected week as blocks across the "
+            "days, with your hours split by category in a chart, alongside "
+            "your weekly to-do list. It is the quickest way to see how a week "
+            "is filling up and what is left to do.")
+
+    with st.expander("Projects — timelines and progress"):
         st.markdown(
             "The **Projects** tab shows a timeline (Gantt) of the projects you "
-            "are part of, with each milestone as a diamond on its due date, "
-            "and a bar chart of each milestone's completion. The **Your daily "
-            "occupancy** chart shows how your planned hours spread across the "
-            "coming weeks, coloured by category, so you can spot days that are "
-            "overloaded. The **Time** tab summarises where your hours have "
-            "gone over a period.")
+            "are part of. Each project's milestones appear as diamonds on "
+            "their due dates, and the bar shows each milestone's active period "
+            "(with gaps where nothing is scheduled). Below each project is a "
+            "bar chart of its milestones' completion. The **Your daily "
+            "occupancy** chart spreads your planned milestone hours across the "
+            "coming weeks, coloured by category, so you can spot days that "
+            "look overloaded.")
+
+    with st.expander("Milestones — the full list and history"):
+        st.markdown(
+            "The **Milestones** tab lists every milestone across the projects "
+            "you take part in, grouped by project, with each one's completion "
+            "and recent progress notes. You can mark a milestone done, add a "
+            "note, or open it to edit its details. It is the place to follow "
+            "milestone-level progress across everything you are involved in.")
+
+    with st.expander("Planning — your private plan and progress"):
+        st.markdown(
+            "The **Planning** tab is also where you monitor your own plan: the "
+            "estimated hours, tracking method, and current percentage for each "
+            "of your milestones, all in one place. Only you see this view of "
+            "your own numbers.")
+
+    with st.expander("Time — where your hours have gone"):
+        st.markdown(
+            "The **Time** tab summarises your recorded hours over a period you "
+            "choose (week, month, year, or a custom range). It shows how your "
+            "time splits across categories and highlights the hours on "
+            "projects you have marked as high importance, so you can see "
+            "whether your effort matches your priorities.")
 
     if is_lead:
-        with st.expander("For the lead: budget"):
+        with st.expander("Budget (lead only)"):
             st.markdown(
-                "The **Budget** tab (visible only to you) lets you plan budget "
+                "The **Budget** tab, visible only to you, lets you plan budget "
                 "items per project, record payments against them, and compare "
                 "how much is spent against how far the work has progressed and "
                 "how much of the timeline has passed.")
