@@ -90,6 +90,20 @@ def current_session():
         return None
 
 
+def clear_user_caches():
+    """Selectively clear only the per-user cached reads, so reference caches
+    (categories, project_statuses — 5-min TTL, rarely change) survive writes.
+    Call this instead of st.cache_data.clear() after mutations. Each save now
+    costs only the per-user re-fetches, not a cold reload of everything."""
+    _my_projects.clear()
+    _projects_i_participate_in.clear()
+    _project_milestones.clear()
+    _group_members.clear()
+    _my_milestone_hours_cached.clear()
+    _project_tracker.clear()
+    _milestone_history_bulk.clear()
+
+
 def _uid():
     """Current auth user id for THIS browser session, or '' if signed out.
     Used as a per-user cache key so cached reads never leak across users."""

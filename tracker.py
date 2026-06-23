@@ -173,7 +173,7 @@ def edit_session_widget(s, key_prefix):
                     try:
                         db.update_session(sid, changes)
                         st.success("Updated.")
-                        st.cache_data.clear()
+                        db.clear_user_caches()
                         return True
                     except Exception as e:
                         st.error(f"Could not update. {e}")
@@ -182,7 +182,7 @@ def edit_session_widget(s, key_prefix):
             try:
                 db.delete_session(sid)
                 st.success("Deleted.")
-                st.cache_data.clear()
+                db.clear_user_caches()
                 return True
             except Exception as e:
                 st.error(f"Could not delete. {e}")
@@ -201,7 +201,7 @@ def edit_session_widget(s, key_prefix):
             try:
                 db.duplicate_session(sid, dup_date.isoformat())
                 st.success("Copied.")
-                st.cache_data.clear()
+                db.clear_user_caches()
                 return True
             except Exception as e:
                 st.error(f"Could not duplicate. {e}")
@@ -406,7 +406,7 @@ def view_log(me):
                                            "the Time tab.")
                 if new_imp != bool(cur_imp):
                     db.set_project_importance(proj_labels[proj], new_imp)
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
         # optional milestone, filtered to the chosen existing project.
         new_ms_name = ""
@@ -502,7 +502,7 @@ def view_log(me):
                 project_id=project_id, description=desc or None,
                 milestone_id=milestone_id)
             st.success("Session saved.")
-            st.cache_data.clear()
+            db.clear_user_caches()
         except Exception as e:
             st.error(f"Could not save. {e}")
 
@@ -541,7 +541,7 @@ def view_log(me):
                                "re-add it if the time is wrong.")
                     if st.button("Delete", key=f"logdel_{s['id']}"):
                         db.delete_session(s["id"])
-                        st.cache_data.clear()
+                        db.clear_user_caches()
                         st.rerun()
     else:
         st.caption("No sessions yet. Your first one will appear here.")
@@ -670,7 +670,7 @@ def view_week(me):
                     t["title"], value=t["is_done"], key=f"todo_{t['id']}")
                 if checked != t["is_done"]:
                     db.set_todo_done(t["id"], checked)
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 if t.get("note"):
                     st.markdown(
@@ -702,13 +702,13 @@ def view_week(me):
                     above = todos[i - 1]
                     db.set_todo_order(t["id"], above["sort_order"])
                     db.set_todo_order(above["id"], t["sort_order"])
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 if dn and i < n - 1:
                     below = todos[i + 1]
                     db.set_todo_order(t["id"], below["sort_order"])
                     db.set_todo_order(below["id"], t["sort_order"])
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
             with tc4:
                 ed, dl = st.columns(2)
@@ -717,7 +717,7 @@ def view_week(me):
                 with dl:
                     if st.button("✕", key=f"tddel_{t['id']}", help="Delete"):
                         db.delete_todo(t["id"])
-                        st.cache_data.clear()
+                        db.clear_user_caches()
                         st.rerun()
                 with edit_pop:
                     with st.form(f"tded_form_{t['id']}"):
@@ -747,7 +747,7 @@ def view_week(me):
                                 "note": e_note.strip() or None,
                                 "est_hours": e_hours or None,
                                 "project_id": e_projs[e_proj]})
-                            st.cache_data.clear()
+                            db.clear_user_caches()
                             st.rerun()
                         elif tded_submit:
                             st.error("Title can't be empty.")
@@ -789,7 +789,7 @@ def view_week(me):
                                 dt.date.today().isoformat(), td_projs[td_proj],
                                 est_hours=td_hours or None,
                                 note=td_note.strip() or None)
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not add. {e}")
@@ -859,7 +859,7 @@ def view_week(me):
                                            "the Time tab.")
                 if new_imp != bool(cur_imp):
                     db.set_project_importance(proj_labels[b_proj], new_imp)
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 # milestone dropdown with inline creation
                 wk_pid = proj_labels[b_proj]
@@ -935,7 +935,7 @@ def view_week(me):
                                    description=b_note or None,
                                    milestone_id=ms_id)
                     st.success("Block added.")
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not add. {e}")
@@ -1563,7 +1563,7 @@ def view_projects(me):
                             "high_importance": new_importance,
                         })
                         st.success("Saved.")
-                        st.cache_data.clear()
+                        db.clear_user_caches()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not save. {e}")
@@ -1594,7 +1594,7 @@ def view_projects(me):
                         "risks": risks or None,
                     })
                     st.success("Planning saved.")
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not save planning. {e}")
@@ -1617,12 +1617,12 @@ def view_projects(me):
                         if st.button("Make leader",
                                      key=f"mklead_{pid}_{L['user_id']}"):
                             db.set_project_leader(pid, L["user_id"])
-                            st.cache_data.clear()
+                            db.clear_user_caches()
                             st.rerun()
                 with lc3:
                     if st.button("Remove", key=f"rmlead_{pid}_{L['user_id']}"):
                         db.remove_project_lead(pid, L["user_id"])
-                        st.cache_data.clear()
+                        db.clear_user_caches()
                         st.rerun()
             if not current_leader:
                 st.caption("⚠ No leader set — assign one so this project is "
@@ -1645,7 +1645,7 @@ def view_projects(me):
                         else:
                             db.add_project_lead(pid, u_labels[who],
                                                 role_in.strip() or None)
-                        st.cache_data.clear()
+                        db.clear_user_caches()
                         st.rerun()
                     except Exception as e:
                         st.error(f"Could not add. {e}")
@@ -1661,7 +1661,7 @@ def view_projects(me):
                 with kc2:
                     if st.button("Remove", key=f"rmlink_{lk['id']}"):
                         db.delete_project_link(lk["id"])
-                        st.cache_data.clear()
+                        db.clear_user_caches()
                         st.rerun()
             with st.form(f"add_link_{pid}", clear_on_submit=True):
                 lu = st.text_input("URL", key=f"lu_{pid}",
@@ -1675,7 +1675,7 @@ def view_projects(me):
                         try:
                             db.add_project_link(pid, lu.strip(),
                                                 ll.strip() or None, lk_kind)
-                            st.cache_data.clear()
+                            db.clear_user_caches()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Could not add link. {e}")
@@ -1784,7 +1784,7 @@ def view_projects(me):
                                 if st.button("✕", key=f"updel_{up['id']}",
                                              help="Remove note"):
                                     db.delete_milestone_update(up["id"])
-                                    st.cache_data.clear()
+                                    db.clear_user_caches()
                                     st.rerun()
                         with st.popover("Add note"):
                             with st.form(f"upnote_form_{m['id']}",
@@ -1799,7 +1799,7 @@ def view_projects(me):
                                     try:
                                         db.add_milestone_update(
                                             m["id"], me["id"], un.strip())
-                                        st.cache_data.clear()
+                                        db.clear_user_caches()
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Could not add note. {e}")
@@ -1817,7 +1817,7 @@ def view_projects(me):
                                 if st.button("✕", key=f"mlk_del_{lk['id']}",
                                              help="Remove link"):
                                     db.delete_project_link(lk["id"])
-                                    st.cache_data.clear()
+                                    db.clear_user_caches()
                                     st.rerun()
                         with st.popover("Add link", use_container_width=False):
                             lu = st.text_input("URL", key=f"mlu_{m['id']}",
@@ -1835,7 +1835,7 @@ def view_projects(me):
                                         db.add_project_link(
                                             pid, lu.strip(), ll.strip() or None,
                                             lk_kind, milestone_id=m["id"])
-                                        st.cache_data.clear()
+                                        db.clear_user_caches()
                                         st.rerun()
                                     except Exception as e:
                                         st.error(f"Could not add link. {e}")
@@ -1849,7 +1849,7 @@ def view_projects(me):
                                      help="Mark done / reopen"):
                             db.update_milestone(m["id"], {
                                 "status": "planned" if done else "done"})
-                            st.cache_data.clear()
+                            db.clear_user_caches()
                             st.rerun()
                         with st.popover("✎", help="Edit milestone"):
                             with st.form(f"editms_form_{m['id']}"):
@@ -1922,7 +1922,7 @@ def view_projects(me):
                                         "hypothesis": e_hyp.strip() or None,
                                         "success_measure": e_sm.strip() or None,
                                     })
-                                    st.cache_data.clear()
+                                    db.clear_user_caches()
                                     st.rerun()
                                 elif editms_submit:
                                     st.error("Title can't be empty.")
@@ -1943,7 +1943,7 @@ def view_projects(me):
                                 due_on=md.isoformat() if md else None,
                                 hypothesis=mh.strip() or None,
                                 success_measure=msm.strip() or None)
-                            st.cache_data.clear()
+                            db.clear_user_caches()
                             st.rerun()
                         except Exception as e:
                             st.error(f"Could not add milestone. {e}")
@@ -1969,7 +1969,7 @@ def view_projects(me):
                     db.create_project(name.strip(), st_labels[status], vis,
                                       None, me["id"])
                     st.success("Project created.")
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not create project. {e}")
@@ -2110,7 +2110,7 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
             if msvnote_submit:
                 if un.strip():
                     db.add_milestone_update(m["id"], me["id"], un.strip())
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 else:
                     st.error("Write a note first.")
@@ -2121,7 +2121,7 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
                      help="Mark done / reopen"):
             db.update_milestone(m["id"], {
                 "status": "planned" if done else "done"})
-            st.cache_data.clear()
+            db.clear_user_caches()
             st.rerun()
         with st.popover("✎", help="Edit milestone"):
             with st.form(f"msv_editform_{m['id']}"):
@@ -2210,7 +2210,7 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
                         "work_days": chosen_days or None,
                         "hypothesis": e_hyp.strip() or None,
                         "success_measure": e_sm.strip() or None})
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 elif msv_submit:
                     st.error("Title can't be empty.")
@@ -2392,7 +2392,7 @@ def view_budget(me):
                        else f"{i['remaining_pct']:g}%")
             if c[5].button("✕", key=f"bi_del_{i['id']}", help="Remove item"):
                 db.delete_budget_item(i["id"])
-                st.cache_data.clear()
+                db.clear_user_caches()
                 st.rerun()
         plan_tot = sum(i["plan_amount"] or 0 for i in items)
         used_tot = sum(i["used"] or 0 for i in items)
@@ -2420,7 +2420,7 @@ def view_budget(me):
         if st.form_submit_button("Add plan item"):
             if it_label.strip():
                 db.add_budget_item(pid, it_label.strip(), it_plan, it_cur)
-                st.cache_data.clear()
+                db.clear_user_caches()
                 st.rerun()
             else:
                 st.error("Give the item a name.")
@@ -2440,7 +2440,7 @@ def view_budget(me):
             pc[0].caption(f"→ {p['item_label']}")
             if pc4.button("✕", key=f"pay_del_{p['id']}", help="Remove"):
                 db.delete_budget_payment(p["id"])
-                st.cache_data.clear()
+                db.clear_user_caches()
                 st.rerun()
     else:
         st.caption("No payments logged yet.")
@@ -2471,7 +2471,7 @@ def view_budget(me):
                         detail1=pay_d1.strip() or None,
                         detail2=pay_d2.strip() or None,
                         paid_on=pay_date.isoformat())
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 else:
                     st.error("Enter a non-zero amount.")
@@ -2567,7 +2567,7 @@ def view_planning(me):
                         m["id"], me["id"], ph or None, unit, pc)
                     # publish only the % to the shared milestone row
                     db.set_milestone_shared_percent(m["id"], derived)
-                    st.cache_data.clear()
+                    db.clear_user_caches()
                     st.rerun()
                 st.caption(f"Shared completion now: "
                            f"{m.get('shared_percent') or 0:g}%")
