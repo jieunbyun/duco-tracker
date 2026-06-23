@@ -2352,7 +2352,7 @@ def view_milestones(me):
             bits.append(f"next due {next_due}")
         st.caption(f"**{pname}** · " + " · ".join(bits))
 
-    st.markdown("**Edit one milestone**")
+    st.markdown("**Edit milestone**")
     project_labels = {pname: proj_id for (pname, proj_id) in sorted(by_proj.keys())}
     if not project_labels:
         st.caption("No milestone to edit.")
@@ -2649,7 +2649,7 @@ def view_planning(me):
         planned = sum(1 for m in mlist if plans.get(m["id"], {}).get("planned_hours"))
         st.caption(f"**{pname}** · {planned}/{total} with private hour estimates")
 
-    st.markdown("**Plan one milestone**")
+    st.markdown("**Plan milestone**")
     project_names = sorted(by_proj.keys())
     saved_project = st.session_state.get("planning_selected_project")
     pidx = project_names.index(saved_project) if saved_project in project_names else 0
