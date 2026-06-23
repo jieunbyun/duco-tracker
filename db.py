@@ -98,6 +98,9 @@ def clear_user_caches():
     _my_projects.clear()
     _projects_i_participate_in.clear()
     _project_milestones.clear()
+    _project_milestones_bulk.clear()
+    _milestone_progress_bulk.clear()
+    _milestone_progress_bars_bulk.clear()
     _group_members.clear()
     _my_milestone_hours_cached.clear()
     _project_tracker.clear()
@@ -111,6 +114,21 @@ def _uid():
     if sess and getattr(sess, "user", None):
         return sess.user.id or ""
     return ""
+
+
+def _secret_bool(name: str, default: bool = False) -> bool:
+    """Read a boolean Streamlit secret safely.
+
+    Used to make the optional Supabase RPC path opt-in. This keeps the app
+    working before the SQL migration is installed.
+    """
+    try:
+        val = st.secrets.get(name, default)
+    except Exception:
+        return default
+    if isinstance(val, str):
+        return val.strip().lower() in {"1", "true", "yes", "y", "on"}
+    return bool(val)
 
 
 
@@ -378,7 +396,8 @@ def projects_i_participate_in():
 def milestones_for_projects(project_ids):
     """All milestones across the given projects, with project name and the
     effective category code (milestone's own category if set, else the
-    project's category)."""
+    project's category). Uses one bulk milestone query instead of one query
+    per project, which is noticeably faster for Gantt/occupancy views."""
     if not project_ids:
         return []
     projs = (client().table("project").select("id,name,category_id")
@@ -388,9 +407,10 @@ def milestones_for_projects(project_ids):
     cats = (client().table("category").select("id,code,label").execute().data
             or [])
     cat_code = {c["id"]: c["code"] for c in cats}
+    ms_by_project = project_milestones_bulk(project_ids)
     out = []
     for pid in project_ids:
-        for m in project_milestones(pid):
+        for m in ms_by_project.get(pid, []):
             m = dict(m)
             m["project_name"] = pname.get(pid, "")
             m["project_id"] = pid
@@ -500,6 +520,88 @@ def _project_milestones(project_id, _u):
 
 def project_milestones(project_id):
     return _project_milestones(project_id, _uid())
+
+
+@st.cache_data(ttl=30)
+def _project_milestones_bulk(project_ids_key, _u):
+    """Milestones for many projects in one Supabase call.
+
+    Returns {project_id: [milestone, ...]}. This replaces loops that called
+    project_milestones(pid) once per project. It keeps the same per-user cache
+    scoping as the single-project helper.
+    """
+    ids = list(project_ids_key)
+    if not ids:
+        return {}
+    rows = (client().table("project_milestone")
+            .select("id,project_id,title,detail,due_on,start_on,status,"
+                    "sort_order,hypothesis,success_measure,"
+                    "precondition_id,contributor_id,shared_percent,"
+                    "category_id,kind,work_days")
+            .in_("project_id", ids)
+            .order("sort_order").execute().data or [])
+    out = {pid: [] for pid in ids}
+    for r in rows:
+        out.setdefault(r.get("project_id"), []).append(r)
+    for pid in out:
+        out[pid].sort(key=lambda m: (m.get("due_on") is None,
+                                     m.get("due_on") or "",
+                                     m.get("sort_order") or 0))
+    return out
+
+
+def project_milestones_bulk(project_ids):
+    ids = tuple(sorted({pid for pid in project_ids if pid}))
+    return _project_milestones_bulk(ids, _uid())
+
+
+def _progress_pct_from_milestone(m):
+    if m.get("status") == "done":
+        return 100
+    sp = m.get("shared_percent")
+    return int(round(sp)) if sp is not None else None
+
+
+@st.cache_data(ttl=30)
+def _milestone_progress_bulk(project_ids_key, _u):
+    """Milestone-completion stats for many projects in one query."""
+    by_project = _project_milestones_bulk(project_ids_key, _u)
+    out = {}
+    for pid, ms in by_project.items():
+        total = len(ms)
+        done = sum(1 for m in ms if m.get("status") == "done")
+        out[pid] = {"done": done, "total": total,
+                    "pct": round(100 * done / total) if total else None}
+    return out
+
+
+def milestone_progress_bulk(project_ids):
+    ids = tuple(sorted({pid for pid in project_ids if pid}))
+    return _milestone_progress_bulk(ids, _uid())
+
+
+@st.cache_data(ttl=30)
+def _milestone_progress_bars_bulk(project_ids_key, _u):
+    """Published per-milestone progress rows for many projects in one query."""
+    by_project = _project_milestones_bulk(project_ids_key, _u)
+    out = {}
+    for pid, ms in by_project.items():
+        rows = []
+        for m in ms:
+            pct = _progress_pct_from_milestone(m)
+            if pct is None:
+                rows.append({"title": m["title"], "pct": 0,
+                             "fallback": True})
+            else:
+                rows.append({"title": m["title"], "pct": pct,
+                             "fallback": False})
+        out[pid] = rows
+    return out
+
+
+def milestone_progress_bars_bulk(project_ids):
+    ids = tuple(sorted({pid for pid in project_ids if pid}))
+    return _milestone_progress_bars_bulk(ids, _uid())
 
 
 def my_milestone_plans():
@@ -799,6 +901,16 @@ def my_milestone_hours():
 def log_session(user_id, category_id, started_at, ended_at=None,
                 manual_minutes=None, project_id=None, description=None,
                 milestone_id=None):
+    """Insert a work session.
+
+    Fast path: if USE_SESSION_RPC=true is set in Streamlit secrets and the SQL
+    function log_session_and_refresh_progress has been installed in Supabase,
+    this becomes a single RPC call that inserts the session and refreshes the
+    shared milestone percent inside Postgres.
+
+    Safe fallback: if the flag is absent/false, or the RPC fails and
+    SESSION_RPC_STRICT is not true, use the original Python multi-call path.
+    """
     payload = {
         "user_id": user_id,
         "category_id": category_id,
@@ -814,6 +926,26 @@ def log_session(user_id, category_id, started_at, ended_at=None,
         payload["milestone_id"] = milestone_id
     if description:
         payload["description"] = description
+
+    if _secret_bool("USE_SESSION_RPC", False):
+        rpc_payload = {
+            "p_user_id": user_id,
+            "p_category_id": category_id,
+            "p_started_at": started_at,
+            "p_ended_at": ended_at,
+            "p_manual_minutes": manual_minutes,
+            "p_project_id": project_id,
+            "p_description": description,
+            "p_milestone_id": milestone_id,
+        }
+        try:
+            return client().rpc("log_session_and_refresh_progress",
+                                rpc_payload).execute()
+        except Exception:
+            if _secret_bool("SESSION_RPC_STRICT", False):
+                raise
+            # fall through to the original, known-working implementation
+
     res = client().table("work_session").insert(payload).execute()
     # auto-publish the shared % for an hours-tracked milestone
     if milestone_id:
@@ -913,36 +1045,16 @@ def project_tracker():
 def milestone_progress(project_id):
     """Milestone-completion stats for a project, with NO hours. Returns
     {done, total, pct} where pct is the share of milestones marked done."""
-    ms = (client().table("project_milestone")
-          .select("id,status").eq("project_id", project_id)
-          .execute().data or [])
-    total = len(ms)
-    done = sum(1 for m in ms if m.get("status") == "done")
-    pct = round(100 * done / total) if total else None
-    return {"done": done, "total": total, "pct": pct}
+    return milestone_progress_bulk([project_id]).get(
+        project_id, {"done": 0, "total": 0, "pct": None})
 
 
 def milestone_progress_bars(project_id):
     """Per-milestone published progress for the project's bar chart. Each item
     is {title, pct, fallback}: pct is the published shared_percent; if none is
-    published, pct falls back to binary (100 if done, else 0) and fallback is
-    True so it can be flagged. Hours are never involved. Ordered by due date."""
-    ms = (client().table("project_milestone")
-          .select("title,status,shared_percent,due_on,sort_order")
-          .eq("project_id", project_id).execute().data or [])
-    ms.sort(key=lambda m: (m.get("due_on") is None, m.get("due_on") or "",
-                           m.get("sort_order") or 0))
-    out = []
-    for m in ms:
-        if m.get("status") == "done":
-            out.append({"title": m["title"], "pct": 100, "fallback": False})
-        elif m.get("shared_percent") is not None:
-            out.append({"title": m["title"],
-                        "pct": int(round(m["shared_percent"])),
-                        "fallback": False})
-        else:
-            out.append({"title": m["title"], "pct": 0, "fallback": True})
-    return out
+    published, pct falls back to binary 0 and fallback is True so it can be
+    flagged. Hours are never involved. Ordered by due date."""
+    return milestone_progress_bars_bulk([project_id]).get(project_id, [])
 
 
 # ---- budget (lead-only via RLS) -------------------------------------------

@@ -519,8 +519,9 @@ def view_log(me):
             mc1, mc2 = st.columns(2)
             mc1.metric("Work (recent)", f"{w:g} h")
             mc2.metric("Life (recent)", f"{l:g} h")
-    st.markdown("**Recent sessions** — expand one to edit or delete it")
+    st.markdown("**Recent sessions** — select one to edit or delete it")
     if rows:
+        labels = {}
         for s in rows:
             when = s.get("session_date", "")
             t = ""
@@ -529,20 +530,23 @@ def view_log(me):
             label = (f"{when}{t} · {s.get('category_label','')}"
                      + (f" · {s['project_name']}" if s.get("project_name") else "")
                      + f" · {s.get('hours','')}h")
-            with st.expander(label):
-                if s.get("description"):
-                    st.caption(s["description"])
-                if s.get("started_at") and s.get("ended_at"):
-                    if edit_session_widget(s, "log"):
-                        st.rerun()
-                else:
-                    st.caption("This was logged as minutes (no clock time), so "
-                               "it can't be edited on the time grid. Delete and "
-                               "re-add it if the time is wrong.")
-                    if st.button("Delete", key=f"logdel_{s['id']}"):
-                        db.delete_session(s["id"])
-                        db.clear_user_caches()
-                        st.rerun()
+            labels[label] = s
+        pick = st.selectbox("Recent session", list(labels.keys()),
+                            key="recent_session_pick")
+        chosen = labels[pick]
+        if chosen.get("description"):
+            st.caption(chosen["description"])
+        if chosen.get("started_at") and chosen.get("ended_at"):
+            if edit_session_widget(chosen, "log"):
+                st.rerun()
+        else:
+            st.caption("This was logged as minutes (no clock time), so it "
+                       "can't be edited on the time grid. Delete and re-add "
+                       "it if the time is wrong.")
+            if st.button("Delete", key=f"logdel_{chosen['id']}"):
+                db.delete_session(chosen["id"])
+                db.clear_user_caches()
+                st.rerun()
     else:
         st.caption("No sessions yet. Your first one will appear here.")
 
@@ -1136,6 +1140,9 @@ def render_gantt(me):
                if not (p.get("started_on") and p.get("due_on"))]
 
     if dated:
+        # One bulk milestone query for the whole Gantt instead of one query
+        # inside the project loop.
+        gantt_ms_by_project = db.project_milestones_bulk([p["id"] for p in dated])
         fig = go.Figure()
         names = [p["name"] for p in dated]
         n = len(dated)
@@ -1147,7 +1154,7 @@ def render_gantt(me):
             colour = "#3A5A78" if p.get("i_lead") else "#9aa5b1"
             role = "lead" if p.get("i_lead") else (
                 "participant" if p.get("i_participate") else "overseeing")
-            ms = db.project_milestones(p["id"])
+            ms = gantt_ms_by_project.get(p["id"], [])
             # draw the project row as milestone-derived segments, so gaps
             # between milestones show as breaks in the bar
             segments = project_gantt_segments(p, ms)
@@ -1404,11 +1411,15 @@ def compute_daily_occupancy(milestones, me_id):
     return totals, breakdown, by_group, by_group_detail
 
 
-def render_milestone_progress_bars(pid, key_suffix):
+def render_milestone_progress_bars(pid, key_suffix, rows=None):
     """Per-milestone published-progress bar chart for a project. Bars at each
     milestone's shared %, with binary-fallback bars (no published %) flagged
-    in a lighter tone and marked. Shown to everyone; no hours involved."""
-    rows = db.milestone_progress_bars(pid)
+    in a lighter tone and marked. Shown to everyone; no hours involved.
+
+    rows can be preloaded by db.milestone_progress_bars_bulk() so the Projects
+    page does not make one progress query per project.
+    """
+    rows = db.milestone_progress_bars(pid) if rows is None else rows
     if not rows:
         return
     titles = [r["title"] for r in rows]
@@ -1918,6 +1929,9 @@ def view_projects(me):
                    "or add one below.")
     is_lead = me.get("role") == "lead"
     sorted_active = sorted(active, key=lambda x: -(x.get("hours_logged") or 0))
+    project_ids = [r["project_id"] for r in sorted_active]
+    progress_bars_by_project = db.milestone_progress_bars_bulk(project_ids)
+    progress_stats_by_project = db.milestone_progress_bulk(project_ids)
 
     # Keep a single project selected for the expensive editor. The summary list
     # remains cheap; details, milestones, links, people, budget and history are
@@ -1954,10 +1968,12 @@ def view_projects(me):
             if est and pct is not None:
                 st.progress(min(pct / 100, 1.0),
                             text=f"{pct:g}% complete")
-            render_milestone_progress_bars(pid, f"lead_{pid}")
+            render_milestone_progress_bars(
+                pid, f"lead_{pid}", progress_bars_by_project.get(pid, []))
         else:
             # shared view: milestone completion only, NO hours anywhere
-            mp = db.milestone_progress(pid)
+            mp = progress_stats_by_project.get(
+                pid, {"done": 0, "total": 0, "pct": None})
             c1, c2, c3 = st.columns([3, 3, 1.5])
             with c1:
                 st.markdown(f"**{r['project_name']}**")
@@ -1975,7 +1991,8 @@ def view_projects(me):
                             text=f"{mp['pct']}% of milestones complete")
             else:
                 st.caption("No milestones set yet.")
-            render_milestone_progress_bars(pid, f"shared_{pid}")
+            render_milestone_progress_bars(
+                pid, f"shared_{pid}", progress_bars_by_project.get(pid, []))
 
         st.markdown("<hr>", unsafe_allow_html=True)
 
