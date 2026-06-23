@@ -1436,6 +1436,477 @@ def render_milestone_progress_bars(pid, key_suffix):
                    "published completion %.")
 
 
+def render_project_details_and_milestones(r, me, is_lead):
+    """Render the expensive project editor for one selected project only.
+
+    This used to live inside every project row's expander. Streamlit computes
+    closed expanders too, so rendering it for every project made ordinary page
+    interactions slow. Keeping it as a separate helper lets view_projects render
+    the full editor only for the project currently selected by the user.
+    """
+    pid = r["project_id"]
+    est = r.get("estimated_hours")
+    statuses = db.project_statuses()
+    st_labels = {s["label"]: s["id"] for s in statuses}
+    det = db.project_detail(pid) or {}
+    with st.form(f"projdet_form_{pid}"):
+        new_name = st.text_input("Project name",
+                                 value=r.get("project_name") or "",
+                                 key=f"name_{pid}")
+        # category (one per project) — filters the logging dropdown
+        all_cats = db.categories(domain="work")
+        cat_by_id = {c["id"]: c["label"] for c in all_cats}
+        cat_label_to_id = {c["label"]: c["id"] for c in all_cats}
+        cur_cat_id = det.get("category_id")
+        cat_options = ["— none —"] + list(cat_label_to_id.keys())
+        cur_cat_label = cat_by_id.get(cur_cat_id, "— none —")
+        cat_index = cat_options.index(cur_cat_label) \
+            if cur_cat_label in cat_options else 0
+        new_proj_cat = st.selectbox(
+            "Category (one per project)", cat_options, index=cat_index,
+            key=f"projcat_{pid}",
+            help="Determines which category this project appears under "
+                 "when logging.")
+        new_importance = st.checkbox(
+            "⭐ High importance",
+            value=bool(det.get("high_importance")),
+            key=f"projimp_{pid}",
+            help="Highlights this project's hours in the Time tab.")
+        ec1, ec2 = st.columns(2)
+        with ec1:
+            if is_lead:
+                if est:
+                    st.metric("Estimate (from milestones)",
+                              f"{est:g} h")
+                else:
+                    st.caption("Estimate: set milestone planned hours "
+                               "below")
+        with ec2:
+            cur_status = r.get("status") or list(st_labels.keys())[0]
+            idx = list(st_labels.keys()).index(cur_status) \
+                if cur_status in st_labels else 0
+            new_status = st.selectbox(
+                "Status", list(st_labels.keys()),
+                index=idx, key=f"status_{pid}")
+        dc1, dc2 = st.columns(2)
+        with dc1:
+            cur_started = det.get("started_on")
+            new_started = st.date_input(
+                "Start date",
+                value=dt.date.fromisoformat(cur_started)
+                if cur_started else None, key=f"start_{pid}")
+        with dc2:
+            cur_due = det.get("due_on")
+            new_due = st.date_input(
+                "Due date",
+                value=dt.date.fromisoformat(cur_due) if cur_due
+                else None, key=f"due_{pid}")
+        savedet_submit = st.form_submit_button("Save details")
+    if savedet_submit:
+        if not new_name.strip():
+            st.error("Project name can't be empty.")
+        else:
+            try:
+                db.update_project(pid, {
+                    "name": new_name.strip(),
+                    "status_id": st_labels[new_status],
+                    "started_on": new_started.isoformat()
+                    if new_started else None,
+                    "due_on": new_due.isoformat() if new_due else None,
+                    "category_id": (cat_label_to_id.get(new_proj_cat)
+                                    if new_proj_cat != "— none —"
+                                    else None),
+                    "high_importance": new_importance,
+                })
+                st.success("Saved.")
+                db.clear_user_caches()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not save. {e}")
+
+    # ---- planning fields ----
+    det = db.project_detail(pid) or {}
+    st.markdown("**Planning**")
+    with st.form(f"projplan_form_{pid}"):
+        purpose = st.text_area("Purpose",
+                               value=det.get("purpose") or "",
+                               key=f"purpose_{pid}",
+                               help="Why the project exists.")
+        outcomes = st.text_area("Final outcomes",
+                                value=det.get("final_outcomes") or "",
+                                key=f"outcomes_{pid}")
+        stake = st.text_area("Stakeholders / users",
+                             value=det.get("stakeholders") or "",
+                             key=f"stake_{pid}")
+        risks = st.text_area("Risks", value=det.get("risks") or "",
+                             key=f"risks_{pid}")
+        saveplan_submit = st.form_submit_button("Save planning")
+    if saveplan_submit:
+        try:
+            db.update_project(pid, {
+                "purpose": purpose or None,
+                "final_outcomes": outcomes or None,
+                "stakeholders": stake or None,
+                "risks": risks or None,
+            })
+            st.success("Planning saved.")
+            db.clear_user_caches()
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not save planning. {e}")
+
+    # ---- people in charge ----
+    st.markdown("**People in charge**")
+    leads = db.project_leads(pid)
+    users = db.all_users()
+    uname = {u["id"]: u["full_name"] for u in users}
+    current_leader = next((L["user_id"] for L in leads
+                           if L.get("is_leader")), None)
+    for L in leads:
+        lc1, lc2, lc3 = st.columns([3, 1, 1])
+        with lc1:
+            crown = "★ " if L.get("is_leader") else ""
+            st.caption(f"{crown}{uname.get(L['user_id'], 'Unknown')}"
+                       + (f" — {L['role']}" if L.get("role") else ""))
+        with lc2:
+            if not L.get("is_leader"):
+                if st.button("Make leader",
+                             key=f"mklead_{pid}_{L['user_id']}"):
+                    db.set_project_leader(pid, L["user_id"])
+                    db.clear_user_caches()
+                    st.rerun()
+        with lc3:
+            if st.button("Remove", key=f"rmlead_{pid}_{L['user_id']}"):
+                db.remove_project_lead(pid, L["user_id"])
+                db.clear_user_caches()
+                st.rerun()
+    if not current_leader:
+        st.caption("⚠ No leader set — assign one so this project is "
+                   "grouped correctly.")
+    with st.form(f"add_lead_{pid}", clear_on_submit=True):
+        u_labels = {u["full_name"]: u["id"] for u in users}
+        who = st.selectbox("Add person", list(u_labels.keys()),
+                           key=f"who_{pid}")
+        role_in = st.text_input("Role (optional)", key=f"role_{pid}",
+                                placeholder="PI, co-lead, student lead")
+        as_leader = st.checkbox("Make this person the leader",
+                                key=f"asld_{pid}")
+        if st.form_submit_button("Add person"):
+            try:
+                if as_leader:
+                    db.set_project_leader(pid, u_labels[who])
+                    if role_in.strip():
+                        db.update_project_lead_role(
+                            pid, u_labels[who], role_in.strip())
+                else:
+                    db.add_project_lead(pid, u_labels[who],
+                                        role_in.strip() or None)
+                db.clear_user_caches()
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not add. {e}")
+
+    # ---- links ----
+    st.markdown("**Links** (references, resources, outcomes)")
+    for lk in db.project_links(pid):
+        kc1, kc2 = st.columns([5, 1])
+        with kc1:
+            st.markdown(
+                f"[{lk.get('label') or lk['url']}]({lk['url']}) "
+                f"· _{lk['kind']}_")
+        with kc2:
+            if st.button("Remove", key=f"rmlink_{lk['id']}"):
+                db.delete_project_link(lk["id"])
+                db.clear_user_caches()
+                st.rerun()
+    with st.form(f"add_link_{pid}", clear_on_submit=True):
+        lu = st.text_input("URL", key=f"lu_{pid}",
+                           placeholder="https://…")
+        ll = st.text_input("Label (optional)", key=f"ll_{pid}")
+        lk_kind = st.selectbox("Type",
+                               ["reference", "resource", "outcome", "other"],
+                               key=f"lk_{pid}")
+        if st.form_submit_button("Add link"):
+            if lu.strip():
+                try:
+                    db.add_project_link(pid, lu.strip(),
+                                        ll.strip() or None, lk_kind)
+                    db.clear_user_caches()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not add link. {e}")
+            else:
+                st.error("Give the link a URL.")
+
+    # ---- budget summary (lead only; full editing in the Budget tab) --
+    if is_lead:
+        st.markdown("**Budget** (private to you)")
+        items = db.budget_items(pid)
+        if items:
+            plan = sum(i.get("plan_amount") or 0 for i in items)
+            used = sum(i.get("used") or 0 for i in items)
+            cur = items[0].get("currency") or ""
+            bm1, bm2, bm3 = st.columns(3)
+            bm1.metric("Planned", f"{plan:g} {cur}")
+            bm2.metric("Used", f"{used:g} {cur}")
+            bm3.metric("Remaining", f"{plan - used:g} {cur}")
+            if plan:
+                st.progress(min(used / plan, 1.0),
+                            text=f"{round(100*used/plan)}% spent")
+            st.caption("Plan items and payments are managed in the "
+                       "Budget tab.")
+        else:
+            st.caption("No budget yet — set it up in the Budget tab.")
+
+    # ---- history ----
+    with st.expander("Edit history"):
+        hist = db.project_history(pid)
+        if hist:
+            for h in hist:
+                when = (h["changed_at"] or "")[:16].replace("T", " ")
+                st.caption(f"{when} · {h['table_name']} {h['action'].lower()}"
+                           + (f" · {h['changed_by']}"
+                              if h.get("changed_by") else ""))
+        else:
+            st.caption("No history yet.")
+
+    st.markdown("**Milestones**")
+    ms = db.project_milestones(pid)
+    my_ms_hours = db.my_milestone_hours()
+    members = db.group_members()
+    member_name = {u["id"]: u["full_name"] for u in members}
+    ms_title = {m["id"]: m["title"] for m in ms}
+
+    # personal view (non-lead): show only my milestones, PLUS any that
+    # mine depend on, so preconditions stay meaningful.
+    if not is_lead:
+        mine = {m["id"] for m in ms
+                if m.get("contributor_id") == me["id"]}
+        # pull in preconditions of mine (one hop is enough in practice)
+        needed = set(mine)
+        for m in ms:
+            if m["id"] in mine and m.get("precondition_id"):
+                needed.add(m["precondition_id"])
+        ms = [m for m in ms if m["id"] in needed]
+        if not ms:
+            st.caption("You have no milestones in this project.")
+
+    if ms:
+        for m in ms:
+            mc1, mc2, mc3 = st.columns([4, 2, 1])
+            done = m["status"] == "done"
+            with mc1:
+                st.markdown(("~~" + m["title"] + "~~") if done
+                            else m["title"])
+                bits = []
+                if m.get("due_on"):
+                    bits.append(f"due {m['due_on']}")
+                if m.get("contributor_id"):
+                    bits.append(member_name.get(m["contributor_id"],
+                                                "someone"))
+                if m.get("precondition_id"):
+                    bits.append("after: " + ms_title.get(
+                        m["precondition_id"], "another milestone"))
+                hrs = my_ms_hours.get(m["id"]) or 0
+                planned = m.get("planned_hours")
+                # computed completion %, works for both tracking units
+                pctv = db.milestone_percent(m, my_hours=hrs)
+                if pctv is not None:
+                    bits.append(f"{pctv}% complete")
+                # hours shown to the lead only; never in the shared view
+                if is_lead:
+                    if planned:
+                        bits.append(f"your hours: {hrs:g} of "
+                                    f"{planned:g} planned")
+                    elif hrs:
+                        bits.append(f"your hours: {hrs:g}")
+                if bits:
+                    st.caption(" · ".join(bits))
+                # progress bar from the computed %
+                if pctv is not None:
+                    st.progress(min(pctv / 100, 1.0))
+                if m.get("hypothesis"):
+                    st.caption(f"Hypothesis: {m['hypothesis']}")
+                if m.get("success_measure"):
+                    st.caption(f"Success measure: {m['success_measure']}")
+                # progress notes (shown to everyone who sees the project)
+                for up in db.milestone_updates(m["id"]):
+                    when = (up["created_at"] or "")[:10]
+                    who = member_name.get(up.get("author_id"), "")
+                    uc1, uc2 = st.columns([6, 1])
+                    with uc1:
+                        st.caption(f"📝 {when} · {who}: {up['note']}")
+                    with uc2:
+                        if st.button("✕", key=f"updel_{up['id']}",
+                                     help="Remove note"):
+                            db.delete_milestone_update(up["id"])
+                            db.clear_user_caches()
+                            st.rerun()
+                with st.popover("Add note"):
+                    with st.form(f"upnote_form_{m['id']}",
+                                 clear_on_submit=True):
+                        un = st.text_input(
+                            "Progress note", key=f"upnote_{m['id']}",
+                            placeholder="e.g. first pass done")
+                        upnote_submit = st.form_submit_button(
+                            "Save note", type="primary")
+                    if upnote_submit:
+                        if un.strip():
+                            try:
+                                db.add_milestone_update(
+                                    m["id"], me["id"], un.strip())
+                                db.clear_user_caches()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Could not add note. {e}")
+                        else:
+                            st.error("Write a note first.")
+                # milestone links
+                mlinks = db.milestone_links(m["id"])
+                for lk in mlinks:
+                    lkc1, lkc2 = st.columns([6, 1])
+                    with lkc1:
+                        st.caption(
+                            f"🔗 [{lk.get('label') or lk['url']}]"
+                            f"({lk['url']}) · {lk['kind']}")
+                    with lkc2:
+                        if st.button("✕", key=f"mlk_del_{lk['id']}",
+                                     help="Remove link"):
+                            db.delete_project_link(lk["id"])
+                            db.clear_user_caches()
+                            st.rerun()
+                with st.popover("Add link", use_container_width=False):
+                    lu = st.text_input("URL", key=f"mlu_{m['id']}",
+                                       placeholder="https://…")
+                    ll = st.text_input("Label (optional)",
+                                       key=f"mll_{m['id']}")
+                    lk_kind = st.selectbox(
+                        "Type",
+                        ["reference", "resource", "outcome", "other"],
+                        key=f"mlk_{m['id']}")
+                    if st.button("Save link", key=f"mlk_save_{m['id']}",
+                                 type="primary"):
+                        if lu.strip():
+                            try:
+                                db.add_project_link(
+                                    pid, lu.strip(), ll.strip() or None,
+                                    lk_kind, milestone_id=m["id"])
+                                db.clear_user_caches()
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"Could not add link. {e}")
+                        else:
+                            st.error("Give the link a URL.")
+            with mc2:
+                st.caption(m["status"])
+            with mc3:
+                if st.button("✓" if not done else "↺",
+                             key=f"ms_toggle_{m['id']}",
+                             help="Mark done / reopen"):
+                    db.update_milestone(m["id"], {
+                        "status": "planned" if done else "done"})
+                    db.clear_user_caches()
+                    st.rerun()
+                with st.popover("✎", help="Edit milestone"):
+                    with st.form(f"editms_form_{m['id']}"):
+                        e_title = st.text_input(
+                            "Title", value=m["title"],
+                            key=f"editms_title_{m['id']}")
+                        cur_start = m.get("start_on")
+                        e_start = st.date_input(
+                            "Start (optional)",
+                            value=dt.date.fromisoformat(cur_start)
+                            if cur_start else None,
+                            key=f"editms_start_{m['id']}",
+                            help="If set, used as the window start for "
+                                 "occupancy and the Gantt segment. "
+                                 "Otherwise falls back to the prior "
+                                 "milestone's due, then the project start.")
+                        cur_due = m.get("due_on")
+                        e_due = st.date_input(
+                            "Due (optional)",
+                            value=dt.date.fromisoformat(cur_due)
+                            if cur_due else None,
+                            key=f"editms_due_{m['id']}")
+                        # contributor (one person)
+                        contrib_labels = {"— none —": None}
+                        contrib_labels.update(
+                            {u["full_name"]: u["id"] for u in members})
+                        cur_contrib = member_name.get(
+                            m.get("contributor_id"), "— none —")
+                        ck = list(contrib_labels.keys())
+                        e_contrib = st.selectbox(
+                            "Contributor", ck,
+                            index=ck.index(cur_contrib)
+                            if cur_contrib in ck else 0,
+                            key=f"editms_contrib_{m['id']}")
+                        # precondition (another milestone in this project)
+                        pre_labels = {"— none —": None}
+                        pre_labels.update(
+                            {mm["title"]: mm["id"]
+                             for mm in db.project_milestones(pid)
+                             if mm["id"] != m["id"]})
+                        cur_pre = ms_title.get(m.get("precondition_id"),
+                                               "— none —")
+                        pk = list(pre_labels.keys())
+                        e_pre = st.selectbox(
+                            "Depends on (precondition)", pk,
+                            index=pk.index(cur_pre) if cur_pre in pk else 0,
+                            key=f"editms_pre_{m['id']}")
+                        e_hyp = st.text_input(
+                            "Hypothesis / expected outcome",
+                            value=m.get("hypothesis") or "",
+                            key=f"editms_hyp_{m['id']}")
+                        e_sm = st.text_input(
+                            "Success measure",
+                            value=m.get("success_measure") or "",
+                            key=f"editms_sm_{m['id']}")
+                        st.caption("Estimated hours and tracking choice are "
+                                   "private — set them in the Planning tab.")
+                        editms_submit = st.form_submit_button(
+                            "Save", type="primary")
+                        if editms_submit and e_title.strip():
+                            db.update_milestone(m["id"], {
+                                "title": e_title.strip(),
+                                "due_on": e_due.isoformat()
+                                if e_due else None,
+                                "start_on": e_start.isoformat()
+                                if e_start else None,
+                                "contributor_id":
+                                    contrib_labels[e_contrib],
+                                "precondition_id": pre_labels[e_pre],
+                                "hypothesis": e_hyp.strip() or None,
+                                "success_measure": e_sm.strip() or None,
+                            })
+                            db.clear_user_caches()
+                            st.rerun()
+                        elif editms_submit:
+                            st.error("Title can't be empty.")
+    else:
+        st.caption("No milestones yet.")
+
+    with st.form(f"add_ms_{pid}", clear_on_submit=True):
+        mt = st.text_input("New milestone", key=f"mt_{pid}")
+        md = st.date_input("Due (optional)", value=None, key=f"md_{pid}")
+        mh = st.text_input("Hypothesis / expected outcome (optional)",
+                           key=f"mh_{pid}")
+        msm = st.text_input("Success measure (optional)", key=f"msm_{pid}")
+        if st.form_submit_button("Add milestone"):
+            if mt.strip():
+                try:
+                    db.add_milestone(
+                        pid, mt.strip(),
+                        due_on=md.isoformat() if md else None,
+                        hypothesis=mh.strip() or None,
+                        success_measure=msm.strip() or None)
+                    db.clear_user_caches()
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not add milestone. {e}")
+            else:
+                st.error("Give the milestone a title.")
+
+
 def view_projects(me):
     section("Projects", "Project tracker",
             "Time spent against estimate, per project.")
@@ -1446,14 +1917,24 @@ def view_projects(me):
         st.caption("No projects yet. Log a session and choose “+ New project…”, "
                    "or add one below.")
     is_lead = me.get("role") == "lead"
-    for r in sorted(active, key=lambda x: -(x.get("hours_logged") or 0)):
+    sorted_active = sorted(active, key=lambda x: -(x.get("hours_logged") or 0))
+
+    # Keep a single project selected for the expensive editor. The summary list
+    # remains cheap; details, milestones, links, people, budget and history are
+    # rendered only for this selected project.
+    valid_ids = {r["project_id"] for r in sorted_active}
+    if sorted_active and st.session_state.get("projects_selected_id") not in valid_ids:
+        st.session_state["projects_selected_id"] = sorted_active[0]["project_id"]
+
+    for r in sorted_active:
         logged = r.get("hours_logged") or 0
         est = r.get("estimated_hours")
         pct = r.get("completion_pct")
         pid = r["project_id"]
+        selected = st.session_state.get("projects_selected_id") == pid
         if is_lead:
             # full view: hours logged vs estimate (hours)
-            c1, c2, c3 = st.columns([3, 2, 2])
+            c1, c2, c3, c4 = st.columns([3, 2, 2, 1.5])
             with c1:
                 st.markdown(f"**{r['project_name']}**")
                 st.caption(r.get("status") or "")
@@ -1465,6 +1946,11 @@ def view_projects(me):
                               delta=f"{r.get('hours_remaining'):g} left"
                               if r.get("hours_remaining") is not None else None,
                               delta_color="off")
+            with c4:
+                if st.button("Open ✓" if selected else "Open",
+                             key=f"open_proj_details_{pid}"):
+                    st.session_state["projects_selected_id"] = pid
+                    selected = True
             if est and pct is not None:
                 st.progress(min(pct / 100, 1.0),
                             text=f"{pct:g}% complete")
@@ -1472,13 +1958,18 @@ def view_projects(me):
         else:
             # shared view: milestone completion only, NO hours anywhere
             mp = db.milestone_progress(pid)
-            c1, c2 = st.columns([3, 3])
+            c1, c2, c3 = st.columns([3, 3, 1.5])
             with c1:
                 st.markdown(f"**{r['project_name']}**")
                 st.caption(r.get("status") or "")
             with c2:
                 if mp["total"]:
                     st.caption(f"{mp['done']} of {mp['total']} milestones done")
+            with c3:
+                if st.button("Open ✓" if selected else "Open",
+                             key=f"open_proj_details_{pid}"):
+                    st.session_state["projects_selected_id"] = pid
+                    selected = True
             if mp["pct"] is not None:
                 st.progress(min(mp["pct"] / 100, 1.0),
                             text=f"{mp['pct']}% of milestones complete")
@@ -1486,471 +1977,16 @@ def view_projects(me):
                 st.caption("No milestones set yet.")
             render_milestone_progress_bars(pid, f"shared_{pid}")
 
-        # ---- edit details & milestones for this project ----
-        with st.expander("Details & milestones"):
-            pid = r["project_id"]
-            statuses = db.project_statuses()
-            st_labels = {s["label"]: s["id"] for s in statuses}
-            det = db.project_detail(pid) or {}
-            det = db.project_detail(pid) or {}
-            with st.form(f"projdet_form_{pid}"):
-                new_name = st.text_input("Project name",
-                                         value=r.get("project_name") or "",
-                                         key=f"name_{pid}")
-                # category (one per project) — filters the logging dropdown
-                all_cats = db.categories(domain="work")
-                cat_by_id = {c["id"]: c["label"] for c in all_cats}
-                cat_label_to_id = {c["label"]: c["id"] for c in all_cats}
-                cur_cat_id = det.get("category_id")
-                cat_options = ["— none —"] + list(cat_label_to_id.keys())
-                cur_cat_label = cat_by_id.get(cur_cat_id, "— none —")
-                cat_index = cat_options.index(cur_cat_label) \
-                    if cur_cat_label in cat_options else 0
-                new_proj_cat = st.selectbox(
-                    "Category (one per project)", cat_options, index=cat_index,
-                    key=f"projcat_{pid}",
-                    help="Determines which category this project appears under "
-                         "when logging.")
-                new_importance = st.checkbox(
-                    "⭐ High importance",
-                    value=bool(det.get("high_importance")),
-                    key=f"projimp_{pid}",
-                    help="Highlights this project's hours in the Time tab.")
-                ec1, ec2 = st.columns(2)
-                with ec1:
-                    if is_lead:
-                        if est:
-                            st.metric("Estimate (from milestones)",
-                                      f"{est:g} h")
-                        else:
-                            st.caption("Estimate: set milestone planned hours "
-                                       "below")
-                with ec2:
-                    cur_status = r.get("status") or list(st_labels.keys())[0]
-                    idx = list(st_labels.keys()).index(cur_status) \
-                        if cur_status in st_labels else 0
-                    new_status = st.selectbox(
-                        "Status", list(st_labels.keys()),
-                        index=idx, key=f"status_{pid}")
-                dc1, dc2 = st.columns(2)
-                with dc1:
-                    cur_started = det.get("started_on")
-                    new_started = st.date_input(
-                        "Start date",
-                        value=dt.date.fromisoformat(cur_started)
-                        if cur_started else None, key=f"start_{pid}")
-                with dc2:
-                    cur_due = det.get("due_on")
-                    new_due = st.date_input(
-                        "Due date",
-                        value=dt.date.fromisoformat(cur_due) if cur_due
-                        else None, key=f"due_{pid}")
-                savedet_submit = st.form_submit_button("Save details")
-            if savedet_submit:
-                if not new_name.strip():
-                    st.error("Project name can't be empty.")
-                else:
-                    try:
-                        db.update_project(pid, {
-                            "name": new_name.strip(),
-                            "status_id": st_labels[new_status],
-                            "started_on": new_started.isoformat()
-                            if new_started else None,
-                            "due_on": new_due.isoformat() if new_due else None,
-                            "category_id": (cat_label_to_id.get(new_proj_cat)
-                                            if new_proj_cat != "— none —"
-                                            else None),
-                            "high_importance": new_importance,
-                        })
-                        st.success("Saved.")
-                        db.clear_user_caches()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Could not save. {e}")
-
-            # ---- planning fields ----
-            det = db.project_detail(pid) or {}
-            st.markdown("**Planning**")
-            with st.form(f"projplan_form_{pid}"):
-                purpose = st.text_area("Purpose",
-                                       value=det.get("purpose") or "",
-                                       key=f"purpose_{pid}",
-                                       help="Why the project exists.")
-                outcomes = st.text_area("Final outcomes",
-                                        value=det.get("final_outcomes") or "",
-                                        key=f"outcomes_{pid}")
-                stake = st.text_area("Stakeholders / users",
-                                     value=det.get("stakeholders") or "",
-                                     key=f"stake_{pid}")
-                risks = st.text_area("Risks", value=det.get("risks") or "",
-                                     key=f"risks_{pid}")
-                saveplan_submit = st.form_submit_button("Save planning")
-            if saveplan_submit:
-                try:
-                    db.update_project(pid, {
-                        "purpose": purpose or None,
-                        "final_outcomes": outcomes or None,
-                        "stakeholders": stake or None,
-                        "risks": risks or None,
-                    })
-                    st.success("Planning saved.")
-                    db.clear_user_caches()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not save planning. {e}")
-
-            # ---- people in charge ----
-            st.markdown("**People in charge**")
-            leads = db.project_leads(pid)
-            users = db.all_users()
-            uname = {u["id"]: u["full_name"] for u in users}
-            current_leader = next((L["user_id"] for L in leads
-                                   if L.get("is_leader")), None)
-            for L in leads:
-                lc1, lc2, lc3 = st.columns([3, 1, 1])
-                with lc1:
-                    crown = "★ " if L.get("is_leader") else ""
-                    st.caption(f"{crown}{uname.get(L['user_id'], 'Unknown')}"
-                               + (f" — {L['role']}" if L.get("role") else ""))
-                with lc2:
-                    if not L.get("is_leader"):
-                        if st.button("Make leader",
-                                     key=f"mklead_{pid}_{L['user_id']}"):
-                            db.set_project_leader(pid, L["user_id"])
-                            db.clear_user_caches()
-                            st.rerun()
-                with lc3:
-                    if st.button("Remove", key=f"rmlead_{pid}_{L['user_id']}"):
-                        db.remove_project_lead(pid, L["user_id"])
-                        db.clear_user_caches()
-                        st.rerun()
-            if not current_leader:
-                st.caption("⚠ No leader set — assign one so this project is "
-                           "grouped correctly.")
-            with st.form(f"add_lead_{pid}", clear_on_submit=True):
-                u_labels = {u["full_name"]: u["id"] for u in users}
-                who = st.selectbox("Add person", list(u_labels.keys()),
-                                   key=f"who_{pid}")
-                role_in = st.text_input("Role (optional)", key=f"role_{pid}",
-                                        placeholder="PI, co-lead, student lead")
-                as_leader = st.checkbox("Make this person the leader",
-                                        key=f"asld_{pid}")
-                if st.form_submit_button("Add person"):
-                    try:
-                        if as_leader:
-                            db.set_project_leader(pid, u_labels[who])
-                            if role_in.strip():
-                                db.update_project_lead_role(
-                                    pid, u_labels[who], role_in.strip())
-                        else:
-                            db.add_project_lead(pid, u_labels[who],
-                                                role_in.strip() or None)
-                        db.clear_user_caches()
-                        st.rerun()
-                    except Exception as e:
-                        st.error(f"Could not add. {e}")
-
-            # ---- links ----
-            st.markdown("**Links** (references, resources, outcomes)")
-            for lk in db.project_links(pid):
-                kc1, kc2 = st.columns([5, 1])
-                with kc1:
-                    st.markdown(
-                        f"[{lk.get('label') or lk['url']}]({lk['url']}) "
-                        f"· _{lk['kind']}_")
-                with kc2:
-                    if st.button("Remove", key=f"rmlink_{lk['id']}"):
-                        db.delete_project_link(lk["id"])
-                        db.clear_user_caches()
-                        st.rerun()
-            with st.form(f"add_link_{pid}", clear_on_submit=True):
-                lu = st.text_input("URL", key=f"lu_{pid}",
-                                   placeholder="https://…")
-                ll = st.text_input("Label (optional)", key=f"ll_{pid}")
-                lk_kind = st.selectbox("Type",
-                                       ["reference", "resource", "outcome", "other"],
-                                       key=f"lk_{pid}")
-                if st.form_submit_button("Add link"):
-                    if lu.strip():
-                        try:
-                            db.add_project_link(pid, lu.strip(),
-                                                ll.strip() or None, lk_kind)
-                            db.clear_user_caches()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Could not add link. {e}")
-                    else:
-                        st.error("Give the link a URL.")
-
-            # ---- budget summary (lead only; full editing in the Budget tab) --
-            if is_lead:
-                st.markdown("**Budget** (private to you)")
-                items = db.budget_items(pid)
-                if items:
-                    plan = sum(i.get("plan_amount") or 0 for i in items)
-                    used = sum(i.get("used") or 0 for i in items)
-                    cur = items[0].get("currency") or ""
-                    bm1, bm2, bm3 = st.columns(3)
-                    bm1.metric("Planned", f"{plan:g} {cur}")
-                    bm2.metric("Used", f"{used:g} {cur}")
-                    bm3.metric("Remaining", f"{plan - used:g} {cur}")
-                    if plan:
-                        st.progress(min(used / plan, 1.0),
-                                    text=f"{round(100*used/plan)}% spent")
-                    st.caption("Plan items and payments are managed in the "
-                               "Budget tab.")
-                else:
-                    st.caption("No budget yet — set it up in the Budget tab.")
-
-            # ---- history ----
-            with st.expander("Edit history"):
-                hist = db.project_history(pid)
-                if hist:
-                    for h in hist:
-                        when = (h["changed_at"] or "")[:16].replace("T", " ")
-                        st.caption(f"{when} · {h['table_name']} {h['action'].lower()}"
-                                   + (f" · {h['changed_by']}"
-                                      if h.get("changed_by") else ""))
-                else:
-                    st.caption("No history yet.")
-
-            st.markdown("**Milestones**")
-            ms = db.project_milestones(pid)
-            my_ms_hours = db.my_milestone_hours()
-            members = db.group_members()
-            member_name = {u["id"]: u["full_name"] for u in members}
-            ms_title = {m["id"]: m["title"] for m in ms}
-
-            # personal view (non-lead): show only my milestones, PLUS any that
-            # mine depend on, so preconditions stay meaningful.
-            if not is_lead:
-                mine = {m["id"] for m in ms
-                        if m.get("contributor_id") == me["id"]}
-                # pull in preconditions of mine (one hop is enough in practice)
-                needed = set(mine)
-                for m in ms:
-                    if m["id"] in mine and m.get("precondition_id"):
-                        needed.add(m["precondition_id"])
-                ms = [m for m in ms if m["id"] in needed]
-                if not ms:
-                    st.caption("You have no milestones in this project.")
-
-            if ms:
-                for m in ms:
-                    mc1, mc2, mc3 = st.columns([4, 2, 1])
-                    done = m["status"] == "done"
-                    with mc1:
-                        st.markdown(("~~" + m["title"] + "~~") if done
-                                    else m["title"])
-                        bits = []
-                        if m.get("due_on"):
-                            bits.append(f"due {m['due_on']}")
-                        if m.get("contributor_id"):
-                            bits.append(member_name.get(m["contributor_id"],
-                                                        "someone"))
-                        if m.get("precondition_id"):
-                            bits.append("after: " + ms_title.get(
-                                m["precondition_id"], "another milestone"))
-                        hrs = my_ms_hours.get(m["id"]) or 0
-                        planned = m.get("planned_hours")
-                        # computed completion %, works for both tracking units
-                        pctv = db.milestone_percent(m, my_hours=hrs)
-                        if pctv is not None:
-                            bits.append(f"{pctv}% complete")
-                        # hours shown to the lead only; never in the shared view
-                        if is_lead:
-                            if planned:
-                                bits.append(f"your hours: {hrs:g} of "
-                                            f"{planned:g} planned")
-                            elif hrs:
-                                bits.append(f"your hours: {hrs:g}")
-                        if bits:
-                            st.caption(" · ".join(bits))
-                        # progress bar from the computed %
-                        if pctv is not None:
-                            st.progress(min(pctv / 100, 1.0))
-                        if m.get("hypothesis"):
-                            st.caption(f"Hypothesis: {m['hypothesis']}")
-                        if m.get("success_measure"):
-                            st.caption(f"Success measure: {m['success_measure']}")
-                        # progress notes (shown to everyone who sees the project)
-                        for up in db.milestone_updates(m["id"]):
-                            when = (up["created_at"] or "")[:10]
-                            who = member_name.get(up.get("author_id"), "")
-                            uc1, uc2 = st.columns([6, 1])
-                            with uc1:
-                                st.caption(f"📝 {when} · {who}: {up['note']}")
-                            with uc2:
-                                if st.button("✕", key=f"updel_{up['id']}",
-                                             help="Remove note"):
-                                    db.delete_milestone_update(up["id"])
-                                    db.clear_user_caches()
-                                    st.rerun()
-                        with st.popover("Add note"):
-                            with st.form(f"upnote_form_{m['id']}",
-                                         clear_on_submit=True):
-                                un = st.text_input(
-                                    "Progress note", key=f"upnote_{m['id']}",
-                                    placeholder="e.g. first pass done")
-                                upnote_submit = st.form_submit_button(
-                                    "Save note", type="primary")
-                            if upnote_submit:
-                                if un.strip():
-                                    try:
-                                        db.add_milestone_update(
-                                            m["id"], me["id"], un.strip())
-                                        db.clear_user_caches()
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Could not add note. {e}")
-                                else:
-                                    st.error("Write a note first.")
-                        # milestone links
-                        mlinks = db.milestone_links(m["id"])
-                        for lk in mlinks:
-                            lkc1, lkc2 = st.columns([6, 1])
-                            with lkc1:
-                                st.caption(
-                                    f"🔗 [{lk.get('label') or lk['url']}]"
-                                    f"({lk['url']}) · {lk['kind']}")
-                            with lkc2:
-                                if st.button("✕", key=f"mlk_del_{lk['id']}",
-                                             help="Remove link"):
-                                    db.delete_project_link(lk["id"])
-                                    db.clear_user_caches()
-                                    st.rerun()
-                        with st.popover("Add link", use_container_width=False):
-                            lu = st.text_input("URL", key=f"mlu_{m['id']}",
-                                               placeholder="https://…")
-                            ll = st.text_input("Label (optional)",
-                                               key=f"mll_{m['id']}")
-                            lk_kind = st.selectbox(
-                                "Type",
-                                ["reference", "resource", "outcome", "other"],
-                                key=f"mlk_{m['id']}")
-                            if st.button("Save link", key=f"mlk_save_{m['id']}",
-                                         type="primary"):
-                                if lu.strip():
-                                    try:
-                                        db.add_project_link(
-                                            pid, lu.strip(), ll.strip() or None,
-                                            lk_kind, milestone_id=m["id"])
-                                        db.clear_user_caches()
-                                        st.rerun()
-                                    except Exception as e:
-                                        st.error(f"Could not add link. {e}")
-                                else:
-                                    st.error("Give the link a URL.")
-                    with mc2:
-                        st.caption(m["status"])
-                    with mc3:
-                        if st.button("✓" if not done else "↺",
-                                     key=f"ms_toggle_{m['id']}",
-                                     help="Mark done / reopen"):
-                            db.update_milestone(m["id"], {
-                                "status": "planned" if done else "done"})
-                            db.clear_user_caches()
-                            st.rerun()
-                        with st.popover("✎", help="Edit milestone"):
-                            with st.form(f"editms_form_{m['id']}"):
-                                e_title = st.text_input(
-                                    "Title", value=m["title"],
-                                    key=f"editms_title_{m['id']}")
-                                cur_start = m.get("start_on")
-                                e_start = st.date_input(
-                                    "Start (optional)",
-                                    value=dt.date.fromisoformat(cur_start)
-                                    if cur_start else None,
-                                    key=f"editms_start_{m['id']}",
-                                    help="If set, used as the window start for "
-                                         "occupancy and the Gantt segment. "
-                                         "Otherwise falls back to the prior "
-                                         "milestone's due, then the project start.")
-                                cur_due = m.get("due_on")
-                                e_due = st.date_input(
-                                    "Due (optional)",
-                                    value=dt.date.fromisoformat(cur_due)
-                                    if cur_due else None,
-                                    key=f"editms_due_{m['id']}")
-                                # contributor (one person)
-                                contrib_labels = {"— none —": None}
-                                contrib_labels.update(
-                                    {u["full_name"]: u["id"] for u in members})
-                                cur_contrib = member_name.get(
-                                    m.get("contributor_id"), "— none —")
-                                ck = list(contrib_labels.keys())
-                                e_contrib = st.selectbox(
-                                    "Contributor", ck,
-                                    index=ck.index(cur_contrib)
-                                    if cur_contrib in ck else 0,
-                                    key=f"editms_contrib_{m['id']}")
-                                # precondition (another milestone in this project)
-                                pre_labels = {"— none —": None}
-                                pre_labels.update(
-                                    {mm["title"]: mm["id"]
-                                     for mm in db.project_milestones(pid)
-                                     if mm["id"] != m["id"]})
-                                cur_pre = ms_title.get(m.get("precondition_id"),
-                                                       "— none —")
-                                pk = list(pre_labels.keys())
-                                e_pre = st.selectbox(
-                                    "Depends on (precondition)", pk,
-                                    index=pk.index(cur_pre) if cur_pre in pk else 0,
-                                    key=f"editms_pre_{m['id']}")
-                                e_hyp = st.text_input(
-                                    "Hypothesis / expected outcome",
-                                    value=m.get("hypothesis") or "",
-                                    key=f"editms_hyp_{m['id']}")
-                                e_sm = st.text_input(
-                                    "Success measure",
-                                    value=m.get("success_measure") or "",
-                                    key=f"editms_sm_{m['id']}")
-                                st.caption("Estimated hours and tracking choice are "
-                                           "private — set them in the Planning tab.")
-                                editms_submit = st.form_submit_button(
-                                    "Save", type="primary")
-                                if editms_submit and e_title.strip():
-                                    db.update_milestone(m["id"], {
-                                        "title": e_title.strip(),
-                                        "due_on": e_due.isoformat()
-                                        if e_due else None,
-                                        "start_on": e_start.isoformat()
-                                        if e_start else None,
-                                        "contributor_id":
-                                            contrib_labels[e_contrib],
-                                        "precondition_id": pre_labels[e_pre],
-                                        "hypothesis": e_hyp.strip() or None,
-                                        "success_measure": e_sm.strip() or None,
-                                    })
-                                    db.clear_user_caches()
-                                    st.rerun()
-                                elif editms_submit:
-                                    st.error("Title can't be empty.")
-            else:
-                st.caption("No milestones yet.")
-
-            with st.form(f"add_ms_{pid}", clear_on_submit=True):
-                mt = st.text_input("New milestone", key=f"mt_{pid}")
-                md = st.date_input("Due (optional)", value=None, key=f"md_{pid}")
-                mh = st.text_input("Hypothesis / expected outcome (optional)",
-                                   key=f"mh_{pid}")
-                msm = st.text_input("Success measure (optional)", key=f"msm_{pid}")
-                if st.form_submit_button("Add milestone"):
-                    if mt.strip():
-                        try:
-                            db.add_milestone(
-                                pid, mt.strip(),
-                                due_on=md.isoformat() if md else None,
-                                hypothesis=mh.strip() or None,
-                                success_measure=msm.strip() or None)
-                            db.clear_user_caches()
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Could not add milestone. {e}")
-                    else:
-                        st.error("Give the milestone a title.")
-
         st.markdown("<hr>", unsafe_allow_html=True)
+
+    selected_id = st.session_state.get("projects_selected_id")
+    selected_project = next((r for r in sorted_active
+                             if r["project_id"] == selected_id), None)
+    if selected_project:
+        with st.expander(
+                f"Details & milestones — {selected_project.get('project_name') or 'project'}",
+                expanded=True):
+            render_project_details_and_milestones(selected_project, me, is_lead)
 
     with st.expander("Add a project"):
         name = st.text_input("Project name")
@@ -1978,6 +2014,8 @@ def view_projects(me):
 # ---------------------------------------------------------------------------
 # Section: Time (high-category proportion + forecast)
 # ---------------------------------------------------------------------------
+
+
 def view_time(me):
     section("Time", "Where the time goes",
             "Proportion by high category, like your yearly summary.")
@@ -2232,9 +2270,6 @@ def view_milestones(me):
     member_name = {u["id"]: u["full_name"] for u in members}
     ms_title = {m["id"]: m["title"] for m in all_ms}
     my_ms_hours = db.my_milestone_hours()
-    # fetch all milestones' recent history in two queries (not two per
-    # milestone), keyed by id, to avoid the first-load N+1 slowdown
-    hist_by_ms = db.milestone_history_bulk([m["id"] for m in all_ms], limit=5)
 
     # ---- bar chart: MY milestones' completion % (filtered to me) ----
     mine = [m for m in all_ms if m.get("contributor_id") == me["id"]]
@@ -2266,19 +2301,64 @@ def view_milestones(me):
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
-    # ---- editable list, grouped by project (all milestones in my projects) --
+    # ---- compact overview, then render only the selected milestone editor ----
     by_proj = {}
     for m in all_ms:
         by_proj.setdefault((m["project_name"], m["project_id"]), []).append(m)
 
+    st.markdown("**Milestone overview**")
     for (pname, proj_id), mlist in sorted(by_proj.items()):
-        st.markdown(f"**{pname}**")
-        for m in sorted(mlist, key=lambda x: (x.get("due_on") is None,
-                                              x.get("due_on") or "")):
-            render_milestone_block(m, me, members, member_name, ms_title,
-                                   proj_id, my_ms_hours.get(m["id"]) or 0,
-                                   hist=hist_by_ms.get(m["id"], []))
-        st.markdown("<hr>", unsafe_allow_html=True)
+        total = len(mlist)
+        done = sum(1 for m in mlist if m.get("status") == "done")
+        next_due = next((m.get("due_on") for m in sorted(
+            mlist, key=lambda x: (x.get("due_on") is None,
+                                  x.get("due_on") or ""))
+                         if m.get("status") != "done" and m.get("due_on")), None)
+        bits = [f"{done}/{total} done"]
+        if next_due:
+            bits.append(f"next due {next_due}")
+        st.caption(f"**{pname}** · " + " · ".join(bits))
+
+    st.markdown("**Edit one milestone**")
+    project_labels = {pname: proj_id for (pname, proj_id) in sorted(by_proj.keys())}
+    if not project_labels:
+        st.caption("No milestone to edit.")
+        return
+    saved_proj_id = st.session_state.get("milestones_selected_project_id")
+    saved_proj_name = next((name for name, pid in project_labels.items()
+                            if pid == saved_proj_id), None)
+    project_names = list(project_labels.keys())
+    proj_index = project_names.index(saved_proj_name) if saved_proj_name in project_names else 0
+    pick_proj = st.selectbox("Project", project_names, index=proj_index,
+                             key="milestones_project_pick")
+    proj_id = project_labels[pick_proj]
+    st.session_state["milestones_selected_project_id"] = proj_id
+    mlist = sorted(by_proj[(pick_proj, proj_id)],
+                   key=lambda x: (x.get("due_on") is None, x.get("due_on") or ""))
+    mlabels = {}
+    for m in mlist:
+        suffix = f" · due {m['due_on']}" if m.get("due_on") else ""
+        status = " · done" if m.get("status") == "done" else ""
+        label = f"{m['title']}{suffix}{status}"
+        # ensure uniqueness if titles repeat
+        if label in mlabels:
+            label = f"{label} · {m['id'][:8]}"
+        mlabels[label] = m
+    saved_mid = st.session_state.get("milestones_selected_id")
+    saved_label = next((label for label, m in mlabels.items()
+                        if m["id"] == saved_mid), None)
+    mkeys = list(mlabels.keys())
+    midx = mkeys.index(saved_label) if saved_label in mkeys else 0
+    pick_m = st.selectbox("Milestone", mkeys, index=midx,
+                          key="milestones_milestone_pick")
+    selected = mlabels[pick_m]
+    st.session_state["milestones_selected_id"] = selected["id"]
+
+    with st.expander(f"Selected milestone — {selected['title']}", expanded=True):
+        render_milestone_block(selected, me, members, member_name, ms_title,
+                               proj_id, my_ms_hours.get(selected["id"]) or 0)
+
+    st.markdown("<hr>", unsafe_allow_html=True)
 
     # ---- milestone history (reconstructed from the audit log) ----
     st.markdown("**Milestone history**")
@@ -2357,6 +2437,7 @@ def view_milestones(me):
                 st.caption("Note: milestones tracked in hours show as 0 here, "
                            "since past hours aren't reconstructed; percent-"
                            "tracked and completed milestones are accurate.")
+
 
 
 def view_budget(me):
@@ -2529,48 +2610,70 @@ def view_planning(me):
     for m in mine:
         by_proj.setdefault(m["project_name"], []).append(m)
 
+    st.markdown("**Your assigned milestones**")
     for pname, mlist in sorted(by_proj.items()):
-        st.markdown(f"**{pname}**")
-        for m in sorted(mlist, key=lambda x: (x.get("due_on") is None,
-                                              x.get("due_on") or "")):
-            plan = plans.get(m["id"], {})
-            with st.expander(m["title"]
-                             + (f" · due {m['due_on']}" if m.get("due_on")
-                                else "")):
-                unit = st.radio(
-                    "Track progress as", ["percent", "hours"],
-                    index=0 if plan.get("track_unit") != "hours" else 1,
-                    horizontal=True, key=f"pl_unit_{m['id']}")
-                ph = st.number_input(
-                    "Estimated hours (private)", min_value=0.0, step=1.0,
-                    value=float(plan.get("planned_hours") or 0),
-                    key=f"pl_ph_{m['id']}",
-                    help="Only you see this. Used for your occupancy view.")
-                # progress: either a direct % or hours-derived %
-                if unit == "percent":
-                    pc = st.number_input(
-                        "Percent complete", min_value=0.0, max_value=100.0,
-                        step=5.0, value=float(plan.get("percent_complete")
-                                              or 0), key=f"pl_pct_{m['id']}")
-                    derived = pc
-                else:
-                    logged = db.my_milestone_hours().get(m["id"]) or 0
-                    derived = (min(round(100 * logged / ph), 100)
-                               if ph else 0)
-                    st.caption(f"From your logged {logged:g} h against "
-                               f"{ph:g} planned: {derived}% (this % is shared; "
-                               f"the hours are not).")
-                    pc = None
-                if st.button("Save", key=f"pl_save_{m['id']}",
-                             type="primary"):
-                    db.upsert_milestone_plan(
-                        m["id"], me["id"], ph or None, unit, pc)
-                    # publish only the % to the shared milestone row
-                    db.set_milestone_shared_percent(m["id"], derived)
-                    db.clear_user_caches()
-                    st.rerun()
-                st.caption(f"Shared completion now: "
-                           f"{m.get('shared_percent') or 0:g}%")
+        total = len(mlist)
+        planned = sum(1 for m in mlist if plans.get(m["id"], {}).get("planned_hours"))
+        st.caption(f"**{pname}** · {planned}/{total} with private hour estimates")
+
+    st.markdown("**Plan one milestone**")
+    project_names = sorted(by_proj.keys())
+    saved_project = st.session_state.get("planning_selected_project")
+    pidx = project_names.index(saved_project) if saved_project in project_names else 0
+    pname = st.selectbox("Project", project_names, index=pidx,
+                         key="planning_project_pick")
+    st.session_state["planning_selected_project"] = pname
+    mlist = sorted(by_proj[pname], key=lambda x: (x.get("due_on") is None,
+                                                  x.get("due_on") or ""))
+    mlabels = {}
+    for m in mlist:
+        label = m["title"] + (f" · due {m['due_on']}" if m.get("due_on") else "")
+        if label in mlabels:
+            label = f"{label} · {m['id'][:8]}"
+        mlabels[label] = m
+    saved_mid = st.session_state.get("planning_selected_milestone_id")
+    saved_label = next((label for label, m in mlabels.items()
+                        if m["id"] == saved_mid), None)
+    mkeys = list(mlabels.keys())
+    midx = mkeys.index(saved_label) if saved_label in mkeys else 0
+    pick = st.selectbox("Milestone", mkeys, index=midx,
+                        key="planning_milestone_pick")
+    m = mlabels[pick]
+    st.session_state["planning_selected_milestone_id"] = m["id"]
+    plan = plans.get(m["id"], {})
+
+    with st.expander(f"Selected milestone — {m['title']}", expanded=True):
+        unit = st.radio(
+            "Track progress as", ["percent", "hours"],
+            index=0 if plan.get("track_unit") != "hours" else 1,
+            horizontal=True, key=f"pl_unit_{m['id']}")
+        ph = st.number_input(
+            "Estimated hours (private)", min_value=0.0, step=1.0,
+            value=float(plan.get("planned_hours") or 0),
+            key=f"pl_ph_{m['id']}",
+            help="Only you see this. Used for your occupancy view.")
+        # progress: either a direct % or hours-derived %
+        if unit == "percent":
+            pc = st.number_input(
+                "Percent complete", min_value=0.0, max_value=100.0,
+                step=5.0, value=float(plan.get("percent_complete") or 0),
+                key=f"pl_pct_{m['id']}")
+            derived = pc
+        else:
+            logged = db.my_milestone_hours().get(m["id"]) or 0
+            derived = (min(round(100 * logged / ph), 100) if ph else 0)
+            st.caption(f"From your logged {logged:g} h against "
+                       f"{ph:g} planned: {derived}% (this % is shared; "
+                       f"the hours are not).")
+            pc = None
+        if st.button("Save", key=f"pl_save_{m['id']}", type="primary"):
+            db.upsert_milestone_plan(m["id"], me["id"], ph or None, unit, pc)
+            # publish only the % to the shared milestone row
+            db.set_milestone_shared_percent(m["id"], derived)
+            db.clear_user_caches()
+            st.rerun()
+        st.caption(f"Shared completion now: {m.get('shared_percent') or 0:g}%")
+
 
 
 def view_help(me):
@@ -2724,28 +2827,30 @@ def main():
             st.rerun()
 
     is_lead = me.get("role") == "lead"
-    tab_names = ["Log", "Week", "Projects", "Milestones", "Planning", "Time"]
+    view_funcs = {
+        "Log": view_log,
+        "Week": view_week,
+        "Projects": view_projects,
+        "Milestones": view_milestones,
+        "Planning": view_planning,
+        "Time": view_time,
+    }
     if is_lead:
-        tab_names.append("Budget")
-    tab_names.append("Help")
-    tabs = st.tabs(tab_names)
-    with tabs[0]:
-        view_log(me)
-    with tabs[1]:
-        view_week(me)
-    with tabs[2]:
-        view_projects(me)
-    with tabs[3]:
-        view_milestones(me)
-    with tabs[4]:
-        view_planning(me)
-    with tabs[5]:
-        view_time(me)
-    if is_lead:
-        with tabs[6]:
-            view_budget(me)
-    with tabs[-1]:
-        view_help(me)
+        view_funcs["Budget"] = view_budget
+    view_funcs["Help"] = view_help
+
+    # Use a normal radio selector instead of st.tabs. Streamlit tabs compute
+    # every tab body on every run; this renders only the selected section.
+    names = list(view_funcs.keys())
+    current = st.session_state.get("main_section", "Log")
+    if current not in names:
+        current = names[0]
+        st.session_state["main_section"] = current
+    index = names.index(current)
+    page = st.radio("Section", names, index=index, horizontal=True,
+                    key="main_section")
+    st.markdown("<hr>", unsafe_allow_html=True)
+    view_funcs[page](me)
 
 
 if __name__ == "__main__":
