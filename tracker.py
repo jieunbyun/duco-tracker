@@ -587,9 +587,12 @@ def view_week(me):
                 st.rerun()
 
     rows = db.sessions_in_range(week_start.isoformat(), week_end.isoformat())
-    # domain (work/life) per session, via the category map
-    cat_domain = {c["id"]: c.get("domain", "work")
-                  for c in db.categories()}
+    is_lead = me.get("role") == "lead"
+
+    # Domain (work/life) per session, via the category map. Life categories are
+    # private to the lead, so non-lead users only load work categories here.
+    domain_cats = db.categories() if is_lead else db.categories(domain="work")
+    cat_domain = {c["id"]: c.get("domain", "work") for c in domain_cats}
     for r in rows:
         r["domain"] = cat_domain.get(r.get("category_id"), "work")
     # group blocks by day
@@ -975,18 +978,30 @@ def view_week(me):
     # ---- summaries ----
     st.markdown("<hr>", unsafe_allow_html=True)
     work_rows = [r for r in rows if r.get("domain") != "life"]
-    life_rows = [r for r in rows if r.get("domain") == "life"]
+    life_rows = [r for r in rows if r.get("domain") == "life"] if is_lead else []
+
     work_total = sum((r.get("hours") or 0) for r in work_rows)
     life_total = sum((r.get("hours") or 0) for r in life_rows)
-    future_total = sum((r.get("hours") or 0) for r in rows
+
+    # Non-lead users never see life totals. Their planned/done numbers are
+    # computed from work rows only, so the summary contains no hidden life data.
+    summary_rows = rows if is_lead else work_rows
+    future_total = sum((r.get("hours") or 0) for r in summary_rows
                        if r.get("session_date") and
                        dt.date.fromisoformat(r["session_date"]) > today)
-    week_total = work_total + life_total
-    s1, s2, s3, s4 = st.columns(4)
-    s1.metric("Work", f"{work_total:g} h")
-    s2.metric("Life", f"{life_total:g} h")
-    s3.metric("Planned (ahead)", f"{future_total:g} h")
-    s4.metric("Done (so far)", f"{week_total - future_total:g} h")
+    summary_total = sum((r.get("hours") or 0) for r in summary_rows)
+
+    if is_lead:
+        s1, s2, s3, s4 = st.columns(4)
+        s1.metric("Work", f"{work_total:g} h")
+        s2.metric("Life", f"{life_total:g} h")
+        s3.metric("Planned (ahead)", f"{future_total:g} h")
+        s4.metric("Done (so far)", f"{summary_total - future_total:g} h")
+    else:
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Work", f"{work_total:g} h")
+        s2.metric("Planned (ahead)", f"{future_total:g} h")
+        s3.metric("Done (so far)", f"{summary_total - future_total:g} h")
 
     def rollup(source, key):
         agg = {}
@@ -995,8 +1010,9 @@ def view_week(me):
             agg[k] = agg.get(k, 0) + (r.get("hours") or 0)
         return agg
 
-    # category display order (matches the logging dropdown order)
-    all_cats = db.categories()
+    # Category display order (matches the logging dropdown order). Non-lead
+    # users should not load life categories just to draw the work chart.
+    all_cats = db.categories() if is_lead else db.categories(domain="work")
     cat_order = {c["label"]: c.get("sort_order", 999) for c in all_cats}
     # label -> code, so we can colour each bar by its shared category group
     cat_code_of = {c["label"]: c.get("code") for c in all_cats}
@@ -1046,9 +1062,9 @@ def view_week(me):
         st.plotly_chart(fig, use_container_width=True,
                         key=f"chart_{title}")
 
-    # ---- two charts: work (group-coloured), then life (grey) ----
+    # ---- charts: work for everyone, life only for the lead ----
     category_bar_chart(work_rows, "Work — hours by category", "#3A5A78")
-    if life_rows or me.get("role") == "lead":
+    if is_lead:
         category_bar_chart(life_rows, "Life — hours by category", "#9aa5b1")
 
     # by-project remains a short text list
