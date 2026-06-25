@@ -2077,9 +2077,16 @@ def view_time(me):
     # filter by domain (students only ever have work rows anyway)
     if view_domain != "both":
         rows = [r for r in rows if r.get("domain") == view_domain]
+
+    # Show the selected-period total before the category breakdown.
+    # This respects the Work/Life/Both filter above for the lead, and is
+    # work-only for non-lead users.
+    total_hours = sum((r.get("total_hours") or 0) for r in rows)
+    st.metric("Total hours", f"{total_hours:g} h")
+
     if rows:
         # recompute proportions within the filtered set so they sum to 100
-        total = sum((r.get("total_hours") or 0) for r in rows) or 1
+        total = total_hours or 1
         st.markdown("**Proportion of time by high category**")
         for r in sorted(rows, key=lambda x: -(x.get("total_hours") or 0)):
             label_cat = r["high_category"]
