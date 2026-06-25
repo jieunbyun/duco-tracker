@@ -266,6 +266,150 @@ def resolve_block_times(day, start, end):
     return start_dt.isoformat(), end_dt.isoformat(), None
 
 
+
+CV_DESTINATIONS = {
+    "Impact — Software, Tools, and Datasets":
+        ("Impact", "Software, Tools, and Datasets"),
+    "Impact — Community & Stakeholder Engagement and Outreach":
+        ("Impact", "Community & Stakeholder Engagement and Outreach"),
+    "Impact — Knowledge Transfer and Capacity Building":
+        ("Impact", "Knowledge Transfer and Capacity Building"),
+    "Impact — Commercialisation":
+        ("Impact", "Commercialisation"),
+    "Impact — Policy and Practice Influence":
+        ("Impact", "Policy and Practice Influence"),
+    "Teaching — Courses":
+        ("Teaching", "Courses"),
+    "Leadership — University Leadership Roles":
+        ("Leadership, Management & Engagement", "University Leadership Roles"),
+    "Leadership — Conference Session Organisation":
+        ("Leadership, Management & Engagement", "Conference Session Organisation"),
+    "Leadership — Development of Team, Staff & Students":
+        ("Leadership, Management & Engagement", "Development of Team, Staff & Students"),
+    "Esteem — Honours and Awards":
+        ("Esteem", "Honours and Awards"),
+    "Esteem — Invited Talks & Keynotes":
+        ("Esteem", "Invited Talks & Keynotes"),
+    "Esteem — Editorial and Reviewing Roles":
+        ("Esteem", "Editorial and Reviewing Roles"),
+    "Esteem — Professional Service":
+        ("Esteem", "Professional Service to Learned Societies & Public Bodies"),
+    "Esteem — Media coverage":
+        ("Esteem", "Media coverage"),
+    "Esteem — Hosting":
+        ("Esteem", "Hosting"),
+    "Grants":
+        ("Grants", None),
+    "Grants — Submitted":
+        ("Grants - Submitted", None),
+    "Supervision":
+        ("Supervision", None),
+    "Publications":
+        ("Publications", None),
+    "Training":
+        ("Training", None),
+    "Other":
+        ("Other", None),
+}
+CV_STATUS_OPTIONS = ["draft", "ready", "added_to_cv", "archived"]
+CV_SOURCE_OPTIONS = ["manual", "session", "milestone", "project"]
+
+
+def cv_destination_parts(label):
+    return CV_DESTINATIONS.get(label, ("Other", None))
+
+
+def cv_destination_label(section_name, subsection_name=None):
+    for label, (sec, sub) in CV_DESTINATIONS.items():
+        if sec == section_name and sub == subsection_name:
+            return label
+    for label, (sec, _sub) in CV_DESTINATIONS.items():
+        if sec == section_name:
+            return label
+    return "Other"
+
+
+def tex_escape(value):
+    """Minimal LaTeX escaping for copied CV snippets."""
+    if value is None:
+        return ""
+    s = str(value)
+    replacements = {
+        "\\": r"\textbackslash{}", "&": r"\&", "%": r"\%",
+        "$": r"\$", "#": r"\#", "_": r"\_", "{": r"\{",
+        "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}",
+    }
+    return "".join(replacements.get(ch, ch) for ch in s)
+
+
+def cv_entry_latex(entry):
+    title = tex_escape(entry.get("title"))
+    date_label = tex_escape(entry.get("entry_date") or str(entry.get("cv_year") or ""))
+    bullets = []
+    for key in ("description", "outcome", "metrics"):
+        val = (entry.get(key) or "").strip()
+        if val:
+            bullets.extend([line.strip(" -") for line in val.splitlines()
+                            if line.strip()])
+    if entry.get("evidence_url"):
+        bullets.append("Evidence: \\url{" + tex_escape(entry["evidence_url"]) + "}")
+    if len(bullets) <= 1:
+        body = tex_escape(bullets[0]) if bullets else ""
+        return f"\\begin{{jobshort}}{{{title}}}{{{date_label}}}\n{body}\n\\end{{jobshort}}"
+    lines = [f"\\begin{{joblong}}{{{title}}}{{{date_label}}}"]
+    lines.extend([f"\\item {tex_escape(b)}" for b in bullets])
+    lines.append("\\end{joblong}")
+    return "\n".join(lines)
+
+
+def cv_entries_latex(entries):
+    if not entries:
+        return ""
+    # Preserve the CV's section/subsection hierarchy in the export.
+    grouped = {}
+    for e in entries:
+        grouped.setdefault((e.get("cv_section") or "Other",
+                            e.get("cv_subsection") or ""), []).append(e)
+    chunks = []
+    current_section = None
+    for (sec, sub), rows in sorted(grouped.items()):
+        if sec != current_section:
+            chunks.append(f"\\section{{{tex_escape(sec)}}}")
+            current_section = sec
+        if sub:
+            chunks.append(f"\\subsection*{{{tex_escape(sub)}}}")
+        chunks.extend(cv_entry_latex(e) for e in rows)
+    return "\n\n".join(chunks)
+
+
+def save_cv_entry_from_values(user_id, entry_date, destination_label, title,
+                              organisation=None, location=None, role=None,
+                              description=None, outcome=None, metrics=None,
+                              evidence_url=None, status="draft",
+                              source_type="manual", session_id=None,
+                              milestone_id=None, project_id=None):
+    section_name, subsection_name = cv_destination_parts(destination_label)
+    return db.add_cv_entry(
+        user_id=user_id,
+        entry_date=entry_date.isoformat() if hasattr(entry_date, "isoformat") else entry_date,
+        cv_section=section_name,
+        cv_subsection=subsection_name,
+        title=title,
+        organisation=organisation,
+        location=location,
+        role=role,
+        description=description,
+        outcome=outcome,
+        metrics=metrics,
+        evidence_url=evidence_url,
+        status=status,
+        source_type=source_type,
+        session_id=session_id,
+        milestone_id=milestone_id,
+        project_id=project_id,
+    )
+
+
 def section(eyebrow: str, title: str, sub: str = ""):
     st.markdown(f'<span class="eyebrow">{eyebrow}</span>', unsafe_allow_html=True)
     st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
@@ -433,6 +577,10 @@ def view_log(me):
     # fields you TYPE into go in a form, so typing no longer re-runs the page
     # on every keystroke — the page only re-runs when you click Save.
     with col2:
+        log_cv_enabled = st.checkbox(
+            "Record this session as a CV achievement",
+            key="log_cv_enabled",
+            help="Optional. Saved as a private CV record linked to this session.")
         with st.form("log_entry_form"):
             day = st.date_input("Date", value=dt.date.today())
             mode = st.radio("Duration", ["Start & end time", "Just minutes"],
@@ -443,6 +591,29 @@ def view_log(me):
                 "Minutes (used if 'Just minutes' is chosen)", min_value=1,
                 max_value=960, value=30, step=5)
             desc = st.text_input("Note (optional)")
+            log_cv_dest = log_cv_title = log_cv_desc = log_cv_outcome = None
+            log_cv_metrics = log_cv_evidence = log_cv_status = None
+            if log_cv_enabled:
+                st.markdown("**CV achievement**")
+                log_cv_dest = st.selectbox(
+                    "CV destination", list(CV_DESTINATIONS.keys()),
+                    key="log_cv_dest")
+                log_cv_title = st.text_input(
+                    "Achievement title", key="log_cv_title",
+                    placeholder="e.g. Delivered stakeholder meeting with Network Rail")
+                log_cv_desc = st.text_area(
+                    "Description / draft bullet", key="log_cv_desc", height=80,
+                    placeholder="Short note you may later polish into a CV bullet.")
+                log_cv_outcome = st.text_input(
+                    "Outcome (optional)", key="log_cv_outcome",
+                    placeholder="e.g. agreed data access route, workshop delivered")
+                log_cv_metrics = st.text_input(
+                    "Metrics (optional)", key="log_cv_metrics",
+                    placeholder="e.g. audience c. 30, £10,000, 2-day tutorial")
+                log_cv_evidence = st.text_input(
+                    "Evidence URL (optional)", key="log_cv_evidence")
+                log_cv_status = st.selectbox(
+                    "Status", CV_STATUS_OPTIONS, index=0, key="log_cv_status")
             submitted = st.form_submit_button("Save session", type="primary")
         if mode == "Start & end time":
             minutes = None
@@ -496,12 +667,33 @@ def view_log(me):
                 return
 
         try:
-            db.log_session(
+            res = db.log_session(
                 user_id=me["id"], category_id=cat_labels[cat],
                 started_at=started, ended_at=ended, manual_minutes=minutes,
                 project_id=project_id, description=desc or None,
                 milestone_id=milestone_id)
-            st.success("Session saved.")
+            cv_saved = False
+            if log_cv_enabled:
+                session_id = (res.data or [{}])[0].get("id") if res else None
+                title_source = (log_cv_title or "").strip() or (desc or "").strip()
+                if not title_source:
+                    title_source = (new_ms_name.strip() if milestone_id else "") or                         (new_proj_name.strip() if proj == "+ New project…" else proj)
+                title_source = title_source if title_source and title_source != "— none —" else cat
+                save_cv_entry_from_values(
+                    user_id=me["id"], entry_date=day,
+                    destination_label=log_cv_dest or "Other",
+                    title=title_source,
+                    description=log_cv_desc,
+                    outcome=log_cv_outcome,
+                    metrics=log_cv_metrics,
+                    evidence_url=log_cv_evidence,
+                    status=log_cv_status or "draft",
+                    source_type="session" if session_id else "manual",
+                    session_id=session_id,
+                    milestone_id=milestone_id,
+                    project_id=project_id)
+                cv_saved = True
+            st.success("Session saved" + (" and CV achievement recorded." if cv_saved else "."))
             db.clear_user_caches()
         except Exception as e:
             st.error(f"Could not save. {e}")
@@ -807,6 +999,10 @@ def view_week(me):
 
     # ---- add a time block ----
     st.markdown("**Add a time block**")
+    wk_cv_enabled = st.checkbox(
+        "Record this block as a CV achievement",
+        key="wk_cv_enabled",
+        help="Optional. Saved as a private CV record linked to the time block.")
     is_lead = me.get("role") == "lead"
     # one category list: work first, then life (life only shown to the lead).
     # The chosen category determines the domain — no separate toggle.
@@ -889,6 +1085,25 @@ def view_week(me):
         # it doesn't re-run the page each keystroke.
         with st.form("wk_addblock_form", clear_on_submit=True):
             b_note = st.text_input("What will you work on?", key="wk_note")
+            wk_cv_dest = wk_cv_title = wk_cv_desc = wk_cv_outcome = None
+            wk_cv_metrics = wk_cv_evidence = wk_cv_status = None
+            if wk_cv_enabled:
+                st.markdown("**CV achievement**")
+                wk_cv_dest = st.selectbox(
+                    "CV destination", list(CV_DESTINATIONS.keys()),
+                    key="wk_cv_dest")
+                wk_cv_title = st.text_input(
+                    "Achievement title", key="wk_cv_title")
+                wk_cv_desc = st.text_area(
+                    "Description / draft bullet", key="wk_cv_desc", height=80)
+                wk_cv_outcome = st.text_input(
+                    "Outcome (optional)", key="wk_cv_outcome")
+                wk_cv_metrics = st.text_input(
+                    "Metrics (optional)", key="wk_cv_metrics")
+                wk_cv_evidence = st.text_input(
+                    "Evidence URL (optional)", key="wk_cv_evidence")
+                wk_cv_status = st.selectbox(
+                    "Status", CV_STATUS_OPTIONS, index=0, key="wk_cv_status")
             addblock_submit = st.form_submit_button("Add block",
                                                     type="primary")
     if addblock_submit:
@@ -935,13 +1150,32 @@ def view_week(me):
                             ok = False
             if ok:
                 try:
-                    db.log_session(user_id=me["id"],
+                    res = db.log_session(user_id=me["id"],
                                    category_id=cat_labels[b_cat],
                                    started_at=started, ended_at=ended,
                                    project_id=project_id,
                                    description=b_note or None,
                                    milestone_id=ms_id)
-                    st.success("Block added.")
+                    if wk_cv_enabled:
+                        session_id = (res.data or [{}])[0].get("id") if res else None
+                        title_source = (wk_cv_title or "").strip() or (b_note or "").strip()
+                        if not title_source:
+                            title_source = (wk_new_ms.strip() if ms_id else "") or                                 (wk_new_name.strip() if b_proj == "+ New project…" else b_proj)
+                        title_source = title_source if title_source and title_source != "— none —" else b_cat
+                        save_cv_entry_from_values(
+                            user_id=me["id"], entry_date=b_day,
+                            destination_label=wk_cv_dest or "Other",
+                            title=title_source,
+                            description=wk_cv_desc,
+                            outcome=wk_cv_outcome,
+                            metrics=wk_cv_metrics,
+                            evidence_url=wk_cv_evidence,
+                            status=wk_cv_status or "draft",
+                            source_type="session" if session_id else "manual",
+                            session_id=session_id,
+                            milestone_id=ms_id,
+                            project_id=project_id)
+                    st.success("Block added" + (" and CV achievement recorded." if wk_cv_enabled else "."))
                     db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
@@ -1912,20 +2146,45 @@ def render_project_details_and_milestones(r, me, is_lead):
     else:
         st.caption("No milestones yet.")
 
+    add_ms_cv = st.checkbox("Also add a private CV achievement",
+                            key=f"addms_cv_{pid}")
     with st.form(f"add_ms_{pid}", clear_on_submit=True):
         mt = st.text_input("New milestone", key=f"mt_{pid}")
         md = st.date_input("Due (optional)", value=None, key=f"md_{pid}")
         mh = st.text_input("Hypothesis / expected outcome (optional)",
                            key=f"mh_{pid}")
         msm = st.text_input("Success measure (optional)", key=f"msm_{pid}")
+        add_ms_cv_dest = add_ms_cv_desc = add_ms_cv_status = None
+        if add_ms_cv:
+            add_ms_cv_dest = st.selectbox(
+                "CV destination", list(CV_DESTINATIONS.keys()),
+                key=f"addms_cv_dest_{pid}")
+            add_ms_cv_desc = st.text_area(
+                "CV description / draft bullet", height=70,
+                key=f"addms_cv_desc_{pid}")
+            add_ms_cv_status = st.selectbox(
+                "CV status", CV_STATUS_OPTIONS, index=0,
+                key=f"addms_cv_status_{pid}")
         if st.form_submit_button("Add milestone"):
             if mt.strip():
                 try:
-                    db.add_milestone(
+                    res = db.add_milestone(
                         pid, mt.strip(),
                         due_on=md.isoformat() if md else None,
                         hypothesis=mh.strip() or None,
                         success_measure=msm.strip() or None)
+                    if add_ms_cv:
+                        milestone_id = (res.data or [{}])[0].get("id") if res else None
+                        save_cv_entry_from_values(
+                            user_id=me["id"],
+                            entry_date=md or dt.date.today(),
+                            destination_label=add_ms_cv_dest or "Other",
+                            title=mt.strip(),
+                            description=add_ms_cv_desc or msm or mh,
+                            status=add_ms_cv_status or "draft",
+                            source_type="milestone" if milestone_id else "project",
+                            milestone_id=milestone_id,
+                            project_id=pid)
                     db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
@@ -2192,6 +2451,50 @@ def render_milestone_block(m, me, members, member_name, ms_title_map,
                     st.rerun()
                 else:
                     st.error("Write a note first.")
+        with st.popover("CV", use_container_width=False,
+                        help="Add this milestone to your private CV record."):
+            default_date = dt.date.fromisoformat(m["due_on"]) if m.get("due_on") else dt.date.today()
+            with st.form(f"msv_cv_form_{m['id']}", clear_on_submit=True):
+                cv_date = st.date_input("Date", value=default_date,
+                                        key=f"msv_cv_date_{m['id']}")
+                cv_dest = st.selectbox(
+                    "CV destination", list(CV_DESTINATIONS.keys()),
+                    key=f"msv_cv_dest_{m['id']}")
+                cv_title = st.text_input(
+                    "Achievement title", value=m.get("title") or "",
+                    key=f"msv_cv_title_{m['id']}")
+                cv_desc = st.text_area(
+                    "Description / draft bullet", height=80,
+                    value=m.get("success_measure") or m.get("hypothesis") or "",
+                    key=f"msv_cv_desc_{m['id']}")
+                cv_outcome = st.text_input("Outcome (optional)",
+                                           key=f"msv_cv_outcome_{m['id']}")
+                cv_metrics = st.text_input("Metrics (optional)",
+                                           key=f"msv_cv_metrics_{m['id']}")
+                cv_evidence = st.text_input("Evidence URL (optional)",
+                                            key=f"msv_cv_evidence_{m['id']}")
+                cv_status = st.selectbox("Status", CV_STATUS_OPTIONS,
+                                         index=0, key=f"msv_cv_status_{m['id']}")
+                save_msv_cv = st.form_submit_button("Save CV entry",
+                                                    type="primary")
+            if save_msv_cv:
+                if cv_title.strip():
+                    save_cv_entry_from_values(
+                        user_id=me["id"], entry_date=cv_date,
+                        destination_label=cv_dest,
+                        title=cv_title.strip(),
+                        description=cv_desc,
+                        outcome=cv_outcome,
+                        metrics=cv_metrics,
+                        evidence_url=cv_evidence,
+                        status=cv_status,
+                        source_type="milestone",
+                        milestone_id=m["id"],
+                        project_id=project_id)
+                    db.clear_user_caches()
+                    st.success("CV entry saved.")
+                else:
+                    st.error("Give the CV entry a title.")
     with c2:
         st.caption(m["status"])
     with c3:
@@ -2478,6 +2781,193 @@ def view_milestones(me):
                            "since past hours aren't reconstructed; percent-"
                            "tracked and completed milestones are accurate.")
 
+
+
+
+def view_cv(me):
+    section("CV", "CV records",
+            "Private achievement records you can later polish into CV entries.")
+
+    with st.expander("Add standalone CV entry", expanded=False):
+        with st.form("cv_manual_form", clear_on_submit=True):
+            c1, c2 = st.columns(2)
+            with c1:
+                entry_date = st.date_input("Date", value=dt.date.today(),
+                                           key="cv_manual_date")
+                dest = st.selectbox("CV destination",
+                                    list(CV_DESTINATIONS.keys()),
+                                    key="cv_manual_dest")
+                title = st.text_input("Title", key="cv_manual_title",
+                                      placeholder="e.g. Editorial Board Member, Structural Safety")
+                organisation = st.text_input("Organisation / funder / host",
+                                             key="cv_manual_org")
+                location = st.text_input("Location (optional)",
+                                         key="cv_manual_loc")
+            with c2:
+                role = st.text_input("Role (optional)", key="cv_manual_role")
+                status = st.selectbox("Status", CV_STATUS_OPTIONS, index=0,
+                                      key="cv_manual_status")
+                evidence = st.text_input("Evidence URL (optional)",
+                                         key="cv_manual_evidence")
+                metrics = st.text_input("Metrics (optional)",
+                                        key="cv_manual_metrics",
+                                        placeholder="e.g. c. 100 attendees, £10,000")
+            description = st.text_area("Description / draft bullet(s)",
+                                       key="cv_manual_desc", height=90)
+            outcome = st.text_area("Outcome / significance (optional)",
+                                   key="cv_manual_outcome", height=70)
+            submitted = st.form_submit_button("Save CV entry", type="primary")
+        if submitted:
+            if title.strip():
+                try:
+                    save_cv_entry_from_values(
+                        user_id=me["id"], entry_date=entry_date,
+                        destination_label=dest, title=title.strip(),
+                        organisation=organisation, location=location, role=role,
+                        description=description, outcome=outcome,
+                        metrics=metrics, evidence_url=evidence,
+                        status=status, source_type="manual")
+                    db.clear_user_caches()
+                    st.success("CV entry saved.")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not save CV entry. {e}")
+            else:
+                st.error("Give the CV entry a title.")
+
+    summary = db.cv_entry_summary()
+    if not summary:
+        st.caption("No CV records yet. Add one above or tick the CV option when logging sessions/milestones.")
+        return
+
+    # ---- compact summary by year and destination ----
+    st.markdown("**Summary by year**")
+    by_year = {}
+    for r in summary:
+        year = r.get("cv_year") or "—"
+        sec = r.get("cv_section") or "Other"
+        by_year.setdefault(year, {})[sec] = by_year.setdefault(year, {}).get(sec, 0) + 1
+    years_sorted = sorted(by_year.keys(), reverse=True)
+    metric_cols = st.columns(min(4, max(1, len(years_sorted))))
+    for idx, year in enumerate(years_sorted[:4]):
+        total = sum(by_year[year].values())
+        metric_cols[idx % len(metric_cols)].metric(str(year), f"{total} entries")
+    for year in years_sorted:
+        with st.expander(f"{year} — {sum(by_year[year].values())} entries"):
+            for sec, count in sorted(by_year[year].items()):
+                st.caption(f"{sec}: {count}")
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown("**Review and export**")
+    years = ["All"] + [str(y) for y in years_sorted]
+    sections = ["All"] + sorted({r.get("cv_section") or "Other" for r in summary})
+    statuses = ["All"] + CV_STATUS_OPTIONS
+    f1, f2, f3 = st.columns(3)
+    with f1:
+        year_pick = st.selectbox("Year", years, key="cv_filter_year")
+    with f2:
+        section_pick = st.selectbox("Section", sections, key="cv_filter_section")
+    with f3:
+        status_pick = st.selectbox("Status", statuses, key="cv_filter_status")
+    entries = db.cv_entries(
+        year=None if year_pick == "All" else int(year_pick),
+        status=None if status_pick == "All" else status_pick,
+        section=None if section_pick == "All" else section_pick)
+
+    if not entries:
+        st.caption("No entries match these filters.")
+        return
+
+    for e in entries:
+        with st.expander(f"{e.get('entry_date')} · {e.get('title')} · {e.get('status')}"):
+            st.caption(
+                f"{e.get('cv_section') or 'Other'}"
+                + (f" → {e.get('cv_subsection')}" if e.get('cv_subsection') else "")
+                + f" · source: {e.get('source_type') or 'manual'}")
+            if e.get("organisation") or e.get("role") or e.get("location"):
+                st.write(" · ".join(v for v in [e.get("role"), e.get("organisation"), e.get("location")] if v))
+            for label, key in [("Description", "description"),
+                               ("Outcome", "outcome"),
+                               ("Metrics", "metrics"),
+                               ("Evidence", "evidence_url")]:
+                if e.get(key):
+                    st.markdown(f"**{label}:** {e.get(key)}")
+
+            with st.form(f"cv_edit_{e['id']}"):
+                ec1, ec2 = st.columns(2)
+                with ec1:
+                    edit_date = st.date_input(
+                        "Date", value=dt.date.fromisoformat(e["entry_date"]),
+                        key=f"cv_date_{e['id']}")
+                    edit_dest_label = cv_destination_label(
+                        e.get("cv_section"), e.get("cv_subsection"))
+                    dest_keys = list(CV_DESTINATIONS.keys())
+                    edit_dest = st.selectbox(
+                        "CV destination", dest_keys,
+                        index=dest_keys.index(edit_dest_label)
+                        if edit_dest_label in dest_keys else 0,
+                        key=f"cv_dest_{e['id']}")
+                    edit_title = st.text_input("Title", value=e.get("title") or "",
+                                               key=f"cv_title_{e['id']}")
+                    edit_status = st.selectbox(
+                        "Status", CV_STATUS_OPTIONS,
+                        index=CV_STATUS_OPTIONS.index(e.get("status"))
+                        if e.get("status") in CV_STATUS_OPTIONS else 0,
+                        key=f"cv_status_{e['id']}")
+                with ec2:
+                    edit_org = st.text_input(
+                        "Organisation / funder / host",
+                        value=e.get("organisation") or "",
+                        key=f"cv_org_{e['id']}")
+                    edit_role = st.text_input("Role", value=e.get("role") or "",
+                                              key=f"cv_role_{e['id']}")
+                    edit_loc = st.text_input("Location", value=e.get("location") or "",
+                                             key=f"cv_loc_{e['id']}")
+                    edit_evidence = st.text_input(
+                        "Evidence URL", value=e.get("evidence_url") or "",
+                        key=f"cv_evidence_{e['id']}")
+                edit_desc = st.text_area(
+                    "Description / draft bullet(s)", value=e.get("description") or "",
+                    height=90, key=f"cv_desc_{e['id']}")
+                edit_outcome = st.text_area(
+                    "Outcome / significance", value=e.get("outcome") or "",
+                    height=70, key=f"cv_outcome_{e['id']}")
+                edit_metrics = st.text_input(
+                    "Metrics", value=e.get("metrics") or "",
+                    key=f"cv_metrics_{e['id']}")
+                save_edit = st.form_submit_button("Save changes", type="primary")
+                if save_edit:
+                    if edit_title.strip():
+                        sec, sub = cv_destination_parts(edit_dest)
+                        db.update_cv_entry(e["id"], {
+                            "entry_date": edit_date.isoformat(),
+                            "cv_section": sec,
+                            "cv_subsection": sub,
+                            "title": edit_title.strip(),
+                            "organisation": edit_org,
+                            "location": edit_loc,
+                            "role": edit_role,
+                            "description": edit_desc,
+                            "outcome": edit_outcome,
+                            "metrics": edit_metrics,
+                            "evidence_url": edit_evidence,
+                            "status": edit_status,
+                        })
+                        db.clear_user_caches()
+                        st.success("Updated.")
+                        st.rerun()
+                    else:
+                        st.error("Title can't be empty.")
+            if st.button("Delete entry", key=f"cv_delete_{e['id']}"):
+                db.delete_cv_entry(e["id"])
+                db.clear_user_caches()
+                st.rerun()
+
+    st.markdown("<hr>", unsafe_allow_html=True)
+    st.markdown("**LaTeX preview**")
+    latex = cv_entries_latex(entries)
+    st.text_area("Copy into your CV source", value=latex, height=300,
+                 key="cv_latex_export")
 
 
 def view_budget(me):
@@ -2874,6 +3364,7 @@ def main():
         "Milestones": view_milestones,
         "Planning": view_planning,
         "Time": view_time,
+        "CV": view_cv,
     }
     if is_lead:
         view_funcs["Budget"] = view_budget
