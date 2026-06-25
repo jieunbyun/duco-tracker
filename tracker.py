@@ -308,6 +308,10 @@ CV_DESTINATIONS = {
         ("Publications", None),
     "Training":
         ("Training", None),
+    "Admin — University": 
+        ("Admin", "University"),
+    "Admin — External": 
+        ("Admin", "External"),
     "Other":
         ("Other", None),
 }
