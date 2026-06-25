@@ -500,6 +500,41 @@ def project_milestones(project_id):
     return _project_milestones(project_id, _uid())
 
 
+@st.cache_data(ttl=30)
+def _project_milestones_bulk(project_ids_key, _u):
+    """Milestones for many projects in one query, grouped by project_id.
+
+    Used by the Gantt chart so the Projects tab does not issue one
+    project_milestones() query per project. The _u argument keeps the cache
+    scoped to the signed-in user.
+    """
+    project_ids = list(project_ids_key)
+    if not project_ids:
+        return {}
+    rows = (client().table("project_milestone")
+            .select("id,project_id,title,detail,due_on,start_on,status,sort_order,"
+                    "hypothesis,success_measure,"
+                    "precondition_id,contributor_id,"
+                    "shared_percent,category_id,kind,"
+                    "work_days")
+            .in_("project_id", project_ids)
+            .order("sort_order")
+            .execute().data or [])
+    grouped = {pid: [] for pid in project_ids}
+    for r in rows:
+        grouped.setdefault(r.get("project_id"), []).append(r)
+    for pid in grouped:
+        grouped[pid].sort(key=lambda m: (m.get("due_on") is None,
+                                         m.get("due_on") or "",
+                                         m.get("sort_order") or 0))
+    return grouped
+
+
+def project_milestones_bulk(project_ids):
+    ids = tuple(sorted({pid for pid in project_ids if pid}))
+    return _project_milestones_bulk(ids, _uid())
+
+
 def my_milestone_plans():
     """The caller's private milestone plans, keyed by milestone_id. RLS means
     this only ever returns the caller's own rows."""
@@ -941,6 +976,74 @@ def milestone_progress_bars(project_id):
         else:
             out.append({"title": m["title"], "pct": 0, "fallback": True})
     return out
+
+
+@st.cache_data(ttl=30)
+def _milestone_progress_bulk(project_ids_key, _u):
+    """Milestone-completion stats for many projects in one query."""
+    project_ids = list(project_ids_key)
+    if not project_ids:
+        return {}
+    rows = (client().table("project_milestone")
+            .select("project_id,status")
+            .in_("project_id", project_ids)
+            .execute().data or [])
+    out = {pid: {"done": 0, "total": 0, "pct": None}
+           for pid in project_ids}
+    for m in rows:
+        pid = m.get("project_id")
+        if pid not in out:
+            out[pid] = {"done": 0, "total": 0, "pct": None}
+        out[pid]["total"] += 1
+        if m.get("status") == "done":
+            out[pid]["done"] += 1
+    for pid, v in out.items():
+        v["pct"] = round(100 * v["done"] / v["total"]) if v["total"] else None
+    return out
+
+
+def milestone_progress_bulk(project_ids):
+    ids = tuple(sorted({pid for pid in project_ids if pid}))
+    return _milestone_progress_bulk(ids, _uid())
+
+
+@st.cache_data(ttl=30)
+def _milestone_progress_bars_bulk(project_ids_key, _u):
+    """Per-milestone progress bars for many projects in one query."""
+    project_ids = list(project_ids_key)
+    if not project_ids:
+        return {}
+    rows = (client().table("project_milestone")
+            .select("project_id,title,status,shared_percent,due_on,sort_order")
+            .in_("project_id", project_ids)
+            .execute().data or [])
+    grouped = {pid: [] for pid in project_ids}
+    for m in rows:
+        grouped.setdefault(m.get("project_id"), []).append(m)
+    out = {}
+    for pid, ms in grouped.items():
+        ms.sort(key=lambda m: (m.get("due_on") is None,
+                               m.get("due_on") or "",
+                               m.get("sort_order") or 0))
+        bars = []
+        for m in ms:
+            if m.get("status") == "done":
+                bars.append({"title": m["title"], "pct": 100,
+                             "fallback": False})
+            elif m.get("shared_percent") is not None:
+                bars.append({"title": m["title"],
+                             "pct": int(round(m["shared_percent"])),
+                             "fallback": False})
+            else:
+                bars.append({"title": m["title"], "pct": 0,
+                             "fallback": True})
+        out[pid] = bars
+    return out
+
+
+def milestone_progress_bars_bulk(project_ids):
+    ids = tuple(sorted({pid for pid in project_ids if pid}))
+    return _milestone_progress_bars_bulk(ids, _uid())
 
 
 # ---- budget (lead-only via RLS) -------------------------------------------
