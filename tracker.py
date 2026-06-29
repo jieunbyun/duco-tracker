@@ -1485,13 +1485,18 @@ def render_gantt(me):
     # ---- my daily time occupancy (from milestone planned hours) ----
     st.markdown("<hr>", unsafe_allow_html=True)
     st.markdown("**Your daily occupancy**")
-    st.caption("Your milestones' planned hours, spread across the days you "
-               "chose for each, shown as a 3-month window from a start date "
-               "you pick. A milestone that depends on another starts the day "
-               "after that one is due.")
-    # gather all my milestones across my projects
-    parts = db.projects_i_participate_in()
-    all_my_ms = db.milestones_for_projects([p["id"] for p in parts])
+    st.caption("Your active milestones' planned hours, spread across the "
+               "days you chose for each, shown as a 3-month window from a "
+               "start date you pick. Paused, completed, or abandoned projects "
+               "and completed milestones are excluded. A milestone that "
+               "depends on another starts the day after that one is due.")
+    # gather only my milestones from active projects. The Gantt already uses
+    # db.active_projects_for_gantt(), which filters project.status by the
+    # canonical "active" status code. Reuse that filtered project list here so
+    # paused, completed, or abandoned projects do not contribute to occupancy.
+    occ_projects = [p for p in projects
+                    if p.get("i_lead") or p.get("i_participate")]
+    all_my_ms = db.milestones_for_projects([p["id"] for p in occ_projects])
     # planned hours are private now; pull the caller's own plans and attach
     my_plans = db.my_milestone_plans()
     for _m in all_my_ms:
@@ -1622,6 +1627,11 @@ def compute_daily_occupancy(milestones, me_id):
     today = dt.date.today()
     for m in milestones:
         if m.get("contributor_id") != me_id:
+            continue
+        # Occupancy is forward-looking capacity planning, so completed/done
+        # milestones should not keep consuming planned hours. Project-level
+        # inactive statuses are filtered before this function is called.
+        if str(m.get("status") or "").lower() in {"done", "completed"}:
             continue
         planned = m.get("planned_hours")
         if not planned or not m.get("due_on"):
