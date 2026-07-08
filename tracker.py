@@ -17,6 +17,7 @@ import datetime as dt
 import streamlit as st
 import plotly.graph_objects as go
 import db
+from streamlit_local_storage import LocalStorage
 
 st.set_page_config(page_title="Group Tracker", page_icon="◳", layout="wide")
 
@@ -452,16 +453,21 @@ def period_range(choice, today=None):
 def auth_gate():
     section("Sign in", "Group Tracker",
             "Time and project tracking for the research group.")
+    localS = LocalStorage()
+    saved_email = localS.getItem("tracker_email")
+
     tab_in, tab_up = st.tabs(["Sign in", "Create account"])
     with tab_in:
-        email = st.text_input("Email", key="in_email")
+        email = st.text_input("Email", value=saved_email or "", key="in_email")
         pw = st.text_input("Password", type="password", key="in_pw")
         if st.button("Sign in", type="primary"):
             try:
                 db.sign_in(email, pw)
+                localS.setItem("tracker_email", email)  # remember for next time
                 st.rerun()
             except Exception as e:
                 st.error(f"Could not sign in. {e}")
+                
     with tab_up:
         email2 = st.text_input("Email", key="up_email")
         pw2 = st.text_input("Password", type="password", key="up_pw",
