@@ -208,25 +208,34 @@ def high_importance_hours(date_from, date_to):
 # ---- to-do items ----------------------------------------------------------
 def todos_in_range(date_from, date_to, include_open_before=True):
     """The caller's todos with due_on in [date_from, date_to], ordered by
-    sort_order. If include_open_before, also include still-open todos due
-    before date_from (carried over)."""
-    rows = (client().table("todo")
-            .select("id,title,note,due_on,is_done,project_id,est_hours,"
-                    "sort_order")
+    sort_order. If include_open_before, also include todos due before
+    date_from that are either still open (carried over) or were completed
+    within [date_from, date_to] (so this week's "done" hours capture carried
+    tasks finished this week)."""
+    cols = ("id,title,note,due_on,is_done,project_id,est_hours,"
+            "sort_order,done_at")
+    rows = (client().table("todo").select(cols)
             .gte("due_on", date_from).lte("due_on", date_to)
             .order("sort_order").order("due_on").execute().data or [])
     if include_open_before:
-        carried = (client().table("todo")
-                   .select("id,title,note,due_on,is_done,project_id,est_hours,"
-                           "sort_order")
+        carried = (client().table("todo").select(cols)
                    .lt("due_on", date_from).eq("is_done", False)
                    .order("sort_order").order("due_on").execute().data or [])
-        # Merge carried + in-range into one list sorted by a single global
-        # sort_order so items can be reordered freely across the boundary
-        # (carried items are no longer pinned above the current week). New
-        # todos with a null sort_order fall to the bottom, then by due_on.
+        # carried tasks completed within this range: their done_at is a
+        # timestamp, so bound it by [date_from, day after date_to).
+        done_upper = (dt.date.fromisoformat(date_to)
+                      + dt.timedelta(days=1)).isoformat()
+        carried_done = (client().table("todo").select(cols)
+                        .lt("due_on", date_from).eq("is_done", True)
+                        .gte("done_at", date_from).lt("done_at", done_upper)
+                        .order("sort_order").order("due_on").execute().data
+                        or [])
+        # Merge everything into one list sorted by a single global sort_order
+        # so items can be reordered freely across the boundary (carried items
+        # are no longer pinned above the current week). New todos with a null
+        # sort_order fall to the bottom, then by due_on.
         rows = sorted(
-            carried + rows,
+            carried + carried_done + rows,
             key=lambda t: (t.get("sort_order") if t.get("sort_order")
                            is not None else 10**9, t.get("due_on") or ""))
     return rows
