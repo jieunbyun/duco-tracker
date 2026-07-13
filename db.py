@@ -221,7 +221,14 @@ def todos_in_range(date_from, date_to, include_open_before=True):
                            "sort_order")
                    .lt("due_on", date_from).eq("is_done", False)
                    .order("sort_order").order("due_on").execute().data or [])
-        rows = carried + rows
+        # Merge carried + in-range into one list sorted by a single global
+        # sort_order so items can be reordered freely across the boundary
+        # (carried items are no longer pinned above the current week). New
+        # todos with a null sort_order fall to the bottom, then by due_on.
+        rows = sorted(
+            carried + rows,
+            key=lambda t: (t.get("sort_order") if t.get("sort_order")
+                           is not None else 10**9, t.get("due_on") or ""))
     return rows
 
 
