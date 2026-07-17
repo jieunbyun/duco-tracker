@@ -213,7 +213,7 @@ def todos_in_range(date_from, date_to, include_open_before=True):
     within [date_from, date_to] (so this week's "done" hours capture carried
     tasks finished this week)."""
     cols = ("id,title,note,due_on,is_done,project_id,est_hours,"
-            "sort_order,done_at")
+            "sort_order,done_at,is_important")
     rows = (client().table("todo").select(cols)
             .gte("due_on", date_from).lte("due_on", date_to)
             .order("sort_order").order("due_on").execute().data or [])
@@ -251,8 +251,9 @@ def update_todo(todo_id, fields: dict):
 
 
 def add_todo(user_id, title, due_on, project_id=None, est_hours=None,
-             note=None):
-    payload = {"user_id": user_id, "title": title, "due_on": due_on}
+             note=None, important=False):
+    payload = {"user_id": user_id, "title": title, "due_on": due_on,
+               "is_important": bool(important)}
     if project_id:
         payload["project_id"] = project_id
     if est_hours:
@@ -267,6 +268,11 @@ def set_todo_done(todo_id, done):
     fields = {"is_done": bool(done),
               "done_at": _dt.datetime.now().isoformat() if done else None}
     return client().table("todo").update(fields).eq("id", todo_id).execute()
+
+
+def set_todo_important(todo_id, important):
+    return client().table("todo").update({"is_important": bool(important)}) \
+        .eq("id", todo_id).execute()
 
 
 def delete_todo(todo_id):

@@ -871,12 +871,14 @@ def view_week(me):
                 t["sort_order"] = i
         n = len(todos)
         for i, t in enumerate(todos):
-            tc1, tc2, tc3, tc4 = st.columns([4.5, 2, 1.4, 1.3])
+            tc1, tc2, tc3, tc4 = st.columns([4.2, 1.9, 1.4, 1.8])
             overdue = (not t["is_done"]
                        and dt.date.fromisoformat(t["due_on"]) < week_start)
+            important = bool(t.get("is_important"))
             with tc1:
+                label = ("⭐ " + t["title"]) if important else t["title"]
                 checked = st.checkbox(
-                    t["title"], value=t["is_done"], key=f"todo_{t['id']}")
+                    label, value=t["is_done"], key=f"todo_{t['id']}")
                 if checked != t["is_done"]:
                     db.set_todo_done(t["id"], checked)
                     db.clear_user_caches()
@@ -920,7 +922,14 @@ def view_week(me):
                     db.clear_user_caches()
                     st.rerun()
             with tc4:
-                ed, dl = st.columns(2)
+                sr, ed, dl = st.columns(3)
+                with sr:
+                    star = "★" if important else "☆"
+                    if st.button(star, key=f"tdimp_{t['id']}",
+                                 help="Toggle high importance"):
+                        db.set_todo_important(t["id"], not important)
+                        db.clear_user_caches()
+                        st.rerun()
                 with ed:
                     edit_pop = st.popover("✎", help="Edit")
                 with dl:
@@ -948,6 +957,9 @@ def view_week(me):
                         e_idx = e_keys.index(cur_pn) if cur_pn in e_keys else 0
                         e_proj = st.selectbox("Project", e_keys, index=e_idx,
                                               key=f"tded_proj_{t['id']}")
+                        e_imp = st.checkbox("⭐ High importance",
+                                            value=important,
+                                            key=f"tded_imp_{t['id']}")
                         tded_submit = st.form_submit_button(
                             "Save", type="primary")
                         if tded_submit and e_title.strip():
@@ -955,7 +967,8 @@ def view_week(me):
                                 "title": e_title.strip(),
                                 "note": e_note.strip() or None,
                                 "est_hours": e_hours or None,
-                                "project_id": e_projs[e_proj]})
+                                "project_id": e_projs[e_proj],
+                                "is_important": e_imp})
                             db.clear_user_caches()
                             st.rerun()
                         elif tded_submit:
@@ -968,6 +981,15 @@ def view_week(me):
         if est_all:
             st.caption(f"Estimated effort: {est_open:g} h remaining "
                        f"of {est_all:g} h planned ({est_done:g} h done)")
+        # high-importance subset, shown alongside the overall totals
+        if any(t.get("is_important") for t in todos):
+            est_imp = sum((t.get("est_hours") or 0) for t in todos
+                          if t.get("is_important"))
+            est_imp_open = sum((t.get("est_hours") or 0) for t in todos
+                               if t.get("is_important") and not t["is_done"])
+            est_imp_done = est_imp - est_imp_open
+            st.caption(f"⭐ High importance: {est_imp_open:g} h remaining "
+                       f"of {est_imp:g} h planned ({est_imp_done:g} h done)")
     else:
         st.caption("No to-dos for this week yet.")
 
@@ -989,6 +1011,7 @@ def view_week(me):
                                    key="td_proj", label_visibility="collapsed")
         td_note = st.text_input("Note (optional)", key="td_note",
                                 placeholder="optional note shown under the title")
+        td_imp = st.checkbox("⭐ High importance", key="td_important")
         if st.form_submit_button("Add to-do"):
             if td_title.strip():
                 try:
@@ -997,7 +1020,8 @@ def view_week(me):
                     db.add_todo(me["id"], td_title.strip(),
                                 dt.date.today().isoformat(), td_projs[td_proj],
                                 est_hours=td_hours or None,
-                                note=td_note.strip() or None)
+                                note=td_note.strip() or None,
+                                important=td_imp)
                     db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
