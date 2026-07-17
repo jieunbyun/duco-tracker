@@ -960,6 +960,19 @@ def view_week(me):
                         e_imp = st.checkbox("⭐ High importance",
                                             value=important,
                                             key=f"tded_imp_{t['id']}")
+                        # start-week picker: Saturday-anchored weeks around
+                        # this to-do's current week (8 back, 26 ahead). Moving
+                        # it re-files the to-do under the chosen week.
+                        _d = dt.date.fromisoformat(t["due_on"])
+                        cur_week = _d - dt.timedelta(
+                            days=(_d.weekday() - 5) % 7)
+                        week_opts = [cur_week + dt.timedelta(weeks=w)
+                                     for w in range(-8, 27)]
+                        e_week = st.selectbox(
+                            "Start week", week_opts, index=8,
+                            format_func=lambda w: f"{w:%d %b} – "
+                            f"{w + dt.timedelta(days=6):%d %b %Y}",
+                            key=f"tded_week_{t['id']}")
                         tded_submit = st.form_submit_button(
                             "Save", type="primary")
                         if tded_submit and e_title.strip():
@@ -968,7 +981,8 @@ def view_week(me):
                                 "note": e_note.strip() or None,
                                 "est_hours": e_hours or None,
                                 "project_id": e_projs[e_proj],
-                                "is_important": e_imp})
+                                "is_important": e_imp,
+                                "due_on": e_week.isoformat()})
                             db.clear_user_caches()
                             st.rerun()
                         elif tded_submit:
@@ -993,6 +1007,8 @@ def view_week(me):
     else:
         st.caption("No to-dos for this week yet.")
 
+    st.caption(f"New to-dos are filed under the week you're viewing: "
+               f"{week_start:%d %b} – {week_end:%d %b %Y}.")
     with st.form("add_todo", clear_on_submit=True):
         tc1, tc2, tc3 = st.columns([5, 1, 2])
         with tc1:
@@ -1015,10 +1031,13 @@ def view_week(me):
         if st.form_submit_button("Add to-do"):
             if td_title.strip():
                 try:
-                    # due_on defaults to today (places it in the current week);
-                    # not shown in the UI, used only for weekly scoping.
+                    # due_on is the task's start week: it defaults to the
+                    # week currently being viewed (week_start), so adding a
+                    # to-do while looking at a future/past week files it under
+                    # that week. Used only for weekly scoping, not shown as a
+                    # date in the UI.
                     db.add_todo(me["id"], td_title.strip(),
-                                dt.date.today().isoformat(), td_projs[td_proj],
+                                week_start.isoformat(), td_projs[td_proj],
                                 est_hours=td_hours or None,
                                 note=td_note.strip() or None,
                                 important=td_imp)
