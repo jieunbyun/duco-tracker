@@ -2463,6 +2463,27 @@ def view_time(me):
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+def _reset_picker_if_options_changed(key, options):
+    """Drop a keyed selectbox's stored choice when its options were rebuilt.
+
+    Streamlit stores a keyed selectbox's choice as an *index* into the options
+    list, and that index wins over the `index=` argument on the next rerun. So
+    any rebuild that reorders or relabels the options leaves the index pointing
+    at a different row. The milestone picker is sorted by due date, so editing
+    a due date reorders it and the edit looks like it never saved; adding or
+    removing a project or milestone shifts either picker the same way.
+
+    Clearing the widget state on an options change lets the `index=` the caller
+    computes from the id we remember ourselves take effect again. Detecting the
+    change here rather than clearing at each write site means a new write path
+    can't quietly reintroduce the bug."""
+    fingerprint_key = f"{key}__options"
+    fingerprint = tuple(options)
+    if st.session_state.get(fingerprint_key) != fingerprint:
+        st.session_state[fingerprint_key] = fingerprint
+        st.session_state.pop(key, None)
+
+
 def render_milestone_block(m, me, members, member_name, ms_title_map,
                            project_id, my_hours, hist=None):
     """Render one milestone with progress, edit popover, and combined history
@@ -2735,6 +2756,7 @@ def view_milestones(me):
                             if pid == saved_proj_id), None)
     project_names = list(project_labels.keys())
     proj_index = project_names.index(saved_proj_name) if saved_proj_name in project_names else 0
+    _reset_picker_if_options_changed("milestones_project_pick", project_names)
     pick_proj = st.selectbox("Project", project_names, index=proj_index,
                              key="milestones_project_pick")
     proj_id = project_labels[pick_proj]
@@ -2755,6 +2777,7 @@ def view_milestones(me):
                         if m["id"] == saved_mid), None)
     mkeys = list(mlabels.keys())
     midx = mkeys.index(saved_label) if saved_label in mkeys else 0
+    _reset_picker_if_options_changed("milestones_milestone_pick", mkeys)
     pick_m = st.selectbox("Milestone", mkeys, index=midx,
                           key="milestones_milestone_pick")
     selected = mlabels[pick_m]
