@@ -845,10 +845,10 @@ def view_week(me):
                     day_life += hrs
                 else:
                     day_work += hrs
-                    # core is counted as a subset of work, matching the
-                    # "total (work (core) / life)" footer below
-                    if is_core:
-                        day_core += hrs
+                # core counts in every domain, so it matches the week-level
+                # core metric and never silently drops a life session
+                if is_core:
+                    day_core += hrs
                 tag = "plan" if is_future else "actual"
                 label = r.get("project_name") or r.get("category_label")
                 if is_core:
@@ -869,20 +869,16 @@ def view_week(me):
                     f"<br><span style='color:#9aa5b1'>{tag}</span></div>",
                     unsafe_allow_html=True)
             if day_total:
-                # total, with the work/life split and core shown inside the
-                # work figure, e.g. "24 h (12 🎯8 / 12)". Core-only days drop
-                # the split and just show "12 h (🎯8)".
-                core_txt = f" 🎯{day_core:g}" if day_core else ""
-                if day_life:
-                    inner = f"{day_work:g}{core_txt} / {day_life:g}"
-                elif day_core:
-                    inner = f"🎯{day_core:g}"
-                else:
-                    inner = ""
-                split = (f" <span style='color:#9aa5b1'>({inner})</span>"
-                         if inner else "")
+                # total, the work/life split as before, then core appended so
+                # it shows for any domain, e.g. "21.5 h (12.5 / 9) 🎯4"
+                split = (f" <span style='color:#9aa5b1'>"
+                         f"({day_work:g} / {day_life:g})</span>"
+                         if day_life else "")
+                core_txt = (f" <span style='color:#3A5A78'>🎯{day_core:g}"
+                            f"</span>" if day_core else "")
                 st.markdown(f"<div style='text-align:center;font-size:0.72rem;"
-                            f"color:#6b7280'>{day_total:g} h{split}</div>",
+                            f"color:#6b7280'>{day_total:g} h{split}"
+                            f"{core_txt}</div>",
                             unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
