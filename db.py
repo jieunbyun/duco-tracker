@@ -192,8 +192,12 @@ def core_hours(date_from, date_to):
     {"core": h, "total": h, "by_project": [{name, hours} desc]} so callers can
     show the core total, its share of all logged time, and where it went.
     """
+    me_id = my_app_user_id()
+    if not me_id:
+        return {"core": 0, "total": 0, "by_project": []}
     sess = (client().table("v_session_detail")
             .select("project_name,hours,session_date,is_core")
+            .eq("user_id", me_id)
             .gte("session_date", date_from)
             .lte("session_date", date_to).execute().data or [])
     total = sum((s.get("hours") or 0) for s in sess)
@@ -219,8 +223,12 @@ def high_importance_hours(date_from, date_to):
     if not hi:
         return []
     hi_ids = {p["id"]: p["name"] for p in hi}
+    me_id = my_app_user_id()
+    if not me_id:
+        return []
     sess = (client().table("v_session_detail")
             .select("project_id,hours,session_date")
+            .eq("user_id", me_id)
             .gte("session_date", date_from)
             .lte("session_date", date_to).execute().data or [])
     agg = {}
@@ -905,10 +913,14 @@ def log_session(user_id, category_id, started_at, ended_at=None,
 
 
 def recent_sessions(limit=20):
+    me_id = my_app_user_id()
+    if not me_id:
+        return []
     res = client().table("v_session_detail") \
         .select("id,session_date,category_id,category_label,project_id,"
                 "project_name,hours,description,started_at,ended_at,"
                 "milestone_id,milestone_title,is_core") \
+        .eq("user_id", me_id) \
         .order("started_at", desc=True).limit(limit).execute()
     return res.data or []
 
@@ -916,10 +928,14 @@ def recent_sessions(limit=20):
 def sessions_in_range(date_from, date_to):
     """All of the caller's timed sessions overlapping [date_from, date_to].
     Returns rows with start/end so the week view can place them."""
+    me_id = my_app_user_id()
+    if not me_id:
+        return []
     res = (client().table("v_session_detail")
            .select("id,session_date,category_id,category_label,project_id,"
                    "project_name,hours,description,started_at,ended_at,"
                    "milestone_id,milestone_title,is_core")
+           .eq("user_id", me_id)
            .gte("session_date", date_from)
            .lte("session_date", date_to)
            .order("started_at").execute())
