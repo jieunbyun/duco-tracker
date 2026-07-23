@@ -139,6 +139,11 @@ def edit_session_widget(s, key_prefix):
                 "or type", key=f"{key_prefix}_endtype_{sid}",
                 placeholder="1100")
             new_end = parse_time_str(_et_raw) or _ep
+        cur_core = bool(s.get("is_core"))
+        new_core = st.checkbox(
+            "🎯 Core session", value=cur_core,
+            key=f"{key_prefix}_core_{sid}",
+            help="Counts toward your core hours in the Week and Time tabs.")
         save_change = st.form_submit_button("Save change", type="primary")
 
     b1, b2 = st.columns(2)
@@ -168,6 +173,8 @@ def edit_session_widget(s, key_prefix):
                     changes["started_at"] = started
                     changes["ended_at"] = ended
                     changes["manual_minutes"] = None
+                if new_core != cur_core:
+                    changes["is_core"] = new_core
                 if not changes:
                     st.info("Nothing changed.")
                 else:
@@ -601,6 +608,11 @@ def view_log(me):
                 "Minutes (used if 'Just minutes' is chosen)", min_value=1,
                 max_value=960, value=30, step=5)
             desc = st.text_input("Note (optional)")
+            # per-session flag, independent of the project's ⭐ high-importance
+            # setting: the same project can have core and non-core sessions.
+            log_core = st.checkbox(
+                "🎯 Core session", key="log_core",
+                help="Counts toward your core hours in the Week and Time tabs.")
             log_cv_dest = log_cv_title = log_cv_desc = log_cv_outcome = None
             log_cv_metrics = log_cv_evidence = log_cv_status = None
             if log_cv_enabled:
@@ -681,7 +693,7 @@ def view_log(me):
                 user_id=me["id"], category_id=cat_labels[cat],
                 started_at=started, ended_at=ended, manual_minutes=minutes,
                 project_id=project_id, description=desc or None,
-                milestone_id=milestone_id)
+                milestone_id=milestone_id, is_core=log_core)
             cv_saved = False
             if log_cv_enabled:
                 session_id = (res.data or [{}])[0].get("id") if res else None
@@ -1138,6 +1150,11 @@ def view_week(me):
         # it doesn't re-run the page each keystroke.
         with st.form("wk_addblock_form", clear_on_submit=True):
             b_note = st.text_input("What will you work on?", key="wk_note")
+            # per-session flag, independent of the project's ⭐ high-importance
+            # setting: the same project can have core and non-core sessions.
+            wk_core = st.checkbox(
+                "🎯 Core session", key="wk_core",
+                help="Counts toward your core hours in the Week and Time tabs.")
             wk_cv_dest = wk_cv_title = wk_cv_desc = wk_cv_outcome = None
             wk_cv_metrics = wk_cv_evidence = wk_cv_status = None
             if wk_cv_enabled:
@@ -1208,7 +1225,7 @@ def view_week(me):
                                    started_at=started, ended_at=ended,
                                    project_id=project_id,
                                    description=b_note or None,
-                                   milestone_id=ms_id)
+                                   milestone_id=ms_id, is_core=wk_core)
                     if wk_cv_enabled:
                         session_id = (res.data or [{}])[0].get("id") if res else None
                         title_source = (wk_cv_title or "").strip() or (b_note or "").strip()
@@ -1278,17 +1295,27 @@ def view_week(me):
                        dt.date.fromisoformat(r["session_date"]) > today)
     summary_total = sum((r.get("hours") or 0) for r in summary_rows)
 
+    # core hours this week, from the per-session 🎯 flag
+    core_total = sum((r.get("hours") or 0) for r in summary_rows
+                     if r.get("is_core"))
+
     if is_lead:
-        s1, s2, s3, s4 = st.columns(4)
+        s1, s2, s3, s4, s5 = st.columns(5)
         s1.metric("Work", f"{work_total:g} h")
         s2.metric("Life", f"{life_total:g} h")
         s3.metric("Planned (ahead)", f"{future_total:g} h")
         s4.metric("Done (so far)", f"{summary_total - future_total:g} h")
+        s5.metric("🎯 Core", f"{core_total:g} h")
     else:
-        s1, s2, s3 = st.columns(3)
+        s1, s2, s3, s4 = st.columns(4)
         s1.metric("Work", f"{work_total:g} h")
         s2.metric("Planned (ahead)", f"{future_total:g} h")
         s3.metric("Done (so far)", f"{summary_total - future_total:g} h")
+        s4.metric("🎯 Core", f"{core_total:g} h")
+    if core_total:
+        share = round(100 * core_total / summary_total) if summary_total else 0
+        st.caption(f"🎯 Core sessions: {core_total:g} h of "
+                   f"{summary_total:g} h logged this week ({share}%).")
 
     def rollup(source, key):
         agg = {}
@@ -2419,6 +2446,20 @@ def view_time(me):
             st.progress(min(pct / 100, 1.0))
     else:
         st.caption("No time logged in this range yet.")
+
+    # ---- core sessions (per-session 🎯 flag, not a project setting) ----
+    ch = db.core_hours(d_from.isoformat(), d_to.isoformat())
+    if ch["core"]:
+        st.markdown("<hr>", unsafe_allow_html=True)
+        share = round(100 * ch["core"] / ch["total"]) if ch["total"] else 0
+        st.markdown("**🎯 Core sessions** — your core hours this period")
+        st.markdown(f"**{ch['core']:g} h** of {ch['total']:g} h logged "
+                    f"({share}%)")
+        st.progress(min(ch["core"] / ch["total"], 1.0) if ch["total"] else 0.0)
+        for h in ch["by_project"]:
+            p = round(100 * h["hours"] / ch["core"]) if ch["core"] else 0
+            st.markdown(f"🎯 {h['name']} &nbsp;·&nbsp; **{h['hours']:g} h** "
+                        f"&nbsp;·&nbsp; {p}%", unsafe_allow_html=True)
 
     # ---- high-importance projects ----
     hi = db.high_importance_hours(d_from.isoformat(), d_to.isoformat())

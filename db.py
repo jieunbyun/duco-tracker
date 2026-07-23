@@ -184,6 +184,33 @@ def set_project_importance(project_id, high):
         .eq("id", project_id).execute()
 
 
+def core_hours(date_from, date_to):
+    """Hours the caller logged on sessions ticked as 'core' in the range.
+
+    Core is a per-session flag (work_session.is_core), not a project setting:
+    the same project can have both core and non-core sessions. Returns
+    {"core": h, "total": h, "by_project": [{name, hours} desc]} so callers can
+    show the core total, its share of all logged time, and where it went.
+    """
+    sess = (client().table("v_session_detail")
+            .select("project_name,hours,session_date,is_core")
+            .gte("session_date", date_from)
+            .lte("session_date", date_to).execute().data or [])
+    total = sum((s.get("hours") or 0) for s in sess)
+    agg = {}
+    core_total = 0.0
+    for s in sess:
+        if not s.get("is_core"):
+            continue
+        h = s.get("hours") or 0
+        core_total += h
+        name = s.get("project_name") or "— no project —"
+        agg[name] = agg.get(name, 0) + h
+    by_project = sorted(({"name": n, "hours": h} for n, h in agg.items()),
+                        key=lambda x: -x["hours"])
+    return {"core": core_total, "total": total, "by_project": by_project}
+
+
 def high_importance_hours(date_from, date_to):
     """Hours the caller logged on high-importance projects in the range.
     Returns list of {name, hours} sorted by hours desc."""
@@ -853,11 +880,12 @@ def my_milestone_hours():
 # ---- sessions -------------------------------------------------------------
 def log_session(user_id, category_id, started_at, ended_at=None,
                 manual_minutes=None, project_id=None, description=None,
-                milestone_id=None):
+                milestone_id=None, is_core=False):
     payload = {
         "user_id": user_id,
         "category_id": category_id,
         "started_at": started_at,
+        "is_core": bool(is_core),
     }
     if ended_at:
         payload["ended_at"] = ended_at
@@ -880,7 +908,7 @@ def recent_sessions(limit=20):
     res = client().table("v_session_detail") \
         .select("id,session_date,category_id,category_label,project_id,"
                 "project_name,hours,description,started_at,ended_at,"
-                "milestone_id,milestone_title") \
+                "milestone_id,milestone_title,is_core") \
         .order("started_at", desc=True).limit(limit).execute()
     return res.data or []
 
@@ -891,7 +919,7 @@ def sessions_in_range(date_from, date_to):
     res = (client().table("v_session_detail")
            .select("id,session_date,category_id,category_label,project_id,"
                    "project_name,hours,description,started_at,ended_at,"
-                   "milestone_id,milestone_title")
+                   "milestone_id,milestone_title,is_core")
            .gte("session_date", date_from)
            .lte("session_date", date_to)
            .order("started_at").execute())
