@@ -833,18 +833,26 @@ def view_week(me):
             day_total = 0
             day_work = 0
             day_life = 0
+            day_core = 0
             for r in day_rows:
                 t0 = r["started_at"][11:16]
                 t1 = r["ended_at"][11:16]
                 hrs = r.get("hours") or 0
                 day_total += hrs
                 is_life = r.get("domain") == "life"
+                is_core = bool(r.get("is_core"))
                 if is_life:
                     day_life += hrs
                 else:
                     day_work += hrs
+                    # core is counted as a subset of work, matching the
+                    # "total (work (core) / life)" footer below
+                    if is_core:
+                        day_core += hrs
                 tag = "plan" if is_future else "actual"
                 label = r.get("project_name") or r.get("category_label")
+                if is_core:
+                    label = f"🎯 {label}"
                 # work = blue (prominent), life = grey (recessive);
                 # future (planned) is a lighter shade of each
                 if is_life:
@@ -861,10 +869,18 @@ def view_week(me):
                     f"<br><span style='color:#9aa5b1'>{tag}</span></div>",
                     unsafe_allow_html=True)
             if day_total:
-                # total with work/life split, e.g. "24h (12h / 12h)"
-                split = (f" <span style='color:#9aa5b1'>"
-                         f"({day_work:g} / {day_life:g})</span>"
-                         if day_life else "")
+                # total, with the work/life split and core shown inside the
+                # work figure, e.g. "24 h (12 🎯8 / 12)". Core-only days drop
+                # the split and just show "12 h (🎯8)".
+                core_txt = f" 🎯{day_core:g}" if day_core else ""
+                if day_life:
+                    inner = f"{day_work:g}{core_txt} / {day_life:g}"
+                elif day_core:
+                    inner = f"🎯{day_core:g}"
+                else:
+                    inner = ""
+                split = (f" <span style='color:#9aa5b1'>({inner})</span>"
+                         if inner else "")
                 st.markdown(f"<div style='text-align:center;font-size:0.72rem;"
                             f"color:#6b7280'>{day_total:g} h{split}</div>",
                             unsafe_allow_html=True)
