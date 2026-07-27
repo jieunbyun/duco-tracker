@@ -46,11 +46,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-def edit_session_widget(s, key_prefix):
+def edit_session_widget(s, key_prefix, is_lead=False):
     """A compact editor for one session: category, project, date, start, end,
     delete. `s` is a row from recent_sessions/sessions_in_range with id,
     category_label, project_name, started_at, ended_at. Returns True if a
-    change was made (caller should rerun)."""
+    change was made (caller should rerun). Only the lead may see life
+    categories; everyone else gets the work list only."""
     sid = s["id"]
     try:
         cur_start = dt.datetime.fromisoformat(s["started_at"]) \
@@ -63,11 +64,18 @@ def edit_session_widget(s, key_prefix):
     except Exception:
         cur_end = None
 
-    # category + project selectors, prefilled to the current values
-    cats = db.categories()  # all domains, so any session's category resolves
+    # category + project selectors, prefilled to the current values.
+    # Life categories are the lead's private domain — never offer them to
+    # anyone else, even when editing.
+    cats = db.categories() if is_lead else db.categories(domain="work")
     cat_labels = {c["label"]: c["id"] for c in cats}
     cur_cat = s.get("category_label")
     cat_keys = list(cat_labels.keys())
+    # if the session's current category isn't in the visible list, still show
+    # it so the editor doesn't misrepresent (or silently rewrite) the value
+    if cur_cat and cur_cat not in cat_labels:
+        cat_labels[cur_cat] = s.get("category_id")
+        cat_keys = [cur_cat] + cat_keys
     cat_idx = cat_keys.index(cur_cat) if cur_cat in cat_keys else 0
 
     cc1, cc2 = st.columns(2)
@@ -751,7 +759,7 @@ def view_log(me):
         if chosen.get("description"):
             st.caption(chosen["description"])
         if chosen.get("started_at") and chosen.get("ended_at"):
-            if edit_session_widget(chosen, "log"):
+            if edit_session_widget(chosen, "log", is_lead=is_lead):
                 st.rerun()
         else:
             st.caption("This was logged as minutes (no clock time), so it "
@@ -1288,7 +1296,7 @@ def view_week(me):
         with ed2:
             pick = st.selectbox("Block", list(blabels.keys()),
                                 key="wk_edit_pick")
-        if pick and edit_session_widget(blabels[pick], "wk"):
+        if pick and edit_session_widget(blabels[pick], "wk", is_lead=is_lead):
             st.rerun()
 
     # ---- summaries ----
