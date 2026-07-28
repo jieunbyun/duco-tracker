@@ -157,13 +157,48 @@ def project_statuses():
 
 
 # ---- projects -------------------------------------------------------------
+def _project_access_sets(me_id):
+    """The two halves of the project-visibility rule for one user, as id sets:
+
+      owned_ids       -- projects where project.owner_id == me
+      contributed_ids -- projects where I am the contributor on a milestone
+
+    A project is visible to a user iff its id is in owned_ids | contributed_ids.
+    This is the single source of truth for who may see a project; every
+    user-facing project listing scopes through it. Note project_lead membership
+    deliberately does NOT grant visibility — only ownership or contributing to
+    a milestone does. Each half is a server-side eq filter, so other users'
+    projects never leave the database."""
+    owned = (client().table("project").select("id")
+             .eq("owner_id", me_id).execute().data or [])
+    contrib = (client().table("project_milestone").select("project_id")
+               .eq("contributor_id", me_id).execute().data or [])
+    owned_ids = {p["id"] for p in owned}
+    contributed_ids = {m["project_id"] for m in contrib if m.get("project_id")}
+    return owned_ids, contributed_ids
+
+
+def _visible_project_ids(me_id):
+    """Set of project ids the user may see (owned or contributed-to)."""
+    owned_ids, contributed_ids = _project_access_sets(me_id)
+    return owned_ids | contributed_ids
+
+
 @st.cache_data(ttl=30)
 def _my_projects(_u):
-    res = client().table("project").select(
+    """Projects the signed-in user may see, for the to-do / budget / forecast
+    pickers. Scoped through the shared visibility rule (owner or milestone
+    contributor); an unfiltered select would expose every user's projects."""
+    me_id = my_app_user_id()
+    if not me_id:
+        return []
+    vis = _visible_project_ids(me_id)
+    if not vis:
+        return []
+    return (client().table("project").select(
         "id,name,status_id,visibility,estimated_hours,category_id,"
-        "high_importance") \
-        .order("name").execute()
-    return res.data or []
+        "high_importance,owner_id")
+        .in_("id", list(vis)).order("name").execute().data or [])
 
 
 def my_projects():
@@ -171,16 +206,23 @@ def my_projects():
 
 
 def projects_for_category(category_id, active_only=True):
-    """Projects whose single category matches category_id, for the filtered
-    logging dropdown.
+    """Projects in one category the signed-in user may see, for the Week/Log
+    logging dropdowns. Scoped through the shared visibility rule (owner or
+    milestone contributor).
 
-    By default only active projects are returned, so the Week/Log project
-    pickers aren't cluttered with completed or archived work. Pass
-    active_only=False to include every status. If no status is coded 'active'
-    (misconfiguration), the filter is skipped rather than returning nothing."""
+    By default only active projects are returned, so the pickers aren't
+    cluttered with completed or archived work. Pass active_only=False to
+    include every status. If no status is coded 'active' (misconfiguration),
+    the status filter is skipped rather than returning nothing."""
+    me_id = my_app_user_id()
+    if not me_id:
+        return []
+    vis = _visible_project_ids(me_id)
+    if not vis:
+        return []
     q = client().table("project").select(
         "id,name,category_id,high_importance,status_id") \
-        .eq("category_id", category_id)
+        .eq("category_id", category_id).in_("id", list(vis))
     if active_only:
         active_ids = [s["id"] for s in project_statuses()
                       if s.get("code") == "active"]
@@ -387,29 +429,32 @@ def project_detail(project_id):
 
 
 def active_projects_for_gantt():
-    """Active projects with dates and status, each annotated with whether the
-    current user leads it. Ordered: led-by-me first, then participant, then by
-    due date. Used by both the Gantt and the grouped project list."""
+    """Active projects the user may see, annotated with their relationship to
+    each. Ordered: owned first, then contributed-to, then by due date. Used by
+    both the Gantt and the grouped project list.
+
+    Scoped through the shared visibility rule, so only projects the user owns
+    or contributes to a milestone on appear — i_lead means owner, i_participate
+    means milestone contributor (never owner)."""
     statuses = {s["id"]: s for s in project_statuses()}
     active_ids = [sid for sid, s in statuses.items() if s.get("code") == "active"]
     if not active_ids:
         return []
-    rows = client().table("project").select(
-        "id,name,started_on,due_on,status_id").execute().data or []
-    rows = [r for r in rows if r.get("status_id") in active_ids]
     me_id = my_app_user_id()
-    # who leads each project
-    leads = client().table("project_lead").select(
-        "project_id,user_id,is_leader").execute().data or []
-    leader_of = {L["project_id"]: L["user_id"]
-                 for L in leads if L.get("is_leader")}
-    member_of = {}
-    for L in leads:
-        member_of.setdefault(L["project_id"], set()).add(L["user_id"])
+    if not me_id:
+        return []
+    owned_ids, contributed_ids = _project_access_sets(me_id)
+    vis = owned_ids | contributed_ids
+    if not vis:
+        return []
+    rows = (client().table("project").select(
+        "id,name,started_on,due_on,status_id")
+        .in_("id", list(vis)).execute().data or [])
+    rows = [r for r in rows if r.get("status_id") in active_ids]
     for r in rows:
-        r["i_lead"] = leader_of.get(r["id"]) == me_id
-        r["i_participate"] = (me_id in member_of.get(r["id"], set())
-                              and not r["i_lead"])
+        r["i_lead"] = r["id"] in owned_ids
+        r["i_participate"] = (r["id"] in contributed_ids
+                              and r["id"] not in owned_ids)
     rows.sort(key=lambda r: (not r["i_lead"], not r["i_participate"],
                              r.get("due_on") or "9999"))
     return rows
@@ -422,18 +467,18 @@ def my_app_user_id():
 
 @st.cache_data(ttl=60)
 def _projects_i_participate_in(_u):
-    """Projects where I am a lead or participant (via project_lead).
-    Returns [{id, name}] for use in the milestones overview and selectors."""
+    """Projects the user may see (owner or milestone contributor), as
+    [{id, name}], for the milestones overview and selectors. Same visibility
+    rule as everywhere else."""
     me_id = my_app_user_id()
-    leads = (client().table("project_lead")
-             .select("project_id,user_id").execute().data or [])
-    my_pids = {L["project_id"] for L in leads if L["user_id"] == me_id}
-    if not my_pids:
+    if not me_id:
         return []
-    projs = (client().table("project")
-             .select("id,name,status_id").execute().data or [])
-    return [{"id": p["id"], "name": p["name"]}
-            for p in projs if p["id"] in my_pids]
+    vis = _visible_project_ids(me_id)
+    if not vis:
+        return []
+    projs = (client().table("project").select("id,name")
+             .in_("id", list(vis)).execute().data or [])
+    return [{"id": p["id"], "name": p["name"]} for p in projs]
 
 
 def projects_i_participate_in():
