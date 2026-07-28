@@ -170,13 +170,23 @@ def my_projects():
     return _my_projects(_uid())
 
 
-def projects_for_category(category_id):
+def projects_for_category(category_id, active_only=True):
     """Projects whose single category matches category_id, for the filtered
-    logging dropdown."""
-    res = client().table("project").select(
-        "id,name,category_id,high_importance") \
-        .eq("category_id", category_id).order("name").execute()
-    return res.data or []
+    logging dropdown.
+
+    By default only active projects are returned, so the Week/Log project
+    pickers aren't cluttered with completed or archived work. Pass
+    active_only=False to include every status. If no status is coded 'active'
+    (misconfiguration), the filter is skipped rather than returning nothing."""
+    q = client().table("project").select(
+        "id,name,category_id,high_importance,status_id") \
+        .eq("category_id", category_id)
+    if active_only:
+        active_ids = [s["id"] for s in project_statuses()
+                      if s.get("code") == "active"]
+        if active_ids:
+            q = q.in_("status_id", active_ids)
+    return q.order("name").execute().data or []
 
 
 def set_project_importance(project_id, high):
