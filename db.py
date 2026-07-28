@@ -1057,7 +1057,18 @@ def duplicate_session(session_id, new_date=None):
 # ---- inference (views + RPC functions) ------------------------------------
 @st.cache_data(ttl=30)
 def _project_tracker(_u):
-    return client().table("v_project_tracker").select("*").execute().data or []
+    """Rows of the v_project_tracker view (hours vs estimate, completion) for
+    the Projects tab, scoped to projects the user may see. The view itself is
+    NOT row-scoped, so without this filter every user's projects would show —
+    this is the list the Projects tab renders."""
+    me_id = my_app_user_id()
+    if not me_id:
+        return []
+    vis = _visible_project_ids(me_id)
+    if not vis:
+        return []
+    return (client().table("v_project_tracker").select("*")
+            .in_("project_id", list(vis)).execute().data or [])
 
 
 def project_tracker():
