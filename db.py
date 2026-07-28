@@ -1240,6 +1240,7 @@ def project_load_forecast(project_id, capacity=37.5, lookback_weeks=8):
 CV_ENTRY_SELECT = (
     "id,user_id,entry_date,cv_year,cv_section,cv_subsection,title,"
     "organisation,location,role,description,outcome,metrics,evidence_url,"
+    "student_level,start_on,end_on,"
     "status,source_type,session_id,milestone_id,project_id,created_at,updated_at"
 )
 
@@ -1259,13 +1260,15 @@ def _clean_cv_payload(payload: dict) -> dict:
 
 def add_cv_entry(user_id, entry_date, cv_section, title, cv_subsection=None,
                  organisation=None, location=None, role=None, description=None,
-                 outcome=None, metrics=None, evidence_url=None, status="draft",
+                 outcome=None, metrics=None, evidence_url=None,
+                 student_level=None, start_on=None, end_on=None, status="draft",
                  source_type="manual", session_id=None, milestone_id=None,
                  project_id=None):
     """Create a private CV/achievement record for the signed-in user.
 
     The record may link back to a session, milestone, or project, but can also
     stand alone. The CV tab is the only place that reads these records in bulk.
+    Supervision entries also use student_level and the start_on/end_on range.
     """
     payload = _clean_cv_payload({
         "user_id": user_id,
@@ -1280,6 +1283,9 @@ def add_cv_entry(user_id, entry_date, cv_section, title, cv_subsection=None,
         "outcome": outcome,
         "metrics": metrics,
         "evidence_url": evidence_url,
+        "student_level": student_level,
+        "start_on": start_on,
+        "end_on": end_on,
         "status": status or "draft",
         "source_type": source_type or "manual",
         "session_id": session_id,
