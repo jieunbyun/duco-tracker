@@ -3067,11 +3067,11 @@ def _cv_supervision_add_form(me):
         c1, c2 = st.columns(2)
         with c1:
             name = st.text_input("Student name", key="cv_sup_name",
-                                 placeholder="e.g. Graham Thompson")
+                                 placeholder="e.g. John Smith")
             level = st.text_input("Degree / level", key="cv_sup_level",
                                   placeholder="e.g. PhD, Master, MSc Research")
             institution = st.text_input("Institution", key="cv_sup_inst",
-                                        placeholder="e.g. University of Glasgow")
+                                        placeholder="e.g. Imperial College London")
             country = st.text_input("Country", key="cv_sup_country",
                                     placeholder="e.g. United Kingdom")
             status = st.selectbox("Status", CV_STATUS_OPTIONS, index=0,
