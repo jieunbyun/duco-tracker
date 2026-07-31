@@ -660,9 +660,18 @@ def view_log(me):
                     db.set_project_importance(proj_labels[proj], new_imp)
                     db.clear_user_caches()
                     st.rerun()
-        # optional milestone, filtered to the chosen existing project.
+        # optional milestone. For an existing project, pick from its open
+        # milestones (or add one); for a brand-new project, offer to start it
+        # with a first milestone — both are created together on Save.
         new_ms_name = ""
-        if not life_mode and proj not in ("— none —", "+ New project…"):
+        if not life_mode and proj == "+ New project…":
+            new_ms_name = st.text_input(
+                "First milestone (optional)", key="log_new_ms_forproj",
+                placeholder="e.g. First draft",
+                help="Optionally give the new project its first milestone. "
+                     "Add more in the Projects tab later.")
+            milestone_id = "__new__" if new_ms_name.strip() else None
+        elif not life_mode and proj != "— none —":
             chosen_pid = proj_labels[proj]
             ms = db.project_milestones(chosen_pid)
             open_ms = [m for m in ms if m["status"] != "done"]
@@ -1221,6 +1230,14 @@ def view_week(me):
                 wk_new_name = st.text_input("New project name",
                                             placeholder="e.g. DAFNI Fellowship",
                                             key="wk_newproj")
+                # a brand-new project has no milestones yet: offer to start it
+                # with one, created together with the project on Add block.
+                wk_new_ms = st.text_input(
+                    "First milestone (optional)", key="wk_new_ms_forproj",
+                    placeholder="e.g. First draft",
+                    help="Optionally give the new project its first milestone. "
+                         "Add more in the Projects tab later.")
+                wk_milestone_id = "__new__" if wk_new_ms.strip() else None
             elif b_proj != "— none —":
                 cur_imp = next((p.get("high_importance") for p in matching
                                 if p["name"] == b_proj), False)
