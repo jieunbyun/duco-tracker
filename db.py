@@ -113,19 +113,25 @@ def clear_user_caches():
 
 
 # ---- app_user resolution --------------------------------------------------
-def my_app_user():
-    """The app_user row for the signed-in auth user, or None if unlinked."""
-    res = client().table("app_user").select("*").execute()
-    rows = res.data or []
-    # RLS lets a user read the directory; find the row linked to this login
-    sess = current_session()
-    if not sess or not sess.user:
-        return None
-    uid = sess.user.id
+@st.cache_data(ttl=120)
+def _my_app_user(_u):
+    """The app_user row for auth uid `_u`, or None if unlinked. Cached per
+    user so the many transitive my_app_user_id() calls in one page render
+    don't each re-scan the directory. Invalidated by clear_user_caches() on
+    writes, and explicitly after link_my_login()."""
+    rows = client().table("app_user").select("*").execute().data or []
     for r in rows:
-        if r.get("auth_user_id") == uid:
+        if r.get("auth_user_id") == _u:
             return r
     return None
+
+
+def my_app_user():
+    """The app_user row for the signed-in auth user, or None if unlinked."""
+    uid = _uid()
+    if not uid:
+        return None
+    return _my_app_user(uid)
 
 
 def link_my_login(app_user_id: str):
@@ -152,7 +158,10 @@ def categories(domain=None):
 
 
 @st.cache_data(ttl=300)
+@st.cache_data(ttl=300)
 def project_statuses():
+    # a small, near-static lookup table; safe to cache and it is read several
+    # times per Projects-tab render (directly and via active_projects_for_gantt)
     return client().table("project_status").select("*").execute().data or []
 
 
@@ -376,10 +385,13 @@ def project_detail(project_id):
     return rows[0] if rows else None
 
 
-def active_projects_for_gantt():
+@st.cache_data(ttl=30)
+def _active_projects_for_gantt(_u):
     """Active projects with dates and status, each annotated with whether the
     current user leads it. Ordered: led-by-me first, then participant, then by
-    due date. Used by both the Gantt and the grouped project list."""
+    due date. Used by both the Gantt and the grouped project list. Cached
+    per-user so the Projects tab issues these queries once per render, not on
+    every widget interaction; cleared on writes by clear_user_caches()."""
     statuses = {s["id"]: s for s in project_statuses()}
     active_ids = [sid for sid, s in statuses.items() if s.get("code") == "active"]
     if not active_ids:
@@ -403,6 +415,10 @@ def active_projects_for_gantt():
     rows.sort(key=lambda r: (not r["i_lead"], not r["i_participate"],
                              r.get("due_on") or "9999"))
     return rows
+
+
+def active_projects_for_gantt():
+    return _active_projects_for_gantt(_uid())
 
 
 def my_app_user_id():

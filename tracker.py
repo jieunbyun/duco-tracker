@@ -513,6 +513,7 @@ def link_gate(_app_user_none):
     if st.button("Link my login", type="primary"):
         try:
             db.link_my_login(labels[choice])
+            db.clear_user_caches()  # drop the cached unlinked (None) identity
             st.success("Linked. Loading your tracker…")
             st.rerun()
         except Exception as e:
