@@ -362,7 +362,73 @@ def tex_escape(value):
     return "".join(replacements.get(ch, ch) for ch in s)
 
 
+SUPERVISION_SECTION = "Supervision"
+
+
+def _fmt_month(iso):
+    """'2024-10-01' -> 'Oct 2024'. Passes non-ISO strings through unchanged."""
+    if not iso:
+        return ""
+    try:
+        return dt.date.fromisoformat(iso).strftime("%b %Y")
+    except (ValueError, TypeError):
+        return str(iso)
+
+
+def supervision_date_label(entry):
+    """The '{start - end}' label for a supervision jobshort. Falls back to the
+    single entry_date / year if the range isn't filled in."""
+    start = _fmt_month(entry.get("start_on"))
+    end = _fmt_month(entry.get("end_on"))
+    if start and end:
+        return f"{start} - {end}"
+    return (start or end
+            or entry.get("entry_date") or str(entry.get("cv_year") or ""))
+
+
+def supervision_title_line(entry):
+    """Student, degree, institution, country — the jobshort's first argument,
+    joined with commas and skipping blanks. Plain text (not escaped)."""
+    parts = [entry.get("title"), entry.get("student_level"),
+             entry.get("organisation"), entry.get("location")]
+    return ", ".join(p.strip() for p in parts if p and p.strip())
+
+
+def supervision_body_text(entry):
+    """'Second supervisor (20%): topic' — plain text for on-screen preview.
+    The LaTeX variant escapes and uses \\%; this one stays readable."""
+    role = (entry.get("role") or "").strip()
+    pct = (entry.get("metrics") or "").strip().rstrip("%").strip()
+    topic = (entry.get("description") or "").strip()
+    pct_part = f" ({pct}%)" if pct else ""
+    if role and topic:
+        return f"{role}{pct_part}: {topic}"
+    return f"{role}{pct_part}" if role else topic
+
+
+def _supervision_latex(entry):
+    title = ", ".join(
+        tex_escape(p.strip()) for p in
+        [entry.get("title"), entry.get("student_level"),
+         entry.get("organisation"), entry.get("location")]
+        if p and p.strip())
+    date_label = tex_escape(supervision_date_label(entry))
+    role = (entry.get("role") or "").strip()
+    pct = (entry.get("metrics") or "").strip().rstrip("%").strip()
+    topic = (entry.get("description") or "").strip()
+    pct_part = f" ({tex_escape(pct)}\\%)" if pct else ""
+    if role and topic:
+        body = f"{tex_escape(role)}{pct_part}: {tex_escape(topic)}"
+    elif role:
+        body = f"{tex_escape(role)}{pct_part}"
+    else:
+        body = tex_escape(topic)
+    return f"\\begin{{jobshort}}{{{title}}}{{{date_label}}}\n{body}\n\\end{{jobshort}}"
+
+
 def cv_entry_latex(entry):
+    if (entry.get("cv_section") or "") == SUPERVISION_SECTION:
+        return _supervision_latex(entry)
     title = tex_escape(entry.get("title"))
     date_label = tex_escape(entry.get("entry_date") or str(entry.get("cv_year") or ""))
     bullets = []
@@ -398,20 +464,34 @@ def cv_entries_latex(entries):
             current_section = sec
         if sub:
             chunks.append(f"\\subsection*{{{tex_escape(sub)}}}")
-        chunks.extend(cv_entry_latex(e) for e in rows)
+        if sec == SUPERVISION_SECTION:
+            # supervision entries are tightened with \vspace{-10pt} between them
+            sup = []
+            for i, e in enumerate(rows):
+                if i:
+                    sup.append("\\vspace{-10pt}")
+                sup.append(cv_entry_latex(e))
+            chunks.append("\n".join(sup))
+        else:
+            chunks.extend(cv_entry_latex(e) for e in rows)
     return "\n\n".join(chunks)
+
+
+def _iso_or_none(value):
+    return value.isoformat() if hasattr(value, "isoformat") else value
 
 
 def save_cv_entry_from_values(user_id, entry_date, destination_label, title,
                               organisation=None, location=None, role=None,
                               description=None, outcome=None, metrics=None,
-                              evidence_url=None, status="draft",
+                              evidence_url=None, student_level=None,
+                              start_on=None, end_on=None, status="draft",
                               source_type="manual", session_id=None,
                               milestone_id=None, project_id=None):
     section_name, subsection_name = cv_destination_parts(destination_label)
     return db.add_cv_entry(
         user_id=user_id,
-        entry_date=entry_date.isoformat() if hasattr(entry_date, "isoformat") else entry_date,
+        entry_date=_iso_or_none(entry_date),
         cv_section=section_name,
         cv_subsection=subsection_name,
         title=title,
@@ -422,6 +502,9 @@ def save_cv_entry_from_values(user_id, entry_date, destination_label, title,
         outcome=outcome,
         metrics=metrics,
         evidence_url=evidence_url,
+        student_level=student_level,
+        start_on=_iso_or_none(start_on),
+        end_on=_iso_or_none(end_on),
         status=status,
         source_type=source_type,
         session_id=session_id,
@@ -578,9 +661,18 @@ def view_log(me):
                     db.set_project_importance(proj_labels[proj], new_imp)
                     db.clear_user_caches()
                     st.rerun()
-        # optional milestone, filtered to the chosen existing project.
+        # optional milestone. For an existing project, pick from its open
+        # milestones (or add one); for a brand-new project, offer to start it
+        # with a first milestone — both are created together on Save.
         new_ms_name = ""
-        if not life_mode and proj not in ("— none —", "+ New project…"):
+        if not life_mode and proj == "+ New project…":
+            new_ms_name = st.text_input(
+                "First milestone (optional)", key="log_new_ms_forproj",
+                placeholder="e.g. First draft",
+                help="Optionally give the new project its first milestone. "
+                     "Add more in the Projects tab later.")
+            milestone_id = "__new__" if new_ms_name.strip() else None
+        elif not life_mode and proj != "— none —":
             chosen_pid = proj_labels[proj]
             ms = db.project_milestones(chosen_pid)
             open_ms = [m for m in ms if m["status"] != "done"]
@@ -1139,6 +1231,14 @@ def view_week(me):
                 wk_new_name = st.text_input("New project name",
                                             placeholder="e.g. DAFNI Fellowship",
                                             key="wk_newproj")
+                # a brand-new project has no milestones yet: offer to start it
+                # with one, created together with the project on Add block.
+                wk_new_ms = st.text_input(
+                    "First milestone (optional)", key="wk_new_ms_forproj",
+                    placeholder="e.g. First draft",
+                    help="Optionally give the new project its first milestone. "
+                         "Add more in the Projects tab later.")
+                wk_milestone_id = "__new__" if wk_new_ms.strip() else None
             elif b_proj != "— none —":
                 cur_imp = next((p.get("high_importance") for p in matching
                                 if p["name"] == b_proj), False)
@@ -2932,56 +3032,239 @@ def view_milestones(me):
 
 
 
+def _cv_generic_add_form(me, dest):
+    with st.form("cv_manual_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            entry_date = st.date_input("Date", value=dt.date.today(),
+                                       key="cv_manual_date")
+            title = st.text_input("Title", key="cv_manual_title",
+                                  placeholder="e.g. Editorial Board Member, Structural Safety")
+            organisation = st.text_input("Organisation / funder / host",
+                                         key="cv_manual_org")
+            location = st.text_input("Location (optional)",
+                                     key="cv_manual_loc")
+        with c2:
+            role = st.text_input("Role (optional)", key="cv_manual_role")
+            status = st.selectbox("Status", CV_STATUS_OPTIONS, index=0,
+                                  key="cv_manual_status")
+            evidence = st.text_input("Evidence URL (optional)",
+                                     key="cv_manual_evidence")
+            metrics = st.text_input("Metrics (optional)",
+                                    key="cv_manual_metrics",
+                                    placeholder="e.g. c. 100 attendees, £10,000")
+        description = st.text_area("Description / draft bullet(s)",
+                                   key="cv_manual_desc", height=90)
+        outcome = st.text_area("Outcome / significance (optional)",
+                               key="cv_manual_outcome", height=70)
+        submitted = st.form_submit_button("Save CV entry", type="primary")
+    if submitted:
+        if title.strip():
+            try:
+                save_cv_entry_from_values(
+                    user_id=me["id"], entry_date=entry_date,
+                    destination_label=dest, title=title.strip(),
+                    organisation=organisation, location=location, role=role,
+                    description=description, outcome=outcome,
+                    metrics=metrics, evidence_url=evidence,
+                    status=status, source_type="manual")
+                db.clear_user_caches()
+                st.success("CV entry saved.")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Could not save CV entry. {e}")
+        else:
+            st.error("Give the CV entry a title.")
+
+
+def _cv_supervision_add_form(me):
+    st.caption("Renders as a `jobshort`: "
+               "*{student, level, institution, country}{start – end}* "
+               "with a *role (%): topic* line.")
+    with st.form("cv_supervision_form", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            name = st.text_input("Student name", key="cv_sup_name",
+                                 placeholder="e.g. John Smith")
+            level = st.text_input("Degree / level", key="cv_sup_level",
+                                  placeholder="e.g. PhD, Master, MSc Research")
+            institution = st.text_input("Institution", key="cv_sup_inst",
+                                        placeholder="e.g. Imperial College London")
+            country = st.text_input("Country", key="cv_sup_country",
+                                    placeholder="e.g. United Kingdom")
+            status = st.selectbox("Status", CV_STATUS_OPTIONS, index=0,
+                                  key="cv_sup_status")
+        with c2:
+            start_on = st.date_input("Start", value=None, key="cv_sup_start")
+            end_on = st.date_input("End (expected)", value=None,
+                                   key="cv_sup_end")
+            role = st.text_input("Supervisory role", key="cv_sup_role",
+                                 placeholder="e.g. First / Second / Co- / External supervisor")
+            pct = st.text_input("Percentage (optional)", key="cv_sup_pct",
+                                placeholder="e.g. 20 or 100 — omit for co-/external")
+        topic = st.text_input("Project topic", key="cv_sup_topic",
+                              placeholder="e.g. Rail data analysis and probabilistic modelling")
+        submitted = st.form_submit_button("Save supervision entry",
+                                          type="primary")
+    if submitted:
+        if not name.strip():
+            st.error("Enter the student's name.")
+            return
+        try:
+            save_cv_entry_from_values(
+                user_id=me["id"],
+                entry_date=start_on or dt.date.today(),
+                destination_label=SUPERVISION_SECTION, title=name.strip(),
+                organisation=institution, location=country, role=role,
+                description=topic, metrics=pct, student_level=level,
+                start_on=start_on, end_on=end_on,
+                status=status, source_type="manual")
+            db.clear_user_caches()
+            st.success("Supervision entry saved.")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Could not save supervision entry. {e}")
+
+
+def _cv_generic_edit(e):
+    if e.get("organisation") or e.get("role") or e.get("location"):
+        st.write(" · ".join(v for v in [e.get("role"), e.get("organisation"),
+                                        e.get("location")] if v))
+    for label, key in [("Description", "description"), ("Outcome", "outcome"),
+                       ("Metrics", "metrics"), ("Evidence", "evidence_url")]:
+        if e.get(key):
+            st.markdown(f"**{label}:** {e.get(key)}")
+
+    with st.form(f"cv_edit_{e['id']}"):
+        ec1, ec2 = st.columns(2)
+        with ec1:
+            edit_date = st.date_input(
+                "Date", value=dt.date.fromisoformat(e["entry_date"]),
+                key=f"cv_date_{e['id']}")
+            edit_dest_label = cv_destination_label(
+                e.get("cv_section"), e.get("cv_subsection"))
+            dest_keys = list(CV_DESTINATIONS.keys())
+            edit_dest = st.selectbox(
+                "CV destination", dest_keys,
+                index=dest_keys.index(edit_dest_label)
+                if edit_dest_label in dest_keys else 0,
+                key=f"cv_dest_{e['id']}")
+            edit_title = st.text_input("Title", value=e.get("title") or "",
+                                       key=f"cv_title_{e['id']}")
+            edit_status = st.selectbox(
+                "Status", CV_STATUS_OPTIONS,
+                index=CV_STATUS_OPTIONS.index(e.get("status"))
+                if e.get("status") in CV_STATUS_OPTIONS else 0,
+                key=f"cv_status_{e['id']}")
+        with ec2:
+            edit_org = st.text_input(
+                "Organisation / funder / host",
+                value=e.get("organisation") or "", key=f"cv_org_{e['id']}")
+            edit_role = st.text_input("Role", value=e.get("role") or "",
+                                      key=f"cv_role_{e['id']}")
+            edit_loc = st.text_input("Location", value=e.get("location") or "",
+                                     key=f"cv_loc_{e['id']}")
+            edit_evidence = st.text_input(
+                "Evidence URL", value=e.get("evidence_url") or "",
+                key=f"cv_evidence_{e['id']}")
+        edit_desc = st.text_area(
+            "Description / draft bullet(s)", value=e.get("description") or "",
+            height=90, key=f"cv_desc_{e['id']}")
+        edit_outcome = st.text_area(
+            "Outcome / significance", value=e.get("outcome") or "",
+            height=70, key=f"cv_outcome_{e['id']}")
+        edit_metrics = st.text_input(
+            "Metrics", value=e.get("metrics") or "", key=f"cv_metrics_{e['id']}")
+        save_edit = st.form_submit_button("Save changes", type="primary")
+        if save_edit:
+            if edit_title.strip():
+                sec, sub = cv_destination_parts(edit_dest)
+                db.update_cv_entry(e["id"], {
+                    "entry_date": edit_date.isoformat(),
+                    "cv_section": sec, "cv_subsection": sub,
+                    "title": edit_title.strip(), "organisation": edit_org,
+                    "location": edit_loc, "role": edit_role,
+                    "description": edit_desc, "outcome": edit_outcome,
+                    "metrics": edit_metrics, "evidence_url": edit_evidence,
+                    "status": edit_status,
+                })
+                db.clear_user_caches()
+                st.success("Updated.")
+                st.rerun()
+            else:
+                st.error("Title can't be empty.")
+
+
+def _cv_supervision_edit(e):
+    body = supervision_body_text(e)
+    st.markdown(f"**{supervision_title_line(e)}** — {supervision_date_label(e)}")
+    if body:
+        st.write(body)
+    _d = lambda k: dt.date.fromisoformat(e[k]) if e.get(k) else None
+    with st.form(f"cv_edit_{e['id']}"):
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            s_name = st.text_input("Student name", value=e.get("title") or "",
+                                   key=f"cv_sup_name_{e['id']}")
+            s_level = st.text_input("Degree / level",
+                                    value=e.get("student_level") or "",
+                                    key=f"cv_sup_level_{e['id']}")
+            s_inst = st.text_input("Institution",
+                                   value=e.get("organisation") or "",
+                                   key=f"cv_sup_inst_{e['id']}")
+            s_country = st.text_input("Country", value=e.get("location") or "",
+                                      key=f"cv_sup_country_{e['id']}")
+            s_status = st.selectbox(
+                "Status", CV_STATUS_OPTIONS,
+                index=CV_STATUS_OPTIONS.index(e.get("status"))
+                if e.get("status") in CV_STATUS_OPTIONS else 0,
+                key=f"cv_sup_status_{e['id']}")
+        with sc2:
+            s_start = st.date_input("Start", value=_d("start_on"),
+                                    key=f"cv_sup_start_{e['id']}")
+            s_end = st.date_input("End (expected)", value=_d("end_on"),
+                                  key=f"cv_sup_end_{e['id']}")
+            s_role = st.text_input("Supervisory role", value=e.get("role") or "",
+                                   key=f"cv_sup_role_{e['id']}")
+            s_pct = st.text_input("Percentage (optional)",
+                                  value=e.get("metrics") or "",
+                                  key=f"cv_sup_pct_{e['id']}")
+        s_topic = st.text_input("Project topic", value=e.get("description") or "",
+                                key=f"cv_sup_topic_{e['id']}")
+        save_edit = st.form_submit_button("Save changes", type="primary")
+        if save_edit:
+            if s_name.strip():
+                db.update_cv_entry(e["id"], {
+                    "entry_date": (s_start or dt.date.fromisoformat(
+                        e["entry_date"])).isoformat(),
+                    "cv_section": SUPERVISION_SECTION, "cv_subsection": None,
+                    "title": s_name.strip(), "student_level": s_level,
+                    "organisation": s_inst, "location": s_country,
+                    "start_on": s_start.isoformat() if s_start else None,
+                    "end_on": s_end.isoformat() if s_end else None,
+                    "role": s_role, "metrics": s_pct, "description": s_topic,
+                    "status": s_status,
+                })
+                db.clear_user_caches()
+                st.success("Updated.")
+                st.rerun()
+            else:
+                st.error("Student name can't be empty.")
+
+
 def view_cv(me):
     section("CV", "CV records",
             "Private achievement records you can later polish into CV entries.")
 
     with st.expander("Add standalone CV entry", expanded=False):
-        with st.form("cv_manual_form", clear_on_submit=True):
-            c1, c2 = st.columns(2)
-            with c1:
-                entry_date = st.date_input("Date", value=dt.date.today(),
-                                           key="cv_manual_date")
-                dest = st.selectbox("CV destination",
-                                    list(CV_DESTINATIONS.keys()),
-                                    key="cv_manual_dest")
-                title = st.text_input("Title", key="cv_manual_title",
-                                      placeholder="e.g. Editorial Board Member, Structural Safety")
-                organisation = st.text_input("Organisation / funder / host",
-                                             key="cv_manual_org")
-                location = st.text_input("Location (optional)",
-                                         key="cv_manual_loc")
-            with c2:
-                role = st.text_input("Role (optional)", key="cv_manual_role")
-                status = st.selectbox("Status", CV_STATUS_OPTIONS, index=0,
-                                      key="cv_manual_status")
-                evidence = st.text_input("Evidence URL (optional)",
-                                         key="cv_manual_evidence")
-                metrics = st.text_input("Metrics (optional)",
-                                        key="cv_manual_metrics",
-                                        placeholder="e.g. c. 100 attendees, £10,000")
-            description = st.text_area("Description / draft bullet(s)",
-                                       key="cv_manual_desc", height=90)
-            outcome = st.text_area("Outcome / significance (optional)",
-                                   key="cv_manual_outcome", height=70)
-            submitted = st.form_submit_button("Save CV entry", type="primary")
-        if submitted:
-            if title.strip():
-                try:
-                    save_cv_entry_from_values(
-                        user_id=me["id"], entry_date=entry_date,
-                        destination_label=dest, title=title.strip(),
-                        organisation=organisation, location=location, role=role,
-                        description=description, outcome=outcome,
-                        metrics=metrics, evidence_url=evidence,
-                        status=status, source_type="manual")
-                    db.clear_user_caches()
-                    st.success("CV entry saved.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not save CV entry. {e}")
-            else:
-                st.error("Give the CV entry a title.")
+        # Destination lives outside the form so choosing Supervision reruns and
+        # swaps in the tailored fields (form widgets don't rerun until submit).
+        dest = st.selectbox("CV destination", list(CV_DESTINATIONS.keys()),
+                            key="cv_manual_dest")
+        if dest == SUPERVISION_SECTION:
+            _cv_supervision_add_form(me)
+        else:
+            _cv_generic_add_form(me, dest)
 
     summary = db.cv_entry_summary()
     if not summary:
@@ -3032,80 +3315,10 @@ def view_cv(me):
                 f"{e.get('cv_section') or 'Other'}"
                 + (f" → {e.get('cv_subsection')}" if e.get('cv_subsection') else "")
                 + f" · source: {e.get('source_type') or 'manual'}")
-            if e.get("organisation") or e.get("role") or e.get("location"):
-                st.write(" · ".join(v for v in [e.get("role"), e.get("organisation"), e.get("location")] if v))
-            for label, key in [("Description", "description"),
-                               ("Outcome", "outcome"),
-                               ("Metrics", "metrics"),
-                               ("Evidence", "evidence_url")]:
-                if e.get(key):
-                    st.markdown(f"**{label}:** {e.get(key)}")
-
-            with st.form(f"cv_edit_{e['id']}"):
-                ec1, ec2 = st.columns(2)
-                with ec1:
-                    edit_date = st.date_input(
-                        "Date", value=dt.date.fromisoformat(e["entry_date"]),
-                        key=f"cv_date_{e['id']}")
-                    edit_dest_label = cv_destination_label(
-                        e.get("cv_section"), e.get("cv_subsection"))
-                    dest_keys = list(CV_DESTINATIONS.keys())
-                    edit_dest = st.selectbox(
-                        "CV destination", dest_keys,
-                        index=dest_keys.index(edit_dest_label)
-                        if edit_dest_label in dest_keys else 0,
-                        key=f"cv_dest_{e['id']}")
-                    edit_title = st.text_input("Title", value=e.get("title") or "",
-                                               key=f"cv_title_{e['id']}")
-                    edit_status = st.selectbox(
-                        "Status", CV_STATUS_OPTIONS,
-                        index=CV_STATUS_OPTIONS.index(e.get("status"))
-                        if e.get("status") in CV_STATUS_OPTIONS else 0,
-                        key=f"cv_status_{e['id']}")
-                with ec2:
-                    edit_org = st.text_input(
-                        "Organisation / funder / host",
-                        value=e.get("organisation") or "",
-                        key=f"cv_org_{e['id']}")
-                    edit_role = st.text_input("Role", value=e.get("role") or "",
-                                              key=f"cv_role_{e['id']}")
-                    edit_loc = st.text_input("Location", value=e.get("location") or "",
-                                             key=f"cv_loc_{e['id']}")
-                    edit_evidence = st.text_input(
-                        "Evidence URL", value=e.get("evidence_url") or "",
-                        key=f"cv_evidence_{e['id']}")
-                edit_desc = st.text_area(
-                    "Description / draft bullet(s)", value=e.get("description") or "",
-                    height=90, key=f"cv_desc_{e['id']}")
-                edit_outcome = st.text_area(
-                    "Outcome / significance", value=e.get("outcome") or "",
-                    height=70, key=f"cv_outcome_{e['id']}")
-                edit_metrics = st.text_input(
-                    "Metrics", value=e.get("metrics") or "",
-                    key=f"cv_metrics_{e['id']}")
-                save_edit = st.form_submit_button("Save changes", type="primary")
-                if save_edit:
-                    if edit_title.strip():
-                        sec, sub = cv_destination_parts(edit_dest)
-                        db.update_cv_entry(e["id"], {
-                            "entry_date": edit_date.isoformat(),
-                            "cv_section": sec,
-                            "cv_subsection": sub,
-                            "title": edit_title.strip(),
-                            "organisation": edit_org,
-                            "location": edit_loc,
-                            "role": edit_role,
-                            "description": edit_desc,
-                            "outcome": edit_outcome,
-                            "metrics": edit_metrics,
-                            "evidence_url": edit_evidence,
-                            "status": edit_status,
-                        })
-                        db.clear_user_caches()
-                        st.success("Updated.")
-                        st.rerun()
-                    else:
-                        st.error("Title can't be empty.")
+            if (e.get("cv_section") or "") == SUPERVISION_SECTION:
+                _cv_supervision_edit(e)
+            else:
+                _cv_generic_edit(e)
             if st.button("Delete entry", key=f"cv_delete_{e['id']}"):
                 db.delete_cv_entry(e["id"])
                 db.clear_user_caches()
