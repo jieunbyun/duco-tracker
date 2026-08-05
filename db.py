@@ -306,15 +306,19 @@ def todos_in_range(date_from, date_to, include_open_before=True):
     sort_order. If include_open_before, also include todos due before
     date_from that are either still open (carried over) or were completed
     within [date_from, date_to] (so this week's "done" hours capture carried
-    tasks finished this week)."""
+    tasks finished this week).
+
+    Cancelled todos stay visible in their own week (struck through) but never
+    carry forward: they are excluded from the "due before date_from" pulls."""
     cols = ("id,title,note,due_on,is_done,project_id,est_hours,"
-            "sort_order,done_at,is_important")
+            "sort_order,done_at,is_important,is_cancelled")
     rows = (client().table("todo").select(cols)
             .gte("due_on", date_from).lte("due_on", date_to)
             .order("sort_order").order("due_on").execute().data or [])
     if include_open_before:
         carried = (client().table("todo").select(cols)
                    .lt("due_on", date_from).eq("is_done", False)
+                   .eq("is_cancelled", False)
                    .order("sort_order").order("due_on").execute().data or [])
         # carried tasks completed within this range: their done_at is a
         # timestamp, so bound it by [date_from, day after date_to).
@@ -322,6 +326,7 @@ def todos_in_range(date_from, date_to, include_open_before=True):
                       + dt.timedelta(days=1)).isoformat()
         carried_done = (client().table("todo").select(cols)
                         .lt("due_on", date_from).eq("is_done", True)
+                        .eq("is_cancelled", False)
                         .gte("done_at", date_from).lt("done_at", done_upper)
                         .order("sort_order").order("due_on").execute().data
                         or [])
@@ -362,6 +367,22 @@ def set_todo_done(todo_id, done):
     import datetime as _dt
     fields = {"is_done": bool(done),
               "done_at": _dt.datetime.now().isoformat() if done else None}
+    return client().table("todo").update(fields).eq("id", todo_id).execute()
+
+
+def set_todo_cancelled(todo_id, cancelled, due_on=None):
+    """Cancel (or restore) a to-do. A cancelled to-do is kept for the record,
+    shown struck through in its own week, and never carried forward. Cancelling
+    clears any done state, since a cancelled task did not happen.
+
+    Pass due_on (the week being viewed) when cancelling so a task carried over
+    from an earlier week is re-filed under the week it was cancelled in —
+    otherwise it would silently disappear back into its original week."""
+    fields = {"is_cancelled": bool(cancelled)}
+    if cancelled:
+        fields.update({"is_done": False, "done_at": None})
+        if due_on:
+            fields["due_on"] = due_on
     return client().table("todo").update(fields).eq("id", todo_id).execute()
 
 

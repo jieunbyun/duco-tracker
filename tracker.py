@@ -996,25 +996,37 @@ def view_week(me):
                 t["sort_order"] = i
         n = len(todos)
         for i, t in enumerate(todos):
-            tc1, tc2, tc3, tc4 = st.columns([4.2, 1.9, 1.4, 1.8])
-            overdue = (not t["is_done"]
+            tc1, tc2, tc3, tc4 = st.columns([4.0, 1.8, 1.3, 2.4])
+            cancelled = bool(t.get("is_cancelled"))
+            overdue = (not t["is_done"] and not cancelled
                        and dt.date.fromisoformat(t["due_on"]) < week_start)
             important = bool(t.get("is_important"))
             with tc1:
                 label = ("⭐ " + t["title"]) if important else t["title"]
-                checked = st.checkbox(
-                    label, value=t["is_done"], key=f"todo_{t['id']}")
-                if checked != t["is_done"]:
-                    db.set_todo_done(t["id"], checked)
-                    db.clear_user_caches()
-                    st.rerun()
+                if cancelled:
+                    # dropped, but kept for the record: struck through, no
+                    # checkbox (it can't be completed), and it stays in this
+                    # week only — todos_in_range never carries it forward.
+                    st.markdown(
+                        f"<div style='color:#9aa5b1;margin:6px 0 4px 28px'>"
+                        f"<s>{label}</s></div>", unsafe_allow_html=True)
+                else:
+                    checked = st.checkbox(
+                        label, value=t["is_done"], key=f"todo_{t['id']}")
+                    if checked != t["is_done"]:
+                        db.set_todo_done(t["id"], checked)
+                        db.clear_user_caches()
+                        st.rerun()
                 if t.get("note"):
+                    note = f"<s>{t['note']}</s>" if cancelled else t["note"]
                     st.markdown(
                         f"<div style='font-size:0.72rem;color:#6b7280;"
-                        f"margin:-6px 0 4px 28px'>{t['note']}</div>",
+                        f"margin:-6px 0 4px 28px'>{note}</div>",
                         unsafe_allow_html=True)
             with tc2:
                 bits = []
+                if cancelled:
+                    bits.append("cancelled")
                 if overdue:
                     bits.append("carried")
                 est = t.get("est_hours")
@@ -1047,21 +1059,47 @@ def view_week(me):
                     db.clear_user_caches()
                     st.rerun()
             with tc4:
-                sr, ed, dl = st.columns(3)
-                with sr:
-                    star = "★" if important else "☆"
-                    if st.button(star, key=f"tdimp_{t['id']}",
-                                 help="Toggle high importance"):
-                        db.set_todo_important(t["id"], not important)
-                        db.clear_user_caches()
-                        st.rerun()
-                with ed:
-                    edit_pop = st.popover("✎", help="Edit")
-                with dl:
-                    if st.button("✕", key=f"tddel_{t['id']}", help="Delete"):
-                        db.delete_todo(t["id"])
-                        db.clear_user_caches()
-                        st.rerun()
+                if cancelled:
+                    rs, dl = st.columns(2)
+                    with rs:
+                        if st.button("↺", key=f"tdunc_{t['id']}",
+                                     help="Restore this to-do"):
+                            db.set_todo_cancelled(t["id"], False)
+                            db.clear_user_caches()
+                            st.rerun()
+                    with dl:
+                        if st.button("✕", key=f"tddel_{t['id']}",
+                                     help="Delete permanently"):
+                            db.delete_todo(t["id"])
+                            db.clear_user_caches()
+                            st.rerun()
+                    edit_pop = None
+                else:
+                    sr, ed, cx, dl = st.columns(4)
+                    with sr:
+                        star = "★" if important else "☆"
+                        if st.button(star, key=f"tdimp_{t['id']}",
+                                     help="Toggle high importance"):
+                            db.set_todo_important(t["id"], not important)
+                            db.clear_user_caches()
+                            st.rerun()
+                    with ed:
+                        edit_pop = st.popover("✎", help="Edit")
+                    with cx:
+                        if st.button("⊘", key=f"tdcan_{t['id']}",
+                                     help="Cancel: keep it struck through "
+                                          "here, don't carry it forward"):
+                            db.set_todo_cancelled(
+                                t["id"], True, due_on=week_start.isoformat())
+                            db.clear_user_caches()
+                            st.rerun()
+                    with dl:
+                        if st.button("✕", key=f"tddel_{t['id']}",
+                                     help="Delete permanently"):
+                            db.delete_todo(t["id"])
+                            db.clear_user_caches()
+                            st.rerun()
+            if edit_pop is not None:
                 with edit_pop:
                     with st.form(f"tded_form_{t['id']}"):
                         e_title = st.text_input("Title", value=t["title"],
@@ -1112,19 +1150,21 @@ def view_week(me):
                             st.rerun()
                         elif tded_submit:
                             st.error("Title can't be empty.")
-        # estimated-hours totals (all, and just what's still open)
-        est_all = sum((t.get("est_hours") or 0) for t in todos)
-        est_open = sum((t.get("est_hours") or 0) for t in todos
+        # estimated-hours totals (all, and just what's still open). Cancelled
+        # to-dos are dropped work, so they count towards neither.
+        live = [t for t in todos if not t.get("is_cancelled")]
+        est_all = sum((t.get("est_hours") or 0) for t in live)
+        est_open = sum((t.get("est_hours") or 0) for t in live
                        if not t["is_done"])
         est_done = est_all - est_open
         if est_all:
             st.caption(f"Estimated effort: {est_open:g} h remaining "
                        f"of {est_all:g} h planned ({est_done:g} h done)")
         # high-importance subset, shown alongside the overall totals
-        if any(t.get("is_important") for t in todos):
-            est_imp = sum((t.get("est_hours") or 0) for t in todos
+        if any(t.get("is_important") for t in live):
+            est_imp = sum((t.get("est_hours") or 0) for t in live
                           if t.get("is_important"))
-            est_imp_open = sum((t.get("est_hours") or 0) for t in todos
+            est_imp_open = sum((t.get("est_hours") or 0) for t in live
                                if t.get("is_important") and not t["is_done"])
             est_imp_done = est_imp - est_imp_open
             st.caption(f"⭐ High importance: {est_imp_open:g} h remaining "
@@ -3592,7 +3632,10 @@ def view_help(me):
             "day, a category, the times, and what you worked on, then **Add "
             "block**. It also keeps a weekly to-do list, where you can jot "
             "tasks, give each an estimated number of hours, tick them off, and "
-            "carry unfinished ones into next week.")
+            "carry unfinished ones into next week. A task you decide not to "
+            "do can be **cancelled** (⊘) instead of deleted: it stays in that "
+            "week struck through as a record, counts towards no hours, and is "
+            "not carried forward. ↺ brings it back; ✕ still deletes for good.")
 
     with st.expander("2. Record a new project with milestones"):
         st.markdown(
