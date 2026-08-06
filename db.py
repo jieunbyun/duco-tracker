@@ -112,16 +112,33 @@ def clear_user_caches():
     st.cache_data.clear()
 
 
+# ===========================================================================
+# CACHING RULE — read before adding an @st.cache_data function.
+#
+# st.cache_data is a SERVER-WIDE cache shared by every visitor, not a
+# per-session one. Anything user-specific must therefore take the auth uid as
+# a plain argument (by convention named `u`, filled with _uid() by the public
+# wrapper) so each user gets their own cache entry.
+#
+# Never prefix that argument with an underscore. Streamlit deliberately
+# excludes underscore-prefixed arguments from the cache key (it is the escape
+# hatch for unhashable things like DB connections), so `_u` collapses every
+# user onto ONE shared entry and the first caller's rows — including their
+# identity — are served to everybody else until the TTL expires.
+# tests/test_cache_keys.py enforces this.
+# ===========================================================================
+
+
 # ---- app_user resolution --------------------------------------------------
 @st.cache_data(ttl=120)
-def _my_app_user(_u):
-    """The app_user row for auth uid `_u`, or None if unlinked. Cached per
+def _my_app_user(u):
+    """The app_user row for auth uid `u`, or None if unlinked. Cached per
     user so the many transitive my_app_user_id() calls in one page render
     don't each re-scan the directory. Invalidated by clear_user_caches() on
     writes, and explicitly after link_my_login()."""
     rows = client().table("app_user").select("*").execute().data or []
     for r in rows:
-        if r.get("auth_user_id") == _u:
+        if r.get("auth_user_id") == u:
             return r
     return None
 
@@ -193,7 +210,7 @@ def _visible_project_ids(me_id):
 
 
 @st.cache_data(ttl=30)
-def _my_projects(_u):
+def _my_projects(u):
     """Projects the signed-in user may see, for the to-do / budget / forecast
     pickers. Scoped through the shared visibility rule (owner or milestone
     contributor); an unfiltered select would expose every user's projects."""
@@ -458,7 +475,7 @@ def project_detail(project_id):
 
 
 @st.cache_data(ttl=30)
-def _active_projects_for_gantt(_u):
+def _active_projects_for_gantt(u):
     """Active projects the user may see, annotated with their relationship to
     each. Ordered: owned first, then contributed-to, then by due date. Used by
     both the Gantt and the grouped project list.
@@ -503,7 +520,7 @@ def my_app_user_id():
 
 
 @st.cache_data(ttl=60)
-def _projects_i_participate_in(_u):
+def _projects_i_participate_in(u):
     """Projects the user may see (owner or milestone contributor), as
     [{id, name}], for the milestones overview and selectors. Same visibility
     rule as everywhere else."""
@@ -630,7 +647,7 @@ def project_history(project_id):
 
 
 @st.cache_data(ttl=30)
-def _project_milestones(project_id, _u):
+def _project_milestones(project_id, u):
     rows = (client().table("project_milestone")
             .select("id,title,detail,due_on,start_on,status,sort_order,"
                     "hypothesis,success_measure,"
@@ -650,11 +667,11 @@ def project_milestones(project_id):
 
 
 @st.cache_data(ttl=30)
-def _project_milestones_bulk(project_ids_key, _u):
+def _project_milestones_bulk(project_ids_key, u):
     """Milestones for many projects in one query, grouped by project_id.
 
     Used by the Gantt chart so the Projects tab does not issue one
-    project_milestones() query per project. The _u argument keeps the cache
+    project_milestones() query per project. The u argument keeps the cache
     scoped to the signed-in user.
     """
     project_ids = list(project_ids_key)
@@ -810,7 +827,7 @@ def milestone_history_combined(milestone_id, limit=5):
 
 
 @st.cache_data(ttl=30)
-def _milestone_history_bulk(milestone_ids_key, _u, limit=5):
+def _milestone_history_bulk(milestone_ids_key, u, limit=5):
     """Combined edit+note history for MANY milestones in just two queries.
     Returns {milestone_id: [history items]} (each capped at `limit`, newest
     first). Replaces calling milestone_history_combined once per milestone,
@@ -872,7 +889,7 @@ def milestone_percent(m, my_hours=None):
 
 
 @st.cache_data(ttl=120)
-def _group_members(_u):
+def _group_members(u):
     """Active people who can be milestone contributors."""
     return (client().table("app_user")
             .select("id,full_name,role,is_active")
@@ -967,7 +984,7 @@ def _my_milestone_hours_uncached():
 
 
 @st.cache_data(ttl=30)
-def _my_milestone_hours_cached(_u):
+def _my_milestone_hours_cached(u):
     """Map of milestone_id -> the current user's own hours toward it.
     Cached per-user; cleared on writes."""
     return _my_milestone_hours_uncached()
@@ -1093,7 +1110,7 @@ def duplicate_session(session_id, new_date=None):
 
 # ---- inference (views + RPC functions) ------------------------------------
 @st.cache_data(ttl=30)
-def _project_tracker(_u):
+def _project_tracker(u):
     """Rows of the v_project_tracker view (hours vs estimate, completion) for
     the Projects tab, scoped to projects the user may see. The view itself is
     NOT row-scoped, so without this filter every user's projects would show —
@@ -1148,7 +1165,7 @@ def milestone_progress_bars(project_id):
 
 
 @st.cache_data(ttl=30)
-def _milestone_progress_bulk(project_ids_key, _u):
+def _milestone_progress_bulk(project_ids_key, u):
     """Milestone-completion stats for many projects in one query."""
     project_ids = list(project_ids_key)
     if not project_ids:
@@ -1177,7 +1194,7 @@ def milestone_progress_bulk(project_ids):
 
 
 @st.cache_data(ttl=30)
-def _milestone_progress_bars_bulk(project_ids_key, _u):
+def _milestone_progress_bars_bulk(project_ids_key, u):
     """Per-milestone progress bars for many projects in one query."""
     project_ids = list(project_ids_key)
     if not project_ids:
@@ -1408,7 +1425,7 @@ def delete_cv_entry(entry_id):
 
 
 @st.cache_data(ttl=60)
-def _cv_entry_summary(_u):
+def _cv_entry_summary(u):
     """Small, fast summary for the CV tab landing view."""
     return (client().table("cv_entry")
             .select("id,cv_year,cv_section,cv_subsection,status,source_type")
@@ -1420,7 +1437,7 @@ def cv_entry_summary():
 
 
 @st.cache_data(ttl=60)
-def _cv_entries(_u, year=None, status=None, section=None):
+def _cv_entries(u, year=None, status=None, section=None):
     q = client().table("cv_entry").select(CV_ENTRY_SELECT)
     if year not in (None, "All"):
         q = q.eq("cv_year", int(year))
