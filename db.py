@@ -185,35 +185,44 @@ def project_statuses():
 def _project_access_sets(me_id):
     """The two halves of the project-visibility rule for one user, as id sets:
 
-      owned_ids       -- projects where project.owner_id == me
-      contributed_ids -- projects where I am the contributor on a milestone
+      owned_ids    -- projects where project.owner_id == me
+      involved_ids -- projects I am involved in without owning them, either by
+                      being the contributor on one of their milestones or by
+                      being listed on the project itself (project_lead, shown
+                      in the UI as "People in charge")
 
-    A project is visible to a user iff its id is in owned_ids | contributed_ids.
+    A project is visible to a user iff its id is in owned_ids | involved_ids.
     This is the single source of truth for who may see a project; every
-    user-facing project listing scopes through it. Note project_lead membership
-    deliberately does NOT grant visibility — only ownership or contributing to
-    a milestone does. Each half is a server-side eq filter, so other users'
-    projects never leave the database."""
+    user-facing project listing scopes through it, so widening or narrowing
+    access is a change to this function alone.
+
+    Each half is a server-side eq filter on the current user's id, so rows for
+    projects the user has no relationship with never leave the database. That
+    is the property tests/test_project_visibility.py locks in: adding someone
+    to a project grants access deliberately; nothing else does."""
     owned = (client().table("project").select("id")
              .eq("owner_id", me_id).execute().data or [])
     contrib = (client().table("project_milestone").select("project_id")
                .eq("contributor_id", me_id).execute().data or [])
+    listed = (client().table("project_lead").select("project_id")
+              .eq("user_id", me_id).execute().data or [])
     owned_ids = {p["id"] for p in owned}
-    contributed_ids = {m["project_id"] for m in contrib if m.get("project_id")}
-    return owned_ids, contributed_ids
+    involved_ids = ({m["project_id"] for m in contrib if m.get("project_id")}
+                    | {L["project_id"] for L in listed if L.get("project_id")})
+    return owned_ids, involved_ids - owned_ids
 
 
 def _visible_project_ids(me_id):
-    """Set of project ids the user may see (owned or contributed-to)."""
-    owned_ids, contributed_ids = _project_access_sets(me_id)
-    return owned_ids | contributed_ids
+    """Set of project ids the user may see (owned, or involved in)."""
+    owned_ids, involved_ids = _project_access_sets(me_id)
+    return owned_ids | involved_ids
 
 
 @st.cache_data(ttl=30)
 def _my_projects(u):
     """Projects the signed-in user may see, for the to-do / budget / forecast
-    pickers. Scoped through the shared visibility rule (owner or milestone
-    contributor); an unfiltered select would expose every user's projects."""
+    pickers. Scoped through the shared visibility rule (_project_access_sets);
+    an unfiltered select would expose every user's projects."""
     me_id = my_app_user_id()
     if not me_id:
         return []
@@ -232,8 +241,8 @@ def my_projects():
 
 def projects_for_category(category_id, active_only=True):
     """Projects in one category the signed-in user may see, for the Week/Log
-    logging dropdowns. Scoped through the shared visibility rule (owner or
-    milestone contributor).
+    logging dropdowns. Scoped through the shared visibility rule
+    (_project_access_sets).
 
     By default only active projects are returned, so the pickers aren't
     cluttered with completed or archived work. Pass active_only=False to
@@ -477,12 +486,12 @@ def project_detail(project_id):
 @st.cache_data(ttl=30)
 def _active_projects_for_gantt(u):
     """Active projects the user may see, annotated with their relationship to
-    each. Ordered: owned first, then contributed-to, then by due date. Used by
+    each. Ordered: owned first, then involved-in, then by due date. Used by
     both the Gantt and the grouped project list.
 
-    Scoped through the shared visibility rule, so only projects the user owns
-    or contributes to a milestone on appear — i_lead means owner, i_participate
-    means milestone contributor (never owner).
+    Scoped through the shared visibility rule — i_lead means owner,
+    i_participate means involved without owning (milestone contributor, or
+    listed on the project under "People in charge").
 
     Cached per-user so the Projects tab issues these queries once per render,
     not on every widget interaction; cleared on writes by clear_user_caches()."""
@@ -493,8 +502,8 @@ def _active_projects_for_gantt(u):
     me_id = my_app_user_id()
     if not me_id:
         return []
-    owned_ids, contributed_ids = _project_access_sets(me_id)
-    vis = owned_ids | contributed_ids
+    owned_ids, involved_ids = _project_access_sets(me_id)
+    vis = owned_ids | involved_ids
     if not vis:
         return []
     rows = (client().table("project").select(
@@ -503,8 +512,7 @@ def _active_projects_for_gantt(u):
     rows = [r for r in rows if r.get("status_id") in active_ids]
     for r in rows:
         r["i_lead"] = r["id"] in owned_ids
-        r["i_participate"] = (r["id"] in contributed_ids
-                              and r["id"] not in owned_ids)
+        r["i_participate"] = r["id"] in involved_ids
     rows.sort(key=lambda r: (not r["i_lead"], not r["i_participate"],
                              r.get("due_on") or "9999"))
     return rows
@@ -521,9 +529,8 @@ def my_app_user_id():
 
 @st.cache_data(ttl=60)
 def _projects_i_participate_in(u):
-    """Projects the user may see (owner or milestone contributor), as
-    [{id, name}], for the milestones overview and selectors. Same visibility
-    rule as everywhere else."""
+    """Projects the user may see, as [{id, name}], for the milestones overview
+    and selectors. Same visibility rule as everywhere else."""
     me_id = my_app_user_id()
     if not me_id:
         return []

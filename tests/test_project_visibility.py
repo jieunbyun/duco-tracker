@@ -1,8 +1,19 @@
 """Regression tests for the project-visibility rule.
 
-A project must be visible ONLY to its owner or to someone who is the contributor
-on one of its milestones. This suite locks that in against every project-listing
-function in db.py, so a future change that drops a filter fails loudly here.
+A project must be visible ONLY to someone with a deliberate relationship to it:
+
+  * its owner (whoever created it), or
+  * the contributor on one of its milestones, or
+  * a person listed on the project itself, i.e. added under "People in charge".
+
+Anyone else must see nothing — that is the leak this suite exists to catch, and
+it is checked against EVERY project-listing function in db.py, so a future
+change that drops a filter fails loudly here.
+
+The three paths above are the whole rule; expected_visible() below recomputes
+them straight from the seed data as an independent oracle. Widening access (as
+membership did) means widening that oracle deliberately and keeping the
+no-relationship user seeing nothing — not relaxing the invariant.
 
 Run it directly (no pytest needed):
     python tests/test_project_visibility.py
@@ -23,7 +34,9 @@ db = fake_supabase.load_db()
 # ---- users ---------------------------------------------------------------
 SUP = "u-supervisor"      # owns most projects (the "authority" account)
 STU_A = "u-student-a"     # owns one project, contributes to a shared one
-STU_B = "u-student-b"     # owns nothing, contributes to nothing
+STU_B = "u-student-b"     # no relationship to anything: must see NOTHING
+STU_C = "u-student-c"     # owns nothing, contributes nothing, but is LISTED
+#                           on one project under "People in charge"
 
 # ---- statuses ------------------------------------------------------------
 STATUSES = [{"id": "s-active", "code": "active"},
@@ -64,8 +77,18 @@ MILESTONES = [
 V_TRACKER = [{"project_id": p["id"], "project_name": p["name"],
               "status": "active", "hours_logged": 1} for p in PROJECTS]
 
+# ---- people listed on a project ("People in charge") ---------------------
+# STU_C is listed on the supervisor's project and has no other tie to it: that
+# alone must grant visibility. SUP is listed on their own project too, which
+# must not change anything (they already own it).
+PROJECT_LEADS = [
+    {"project_id": P_SUP1, "user_id": STU_C, "is_leader": False,
+     "role": "student lead"},
+    {"project_id": P_SUP1, "user_id": SUP, "is_leader": True, "role": "PI"},
+]
+
 TABLES = {"project": PROJECTS, "project_milestone": MILESTONES,
-          "v_project_tracker": V_TRACKER}
+          "project_lead": PROJECT_LEADS, "v_project_tracker": V_TRACKER}
 
 # ---- wire the fake backend into db --------------------------------------
 _CURRENT = {"uid": None}
@@ -81,11 +104,13 @@ def as_user(uid):
 
 def expected_visible(uid):
     """Independent oracle for the rule, computed straight from the seed data:
-    owner of the project OR contributor on one of its milestones."""
+    owner of the project, OR contributor on one of its milestones, OR listed
+    on it under "People in charge"."""
     owned = {p["id"] for p in PROJECTS if p["owner_id"] == uid}
     contributed = {m["project_id"] for m in MILESTONES
                    if m["contributor_id"] == uid}
-    return owned | contributed
+    listed = {L["project_id"] for L in PROJECT_LEADS if L["user_id"] == uid}
+    return owned | contributed | listed
 
 
 def _pid(row):
@@ -102,7 +127,7 @@ LISTERS = {
     "active_projects_for_gantt": lambda: db.active_projects_for_gantt(),
 }
 
-ALL_USERS = [SUP, STU_A, STU_B]
+ALL_USERS = [SUP, STU_A, STU_B, STU_C]
 
 
 # ==========================================================================
@@ -141,6 +166,39 @@ def test_uninvolved_student_sees_nothing():
     as_user(STU_B)
     for name, fn in LISTERS.items():
         assert list(fn()) == [], f"{name} showed projects to an uninvolved user"
+
+
+# ==========================================================================
+# Being listed on a project ("People in charge") grants visibility, on its own
+# — no ownership and no milestone needed. This is what people expect when they
+# add someone to a project, and it is the ONLY thing membership grants: STU_C
+# still sees nothing else, and STU_B (listed nowhere) still sees nothing.
+# ==========================================================================
+def test_listed_person_sees_the_project_they_are_listed_on():
+    as_user(STU_C)
+    for name, fn in LISTERS.items():
+        assert {_pid(r) for r in fn()} == {P_SUP1}, (
+            f"{name} did not show the project STU_C is listed on")
+
+
+def test_membership_grants_that_project_and_nothing_more():
+    as_user(STU_C)
+    seen = {_pid(r) for r in db.project_tracker()}
+    assert P_SUP2 not in seen and P_STUDENTA not in seen and P_SHARED not in seen
+
+
+def test_listed_person_counts_as_participant_not_lead_on_the_gantt():
+    """STU_C is on the project but does not own it, so the Gantt must file it
+    under 'involved', not 'mine' — the owner is still the supervisor."""
+    as_user(STU_C)
+    rows = {r["id"]: r for r in db.active_projects_for_gantt()}
+    assert P_SUP1 in rows, ("the Gantt hid the project STU_C is listed on — "
+                            "membership no longer grants visibility")
+    assert rows[P_SUP1]["i_participate"] and not rows[P_SUP1]["i_lead"]
+    as_user(SUP)
+    rows = {r["id"]: r for r in db.active_projects_for_gantt()}
+    # SUP is listed on P_SUP1 as well, but owning it must win.
+    assert rows[P_SUP1]["i_lead"] and not rows[P_SUP1]["i_participate"]
 
 
 # ==========================================================================
