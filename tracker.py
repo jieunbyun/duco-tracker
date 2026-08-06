@@ -1609,6 +1609,37 @@ def project_gantt_segments(project, milestones):
     return [(s, e) for s, e in merged]
 
 
+def gantt_window_end(win_start):
+    """The end of the Gantt's fixed 12-month window. 29 Feb has no anniversary
+    in a common year, so it falls forward to 1 March."""
+    if (win_start.month, win_start.day) == (2, 29):
+        return dt.date(win_start.year + 1, 3, 1)
+    return dt.date(win_start.year + 1, win_start.month, win_start.day)
+
+
+def gantt_rows(chart_projects, win_start, win_end):
+    """Split projects into (rows, offscreen, undated) for the Gantt.
+
+    Only projects that actually overlap the visible window become rows. This
+    matters because every row costs a fixed slice of chart height whether or
+    not anything is drawn in it: a project that finished two years ago would
+    otherwise hold an empty, unlabelled lane in every window forever, which is
+    where the Gantt's big blank gaps came from.
+
+    Order is preserved, so the caller's led-then-participant grouping (and the
+    divider drawn from it) survives the filtering.
+    """
+    rows, offscreen, undated = [], [], []
+    for p in chart_projects:
+        if not (p.get("started_on") and p.get("due_on")):
+            undated.append(p)
+            continue
+        overlaps = (dt.date.fromisoformat(p["started_on"]) <= win_end
+                    and dt.date.fromisoformat(p["due_on"]) >= win_start)
+        (rows if overlaps else offscreen).append(p)
+    return rows, offscreen, undated
+
+
 def render_gantt(me):
     section("Timeline", "Project Gantt",
             "Active projects across time, with milestones. Projects you lead "
@@ -1625,10 +1656,23 @@ def render_gantt(me):
 
     # ordered for the chart: led first, then participant, then any other
     chart_projects = led + part + other
-    dated = [p for p in chart_projects
-             if p.get("started_on") and p.get("due_on")]
-    undated = [p for p in chart_projects
-               if not (p.get("started_on") and p.get("due_on"))]
+    has_dates = any(p.get("started_on") and p.get("due_on")
+                    for p in chart_projects)
+
+    today = dt.date.today()
+    dated, offscreen, undated = [], [], chart_projects
+    if has_dates:
+        # The window has to be chosen BEFORE the rows are picked: a project
+        # whose dates don't reach into it gets no bar, and a row with no bar is
+        # just 46px of blank chart. So the picker comes first, then rows are
+        # filtered to those that actually overlap it.
+        default_start = dt.date(today.year, today.month, 1)
+        win_start = st.date_input(
+            "Show 1 year from", value=default_start, key="gantt_start",
+            help="The Gantt always shows a 12-month window from this date.")
+        win_end = gantt_window_end(win_start)
+        dated, offscreen, undated = gantt_rows(
+            chart_projects, win_start, win_end)
 
     if dated:
         # One bulk milestone query for the whole Gantt instead of one query
@@ -1682,28 +1726,25 @@ def render_gantt(me):
                     hovertemplate="%{text}<br>%{x|%d %b %Y}<extra></extra>",
                     hoverlabel=dict(namelength=-1),
                     cliponaxis=False, showlegend=False))
-        # divider line between led and participant groups
-        if led and (part or other):
-            boundary = n - len(led) + 0.5
-            fig.add_hline(y=boundary, line=dict(color="#d9d5cc", width=1))
-        today = dt.date.today()
+        # divider line between led and participant groups. Counted from the
+        # rows actually drawn, not from every visible project, or it lands in
+        # the wrong place once out-of-window rows are dropped.
+        n_led = sum(1 for p in dated if p.get("i_lead"))
+        if n_led and n_led < n:
+            fig.add_hline(y=n - n_led + 0.5,
+                          line=dict(color="#d9d5cc", width=1))
         fig.add_vline(x=today, line=dict(color="#9aa5b1", width=1, dash="dot"))
-        # user picks the window start; always show exactly 12 months from there
-        default_start = dt.date(today.year, today.month, 1)
-        win_start = st.date_input(
-            "Show 1 year from", value=default_start, key="gantt_start",
-            help="The Gantt always shows a 12-month window from this date.")
-        win_end = dt.date(win_start.year + 1, win_start.month, win_start.day) \
-            if (win_start.month, win_start.day) != (2, 29) \
-            else dt.date(win_start.year + 1, 3, 1)
         fig.update_layout(
             height=110 + 46 * n,
             margin=dict(l=10, r=10, t=10, b=10),
             plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
             hovermode="closest",
+            # automargin: with a fixed 10px left margin Plotly clips long
+            # project names away entirely, leaving unlabelled rows.
             yaxis=dict(tickmode="array",
                        tickvals=list(range(n, 0, -1)),
-                       ticktext=names, showgrid=False, fixedrange=True),
+                       ticktext=names, showgrid=False, fixedrange=True,
+                       automargin=True),
             xaxis=dict(showgrid=True, gridcolor="#e6e2d8", type="date",
                        range=[win_start, win_end]),
             font=dict(family="Georgia, serif", color="#1F2933"))
@@ -1711,9 +1752,18 @@ def render_gantt(me):
         st.caption("Blue diamonds: deliverables. Grey diamonds: internal "
                    "milestones. Shows a 12-month window from the date you pick "
                    "above. Dotted line is today.")
+    elif has_dates:
+        st.caption("No active project runs during this 12-month window — "
+                   "pick an earlier or later start date above.")
     else:
         st.caption("No active projects have both a start and due date yet — "
                    "add dates in a project's details to place it on the timeline.")
+
+    if offscreen:
+        st.caption("Outside this window: "
+                   + ", ".join(f'{p["name"]} '
+                               f'({p["started_on"][:7]} → {p["due_on"][:7]})'
+                               for p in offscreen))
 
     if undated:
         st.caption("Not shown (missing start or due date): "
