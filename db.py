@@ -421,6 +421,126 @@ def delete_todo(todo_id):
     return client().table("todo").delete().eq("id", todo_id).execute()
 
 
+# ---- to-do sittings (one to-do planned onto one or more days) -------------
+# A "sitting" (todo_slot row) is a to-do planned onto a single day. A to-do
+# with no sittings is unplanned. Hours are optional: planned_hours may be null,
+# which means "this day, however long it takes". Once a sitting is logged,
+# session_id points at the work_session it produced, which is what puts the
+# block on the week calendar.
+#
+# Every read here filters on user_id as well as relying on row-level security,
+# the same belt-and-braces as sessions_in_range: a sitting names what someone
+# is working on and when, so it must never be readable by anyone else.
+_SLOT_COLS = ("id,todo_id,user_id,planned_on,planned_hours,session_id,"
+              "sort_order")
+
+
+def todo_slots_in_range(date_from, date_to):
+    """The caller's sittings planned within [date_from, date_to], in day then
+    sort order. Returns [] for a signed-out user rather than everything."""
+    me_id = my_app_user_id()
+    if not me_id:
+        return []
+    rows = (client().table("todo_slot").select(_SLOT_COLS)
+            .eq("user_id", me_id)
+            .gte("planned_on", date_from).lte("planned_on", date_to)
+            .order("planned_on").order("sort_order").execute().data or [])
+    # defence in depth: never hand back a row that isn't the caller's, even if
+    # a future query change (or a misconfigured RLS policy) lets one through.
+    return [r for r in rows if r.get("user_id") == me_id]
+
+
+def todo_slots_for(todo_ids):
+    """Every sitting of the given to-dos, any week. Used for whole-task
+    progress, which must count sittings outside the week being viewed."""
+    me_id = my_app_user_id()
+    ids = [t for t in (todo_ids or []) if t]
+    if not me_id or not ids:
+        return []
+    rows = (client().table("todo_slot").select(_SLOT_COLS)
+            .eq("user_id", me_id).in_("todo_id", ids)
+            .order("planned_on").execute().data or [])
+    return [r for r in rows if r.get("user_id") == me_id]
+
+
+def todo_logged_hours(todo_ids):
+    """{todo_id: hours} logged against each to-do across all of its sittings.
+
+    Both queries are scoped to the caller, so a sitting can never pull in
+    someone else's session hours even if the ids were guessed."""
+    me_id = my_app_user_id()
+    slots = todo_slots_for(todo_ids)
+    sess_ids = [s["session_id"] for s in slots if s.get("session_id")]
+    if not sess_ids:
+        return {}
+    sess = (client().table("v_session_detail").select("id,hours")
+            .eq("user_id", me_id).in_("id", sess_ids).execute().data or [])
+    hours_of = {s["id"]: (s.get("hours") or 0) for s in sess}
+    out = {}
+    for s in slots:
+        hrs = hours_of.get(s.get("session_id"))
+        if hrs is not None:
+            out[s["todo_id"]] = out.get(s["todo_id"], 0) + hrs
+    return out
+
+
+def add_todo_slot(todo_id, user_id, planned_on, planned_hours=None,
+                  sort_order=None):
+    payload = {"todo_id": todo_id, "user_id": user_id,
+               "planned_on": planned_on}
+    if planned_hours:
+        payload["planned_hours"] = planned_hours
+    if sort_order is not None:
+        payload["sort_order"] = sort_order
+    return client().table("todo_slot").insert(payload).execute()
+
+
+def move_todo_slot(slot_id, planned_on):
+    """Move one sitting to another day. Logged sittings are not moved here —
+    their day follows the session, which is edited on the time grid."""
+    return (client().table("todo_slot")
+            .update({"planned_on": planned_on}).eq("id", slot_id).execute())
+
+
+def delete_todo_slot(slot_id):
+    return client().table("todo_slot").delete().eq("id", slot_id).execute()
+
+
+def set_slot_session(slot_id, session_id):
+    return (client().table("todo_slot").update({"session_id": session_id})
+            .eq("id", slot_id).execute())
+
+
+def set_todo_plan(todo_id, user_id, date_from, date_to, day_hours):
+    """Re-plan a to-do inside [date_from, date_to].
+
+    day_hours maps an ISO date to hours (or None for "no hours"). Sittings
+    already logged are left exactly as they are — re-planning must never
+    silently drop recorded work. Every other sitting of this to-do in the
+    window is updated or removed so the plan ends up matching day_hours."""
+    existing = (client().table("todo_slot")
+                .select("id,planned_on,session_id")
+                .eq("user_id", user_id).eq("todo_id", todo_id)
+                .gte("planned_on", date_from).lte("planned_on", date_to)
+                .execute().data or [])
+    logged_days = {r["planned_on"] for r in existing if r.get("session_id")}
+    open_slots = {r["planned_on"]: r for r in existing
+                  if not r.get("session_id")}
+    wanted = {d: h for d, h in day_hours.items() if d not in logged_days}
+
+    for day, row in open_slots.items():
+        if day not in wanted:
+            delete_todo_slot(row["id"])
+    for i, day in enumerate(sorted(wanted)):
+        hours = wanted[day]
+        if day in open_slots:
+            (client().table("todo_slot")
+             .update({"planned_hours": hours, "sort_order": i})
+             .eq("id", open_slots[day]["id"]).execute())
+        else:
+            add_todo_slot(todo_id, user_id, day, hours, sort_order=i)
+
+
 def set_project_category(project_id, category_id):
     return client().table("project").update({"category_id": category_id}) \
         .eq("id", project_id).execute()

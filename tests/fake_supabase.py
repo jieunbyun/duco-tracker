@@ -57,16 +57,36 @@ def load_db():
 
 class _Query:
     """Mimics the subset of the PostgREST builder db.py uses. Every filter
-    returns a new _Query so calls can chain in any order, matching Supabase."""
+    returns a new _Query so calls can chain in any order, matching Supabase.
 
-    def __init__(self, rows):
+    Writes are supported too: insert/update/delete record the pending
+    operation, filters keep narrowing it, and execute() applies it to the
+    backing list. `rows` holds references to the same dicts as the backing
+    list, so an update mutates the stored row exactly as the real client
+    would. This is what lets tests exercise multi-step writes (db.set_todo_plan
+    deletes, updates and inserts in one call) rather than only reads."""
+
+    def __init__(self, rows, backing=None, op=None, payload=None):
         self.rows = list(rows)
+        self.backing = backing if backing is not None else self.rows
+        self.op = op
+        self.payload = payload
 
     def select(self, *args, **kwargs):
         return self
 
+    def insert(self, payload):
+        return _Query(self.rows, self.backing, "insert", payload)
+
+    def update(self, fields):
+        return _Query(self.rows, self.backing, "update", fields)
+
+    def delete(self):
+        return _Query(self.rows, self.backing, "delete", None)
+
     def _where(self, pred):
-        return _Query([r for r in self.rows if pred(r)])
+        return _Query([r for r in self.rows if pred(r)], self.backing,
+                      self.op, self.payload)
 
     def eq(self, col, val):
         return self._where(lambda r: r.get(col) == val)
@@ -96,9 +116,28 @@ class _Query:
         return self
 
     def limit(self, n):
-        return _Query(self.rows[:n])
+        return _Query(self.rows[:n], self.backing, self.op, self.payload)
 
     def execute(self):
+        if self.op == "insert":
+            items = (self.payload if isinstance(self.payload, list)
+                     else [self.payload])
+            added = []
+            for p in items:
+                row = dict(p)
+                row.setdefault("id", f"gen-{len(self.backing) + 1}")
+                self.backing.append(row)
+                added.append(row)
+            return types.SimpleNamespace(data=[dict(r) for r in added])
+        if self.op == "update":
+            for r in self.rows:
+                r.update(self.payload)
+            return types.SimpleNamespace(data=[dict(r) for r in self.rows])
+        if self.op == "delete":
+            doomed = {id(r) for r in self.rows}
+            kept = [r for r in self.backing if id(r) not in doomed]
+            self.backing[:] = kept
+            return types.SimpleNamespace(data=[])
         return types.SimpleNamespace(data=[dict(r) for r in self.rows])
 
 
@@ -109,4 +148,5 @@ class FakeSupabase:
         self.tables = tables
 
     def table(self, name):
-        return _Query(self.tables.get(name, []))
+        rows = self.tables.setdefault(name, [])
+        return _Query(rows, rows)
