@@ -1136,8 +1136,13 @@ def view_week(me):
         done = bool(t.get("is_done"))
         logged = sess is not None or bool(s.get("session_id"))
         important = bool(t.get("is_important"))
-        stale = (not logged and not done and day < today)
-        if logged or done:
+        # a cancelled sitting is a day dropped from the plan: kept here struck
+        # through so it can be restored, but it is no longer work to do
+        dropped = bool(s.get("is_cancelled"))
+        stale = (not logged and not done and not dropped and day < today)
+        if dropped:
+            edge, bg = "#cfc8bd", "#F2F2F0"
+        elif logged or done:
             edge, bg = "#3F7A5E", "#E9F1EC"
         elif stale:
             edge, bg = "#8A5B2E", "#F7EFE4"
@@ -1146,20 +1151,23 @@ def view_week(me):
         else:
             edge, bg = "#cfc8bd", "#ffffff"
         title = ("⭐ " + t["title"]) if important else t["title"]
-        title_style = ("color:#6b7280;font-weight:500"
-                       if (logged or done) else "font-weight:600")
+        if dropped:
+            title = f"<s>{title}</s>"
+        title_style = ("color:#9aa5b1;font-weight:500" if dropped
+                       else ("color:#6b7280;font-weight:500"
+                             if (logged or done) else "font-weight:600"))
         hrs = s.get("planned_hours")
         meta = f"{hrs:g}h" if hrs else "no hours"
         pn = proj_name.get(t.get("project_id"))
         if pn:
             meta += f" · {pn}"
         nm = (f"<span style='color:#3A5A78;font-weight:600'>{idx}/{total}"
-              f"</span>" if total > 1 else "")
+              f"</span>" if total > 1 and idx else "")
         extra = ""
         # whole-task progress, shown only when the task is split over several
         # sittings and has an estimate to measure against
         est = t.get("est_hours") or 0
-        if total > 1 and est:
+        if total > 1 and est and not dropped:
             got = logged_hours.get(t["id"], 0)
             pct = min(100, round(100 * got / est))
             extra += (
@@ -1170,7 +1178,11 @@ def view_week(me):
                 f"font-size:0.58rem;color:#6b7280'>{got:g} h of {est:g} h"
                 f"</div>")
         stamp = sitting_stamp(sess)
-        if stamp:
+        if dropped:
+            extra += ("<div style='font-family:ui-monospace,monospace;"
+                      "font-size:0.62rem;color:#9aa5b1;margin-top:2px'>"
+                      "⊘ cancelled</div>")
+        elif stamp:
             extra += (f"<div style='font-family:ui-monospace,monospace;"
                       f"font-size:0.62rem;color:#3F7A5E;font-weight:600;"
                       f"margin-top:2px'>{stamp}</div>")
@@ -1194,6 +1206,28 @@ def view_week(me):
 
         # controls. Four is all that fits in a column this narrow, so the
         # star / cancel / delete buttons live in the ✎ panel instead.
+        if dropped:
+            # a dropped day offers only the two ways back out of it
+            b1, b2 = st.columns(2)
+            with b1:
+                if st.button("↺", key=f"slunc_{s['id']}",
+                             use_container_width=True,
+                             help="Restore this day. Its hours go back on to "
+                                  "the task's estimate if the task still has "
+                                  "other days."):
+                    db.set_slot_cancelled(s["id"], False)
+                    db.clear_user_caches()
+                    st.rerun()
+            with b2:
+                if st.button("✕", key=f"sldel_{s['id']}",
+                             use_container_width=True,
+                             help="Forget this day entirely. The estimate "
+                                  "stays as it is — it already came off when "
+                                  "the day was cancelled."):
+                    db.delete_todo_slot(s["id"])
+                    db.clear_user_caches()
+                    st.rerun()
+            return
         if logged:
             b1, b2 = st.columns(2)
             with b1:
@@ -1232,7 +1266,8 @@ def view_week(me):
                 st.rerun()
         with b3:
             if st.button("✓", key=f"sllog_{s['id']}", use_container_width=True,
-                         help="Log this sitting"):
+                         help="Log this sitting — or cancel it, if the day "
+                              "turned out not to be needed"):
                 st.session_state.wk_panel = ("log", s["id"])
                 st.rerun()
         with b4:
@@ -1258,12 +1293,18 @@ def view_week(me):
                          and not todo_by_id[s["todo_id"]].get("is_cancelled")]
             planned = 0
             open_no_hours = 0
+            dropped_here = 0
             for s in day_slots:
                 t = todo_by_id[s["todo_id"]]
-                mine = slots_by_todo.get(t["id"], [])
-                idx = mine.index(s) + 1 if s in mine else 1
-                render_card(t, s, idx, len(mine), d)
-                if s.get("planned_hours"):
+                # sittings are numbered over the days still in the plan, so
+                # cancelling one leaves 1/2, 2/2 rather than a gap
+                live = [x for x in slots_by_todo.get(t["id"], [])
+                        if not x.get("is_cancelled")]
+                idx = live.index(s) + 1 if s in live else 0
+                render_card(t, s, idx, len(live), d)
+                if s.get("is_cancelled"):
+                    dropped_here += 1
+                elif s.get("planned_hours"):
                     planned += s["planned_hours"]
                 elif not s.get("session_id") and not t.get("is_done"):
                     open_no_hours += 1
@@ -1272,6 +1313,8 @@ def view_week(me):
                 bits.append(f"{planned:g} h planned")
             if open_no_hours:
                 bits.append(f"{open_no_hours} open")
+            if dropped_here:
+                bits.append(f"{dropped_here} dropped")
             st.markdown(
                 f"<div style='text-align:center;font-family:ui-monospace,"
                 f"monospace;font-size:0.66rem;color:#6b7280;margin-top:6px'>"
@@ -1289,11 +1332,59 @@ def view_week(me):
             if not slot or not t:
                 st.session_state.pop("wk_panel", None)
                 st.rerun()
-            mine = slots_by_todo.get(t["id"], [])
+            mine = [x for x in slots_by_todo.get(t["id"], [])
+                    if not x.get("is_cancelled")]
             idx = mine.index(slot) + 1 if slot in mine else 1
             of = f" · sitting {idx} of {len(mine)}" if len(mine) > 1 else ""
             slot_day = dt.date.fromisoformat(slot["planned_on"])
-            st.markdown(f"**Log this sitting** — {t['title']}{of}")
+            # the panel answers "what became of this day?", so it carries
+            # both answers: log it, or drop it
+            st.markdown(f"**This sitting** — {t['title']}{of} · "
+                        f"{slot_day:%a %d %b}")
+
+            # The other answer to "what became of this day?": it did not
+            # happen and is not going to. The day is kept struck through, and
+            # for a task spread over several days its hours come off the
+            # estimate, so what is left says what is still to do.
+            est_now = t.get("est_hours") or 0
+            drop_h = slot.get("planned_hours") or 0
+            subtract = drop_h if (len(mine) > 1 and drop_h and est_now) else 0
+            dc1, dc2 = st.columns([2, 8])
+            with dc1:
+                drop_it = st.button("⊘ Cancel this sitting",
+                                    key=f"lgcan_{slot['id']}",
+                                    use_container_width=True,
+                                    disabled=bool(slot.get("session_id")))
+            with dc2:
+                if subtract:
+                    st.caption(
+                        f"{slot_day:%a %d %b} stays on the board struck "
+                        f"through and counts towards no hours. This task is "
+                        f"spread over {len(mine)} days, so its estimate drops "
+                        f"by {subtract:g} h: {est_now:g} h → "
+                        f"{max(est_now - subtract, 0):g} h. ↺ on the card "
+                        f"puts both back.")
+                elif len(mine) > 1:
+                    st.caption(
+                        f"{slot_day:%a %d %b} stays on the board struck "
+                        f"through and counts towards no hours. Nothing comes "
+                        f"off the estimate — this sitting has no hours of its "
+                        f"own. ↺ on the card puts it back.")
+                else:
+                    st.caption(
+                        f"{slot_day:%a %d %b} stays on the board struck "
+                        f"through and counts towards no hours. The estimate "
+                        f"is untouched: this is the task's only planned day, "
+                        f"so the job itself still stands. ↺ on the card puts "
+                        f"it back.")
+            if drop_it:
+                try:
+                    db.set_slot_cancelled(slot["id"], True)
+                    db.clear_user_caches()
+                    st.session_state.pop("wk_panel", None)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Could not cancel this sitting. {e}")
 
             lg1, lg2, lg3 = st.columns(3)
             with lg1:
@@ -1477,7 +1568,10 @@ def view_week(me):
             st.markdown(f"**Plan “{t['title']}” across days**")
             mine = slots_by_todo.get(t["id"], [])
             locked_days = {s["planned_on"] for s in mine if s.get("session_id")}
-            picked_days = {s["planned_on"] for s in mine}
+            # a cancelled sitting is not part of the plan any more: its day
+            # starts unticked, and ticking it again revives that sitting
+            picked_days = {s["planned_on"] for s in mine
+                           if not s.get("is_cancelled")}
             pick_cols = st.columns(7)
             chosen = []
             for i, d in enumerate(days):
@@ -1592,8 +1686,12 @@ def view_week(me):
                     st.rerun()
 
     # ---- to-dos with no day yet, plus anything cancelled ----
+    # A task whose every planned day has been cancelled has no plan left, so
+    # it comes back to this list where it can be given fresh days — its
+    # cancelled cards stay on the board as the record of the dropped ones.
     unplanned = [t for t in todos
-                 if not slots_by_todo.get(t["id"])
+                 if not [s for s in slots_by_todo.get(t["id"], [])
+                         if not s.get("is_cancelled")]
                  or t.get("is_cancelled")]
     st.markdown("<hr>", unsafe_allow_html=True)
     if unplanned:
@@ -4276,6 +4374,18 @@ def view_help(me):
             "open, while **Log it & finish the task** does both at once. "
             "**⤺** re-opens a sitting if you logged it by mistake; the time "
             "block itself stays until you delete it on the time grid.\n\n"
+            "A single day can be dropped without touching the rest of the "
+            "task: press **✓** on its card and then **⊘ Cancel this "
+            "sitting**. The day stays on the board struck through, so you can "
+            "see it was once planned, but it counts towards no hours. When "
+            "the task is spread over several days, the hours you gave that "
+            "day come off the task's estimate — a 6 h task over three days "
+            "becomes a 4 h task over two — because what is left to do is what "
+            "the remaining days hold. A task with only one planned day keeps "
+            "its estimate: dropping its only day plans it out of the week "
+            "(it returns to **Not yet planned**), it does not shrink the job "
+            "to nothing. **↺** on the cancelled card restores the day and its "
+            "hours; **✕** forgets the day for good.\n\n"
             "A task you decide not to do can be **cancelled** (⊘) instead of "
             "deleted: it stays in that week struck through as a record, "
             "counts towards no hours, and is not carried forward. ↺ brings it "

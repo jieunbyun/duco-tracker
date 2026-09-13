@@ -100,6 +100,18 @@ TODOS = [
      "due_on": DAY[0], "is_done": False, "project_id": None,
      "est_hours": 3, "sort_order": 4, "done_at": None,
      "is_important": False, "is_cancelled": True},
+    # alive, but one of its two planned days has been dropped: the estimate
+    # below is what is left after that day's 2 h came off
+    {"id": "t-dropday", "title": "Rebuild the flood mesh", "note": None,
+     "due_on": DAY[0], "is_done": False, "project_id": "p-1",
+     "est_hours": 2, "sort_order": 5, "done_at": None,
+     "is_important": False, "is_cancelled": False},
+    # every one of its days dropped: the task itself still stands, so it must
+    # come back to the list where it can be given fresh days
+    {"id": "t-noday", "title": "Chase the archive request", "note": None,
+     "due_on": DAY[0], "is_done": False, "project_id": None,
+     "est_hours": 1, "sort_order": 6, "done_at": None,
+     "is_important": False, "is_cancelled": False},
 ]
 
 SLOTS = [
@@ -122,6 +134,18 @@ SLOTS = [
     {"id": "sl-f", "todo_id": "t-cancelled", "user_id": "u-me",
      "planned_on": DAY[4], "planned_hours": 3, "session_id": None,
      "sort_order": 0},
+    # one live day and one cancelled day of the same living task: the
+    # cancelled day stays on the board struck through, counting nothing
+    {"id": "sl-g", "todo_id": "t-dropday", "user_id": "u-me",
+     "planned_on": DAY[5], "planned_hours": 2, "session_id": None,
+     "sort_order": 0, "is_cancelled": False},
+    {"id": "sl-h", "todo_id": "t-dropday", "user_id": "u-me",
+     "planned_on": DAY[6], "planned_hours": 2, "session_id": None,
+     "sort_order": 1, "is_cancelled": True},
+    # the task's one and only day, dropped: no plan left at all
+    {"id": "sl-i", "todo_id": "t-noday", "user_id": "u-me",
+     "planned_on": DAY[1], "planned_hours": 1, "session_id": None,
+     "sort_order": 0, "is_cancelled": True},
 ]
 
 
@@ -146,6 +170,7 @@ def fake_db():
     for name in ("set_todo_order", "set_todo_done", "set_todo_important",
                  "set_todo_cancelled", "delete_todo", "update_todo",
                  "add_todo", "move_todo_slot", "delete_todo_slot",
+                 "set_slot_cancelled",
                  "set_slot_session", "set_todo_plan", "log_session",
                  "add_milestone", "get_or_create_project",
                  "set_project_importance"):
@@ -160,10 +185,16 @@ def _forbidden(name):
     return _fn
 
 
-def render_week():
-    """Render the Week tab once and return everything it drew, as one string."""
+def render_week(panel=None):
+    """Render the Week tab once and return everything it drew, as one string.
+
+    Pass panel=("log", slot_id) (or any other wk_panel value) to render with
+    that card's panel already open, which is the only way those branches run —
+    nothing is ever clicked here."""
     st.log.clear()
     st.session_state.clear()
+    if panel:
+        st.session_state["wk_panel"] = panel
     tracker.db = fake_db()
 
     real_date = dt.date
@@ -191,6 +222,10 @@ def render_week():
 
 
 OUT = render_week()
+# the same board with a sitting's panel open: once for a day of a task spread
+# over three, once for a task whose only planned day it is
+PANEL_SPLIT = render_week(("log", "sl-b"))
+PANEL_ONLY = render_week(("log", "sl-g"))
 
 
 # ==========================================================================
@@ -257,6 +292,60 @@ def test_minute_logged_work_appears_in_the_untimed_strip():
 def test_an_unplanned_todo_is_listed_under_the_board():
     assert "Not yet planned" in OUT
     assert "Ethics form" in OUT
+
+
+# ==========================================================================
+# A single dropped day. The task lives on; only that sitting is struck out.
+# ==========================================================================
+def test_a_cancelled_sitting_stays_on_the_board_struck_through():
+    assert "<s>Rebuild the flood mesh</s>" in OUT, (
+        "a cancelled day must stay visible, struck through, so it can be "
+        "restored")
+    assert "⊘ cancelled" in OUT, "the cancelled card lost its label"
+    assert OUT.count("Rebuild the flood mesh") == 2, (
+        "the task has one live day and one dropped one — both cards show")
+
+
+def test_a_cancelled_sitting_counts_towards_no_hours():
+    assert "1 dropped" in OUT, (
+        "a day holding only a cancelled sitting must say so rather than "
+        "count its hours as planned")
+
+
+def test_a_cancelled_sitting_is_not_numbered_among_the_live_ones():
+    assert "1/1" not in OUT, (
+        "sittings are numbered over the days still in the plan, so a task "
+        "with one live day left is not numbered at all")
+
+
+def test_a_task_whose_every_day_was_dropped_returns_to_the_list():
+    assert "<s>Chase the archive request</s>" in OUT, (
+        "its dropped day stays on the board as the record")
+    assert OUT.count("Chase the archive request") == 2, (
+        "a task with no live sitting left has no plan, so it must also be "
+        "back under 'Not yet planned' where new days can be chosen")
+
+
+def test_the_sitting_panel_offers_to_cancel_the_day():
+    assert "⊘ Cancel this sitting" in PANEL_SPLIT, (
+        "the panel behind ✓ must offer the other answer to 'what became of "
+        "this day?'")
+
+
+def test_the_panel_says_exactly_what_cancelling_takes_off_the_estimate():
+    # sl-b is 2 h of a 6 h task planned over three days
+    assert "spread over 3 days" in PANEL_SPLIT
+    assert "6 h → 4 h" in PANEL_SPLIT, (
+        "the subtraction must be spelled out before it happens, not "
+        "discovered afterwards")
+
+
+def test_the_panel_promises_no_subtraction_for_a_one_day_task():
+    assert "⊘ Cancel this sitting" in PANEL_ONLY
+    assert "only planned day" in PANEL_ONLY, (
+        "dropping a task's only day must not claim to shrink its estimate")
+    assert "→" not in PANEL_ONLY.split("only planned day")[0][-400:], (
+        "no before/after figure belongs in the one-day case")
 
 
 def test_a_cancelled_todo_is_struck_through_and_not_on_the_board():

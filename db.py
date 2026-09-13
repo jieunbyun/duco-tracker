@@ -426,13 +426,15 @@ def delete_todo(todo_id):
 # with no sittings is unplanned. Hours are optional: planned_hours may be null,
 # which means "this day, however long it takes". Once a sitting is logged,
 # session_id points at the work_session it produced, which is what puts the
-# block on the week calendar.
+# block on the week calendar. A sitting that turned out not to be needed is
+# CANCELLED rather than deleted (is_cancelled): the day stays on the board
+# struck through, as a record that it was once planned.
 #
 # Every read here filters on user_id as well as relying on row-level security,
 # the same belt-and-braces as sessions_in_range: a sitting names what someone
 # is working on and when, so it must never be readable by anyone else.
 _SLOT_COLS = ("id,todo_id,user_id,planned_on,planned_hours,session_id,"
-              "sort_order")
+              "sort_order,is_cancelled")
 
 
 def todo_slots_in_range(date_from, date_to):
@@ -506,6 +508,67 @@ def delete_todo_slot(slot_id):
     return client().table("todo_slot").delete().eq("id", slot_id).execute()
 
 
+def set_slot_cancelled(slot_id, cancelled):
+    """Cancel (or restore) ONE sitting, leaving the to-do itself alone.
+
+    A plan made on Monday is a guess. When one of a task's days turns out not
+    to be needed, deleting the sitting loses the fact that it was ever planned,
+    and cancelling the whole to-do throws away the days that are still real.
+    So a sitting is dropped the same way a to-do is: kept for the record,
+    struck through on the board, counted towards no day's planned hours.
+
+    Only an UNLOGGED sitting can be cancelled — once a sitting has produced a
+    work_session its hours are real, so it must be re-opened first.
+
+    The estimate follows the plan: when the task is spread over several days,
+    the dropped day's planned hours come off the to-do's estimate, because what
+    is left to do is what the remaining days hold. A task with only one sitting
+    keeps its estimate — dropping its only day plans it out of the week, it
+    does not shrink the job to nothing. Restoring adds back on the same rule,
+    so cancel-then-restore always lands where it started.
+
+    Returns the to-do's estimate after the change (None if it has none).
+    """
+    me_id = my_app_user_id()
+    if not me_id:
+        return None
+    rows = (client().table("todo_slot").select(_SLOT_COLS)
+            .eq("id", slot_id).eq("user_id", me_id).execute().data or [])
+    slot = next((r for r in rows if r.get("user_id") == me_id), None)
+    if not slot:
+        return None
+    if cancelled and slot.get("session_id"):
+        raise ValueError("That sitting is already logged. Re-open it (⤺) "
+                         "before cancelling it.")
+
+    # Every other sitting of this to-do, any week: whether the estimate moves
+    # depends on the task still having days left, not on what this week shows.
+    others = [r for r in (client().table("todo_slot").select(_SLOT_COLS)
+                          .eq("user_id", me_id).eq("todo_id", slot["todo_id"])
+                          .execute().data or [])
+              if r.get("user_id") == me_id and r["id"] != slot["id"]]
+    live_others = [r for r in others if not r.get("is_cancelled")]
+
+    (client().table("todo_slot").update({"is_cancelled": bool(cancelled)})
+     .eq("id", slot_id).eq("user_id", me_id).execute())
+
+    todo = (client().table("todo").select("id,est_hours")
+            .eq("id", slot["todo_id"]).execute().data or [])
+    est = todo[0].get("est_hours") if todo else None
+    hours = slot.get("planned_hours") or 0
+    # A task that never carried an estimate is left without one — cancelling a
+    # day must not invent a number. Everywhere else the arithmetic runs, and
+    # lands on a real 0 rather than null when a plan outgrew its estimate, so
+    # that restoring the day gives the same hours back.
+    if not hours or not live_others or est is None:
+        return est
+    new_est = round(max((est - hours) if cancelled else (est + hours), 0), 2)
+    if new_est != est:
+        (client().table("todo").update({"est_hours": new_est})
+         .eq("id", slot["todo_id"]).execute())
+    return new_est
+
+
 def set_slot_session(slot_id, session_id):
     return (client().table("todo_slot").update({"session_id": session_id})
             .eq("id", slot_id).execute())
@@ -517,7 +580,9 @@ def set_todo_plan(todo_id, user_id, date_from, date_to, day_hours):
     day_hours maps an ISO date to hours (or None for "no hours"). Sittings
     already logged are left exactly as they are — re-planning must never
     silently drop recorded work. Every other sitting of this to-do in the
-    window is updated or removed so the plan ends up matching day_hours."""
+    window is updated or removed so the plan ends up matching day_hours, and a
+    cancelled sitting on a day that is planned again comes back to life rather
+    than sitting struck through beside a fresh card."""
     existing = (client().table("todo_slot")
                 .select("id,planned_on,session_id")
                 .eq("user_id", user_id).eq("todo_id", todo_id)
@@ -535,7 +600,8 @@ def set_todo_plan(todo_id, user_id, date_from, date_to, day_hours):
         hours = wanted[day]
         if day in open_slots:
             (client().table("todo_slot")
-             .update({"planned_hours": hours, "sort_order": i})
+             .update({"planned_hours": hours, "sort_order": i,
+                      "is_cancelled": False})
              .eq("id", open_slots[day]["id"]).execute())
         else:
             add_todo_slot(todo_id, user_id, day, hours, sort_order=i)
