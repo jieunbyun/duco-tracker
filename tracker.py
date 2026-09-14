@@ -282,6 +282,47 @@ def resolve_block_times(day, start, end):
     return start_dt.isoformat(), end_dt.isoformat(), None
 
 
+NEW_PROJECT = "+ New project…"
+NEW_MILESTONE = "+ New milestone…"
+
+
+def resolve_new_project_and_milestone(project_id, new_project_name,
+                                      milestone_id, new_milestone_name,
+                                      owner_id, category_id):
+    """Turn a logging form's "+ New project…" / "+ New milestone…" picks
+    (passed as the id "__new__") into real ids, creating what is needed just
+    before the session is written. Returns (project_id, milestone_id, error).
+
+    Both names are checked before anything is written, so a missing name
+    creates nothing. A new project is PRIVATE, owned by the person logging and
+    linked to the chosen category, like every other on-the-fly project, so
+    logging never shows anything to anyone else. get_or_create_project matches
+    on owner as well as name: typing a name someone else's project already has
+    makes a project of your own rather than filing your hours under theirs,
+    and a retry after a failed log finds the project again instead of making a
+    second one."""
+    if project_id == "__new__" and not (new_project_name or "").strip():
+        return None, None, "Give the new project a name, or pick one."
+    if milestone_id == "__new__" and not (new_milestone_name or "").strip():
+        return None, None, "Give the new milestone a name, or pick one."
+    if project_id == "__new__":
+        try:
+            project_id, _ = db.get_or_create_project(
+                new_project_name, owner_id, "private",
+                category_id=category_id)
+        except Exception as e:
+            return None, None, f"Could not create the project. {e}"
+    if milestone_id == "__new__":
+        if not project_id:
+            return None, None, "A new milestone needs a project."
+        try:
+            res = db.add_milestone(project_id, new_milestone_name.strip())
+            milestone_id = res.data[0]["id"]
+        except Exception as e:
+            return project_id, None, f"Could not create the milestone. {e}"
+    return project_id, milestone_id, None
+
+
 
 CV_DESTINATIONS = {
     "Impact — Software, Tools, and Datasets":
@@ -1402,6 +1443,14 @@ def view_week(me):
                 lg_matching = db.projects_for_category(lg_cat_labels[lg_cat])
                 lg_projs = {"— none —": None}
                 lg_projs.update({p["name"]: p["id"] for p in lg_matching})
+                # A project or milestone that doesn't exist yet can be made
+                # here, as in Add block. Nothing is created until the sitting
+                # is logged, so browsing these options writes nothing. Life is
+                # never project-tied, so a life category offers no new project.
+                lg_life = next((c.get("domain") == "life" for c in lg_cats
+                                if c["id"] == lg_cat_labels[lg_cat]), False)
+                if not lg_life:
+                    lg_projs[NEW_PROJECT] = "__new__"
                 cur_pn = proj_name.get(t.get("project_id")) or "— none —"
                 lg_pkeys = list(lg_projs.keys())
                 p_idx = lg_pkeys.index(cur_pn) if cur_pn in lg_pkeys else 0
@@ -1409,15 +1458,35 @@ def view_week(me):
                                        key=f"lgproj_{slot['id']}")
                 lg_pid = lg_projs[lg_proj]
                 lg_ms_id = None
-                if lg_pid:
+                lg_new_proj = lg_new_ms = ""
+                if lg_pid == "__new__":
+                    lg_new_proj = st.text_input(
+                        "New project name", placeholder="e.g. DAFNI Fellowship",
+                        key=f"lgnewproj_{slot['id']}",
+                        help="Created private to you, in the category above.")
+                    # a brand-new project has no milestones yet: offer to
+                    # start it with one, created together with the project
+                    lg_new_ms = st.text_input(
+                        "First milestone (optional)",
+                        placeholder="e.g. First draft",
+                        key=f"lgnewmsp_{slot['id']}",
+                        help="Add more in the Projects tab later.")
+                    lg_ms_id = "__new__" if lg_new_ms.strip() else None
+                elif lg_pid:
                     lg_ms = [m for m in db.project_milestones(lg_pid)
                              if m["status"] != "done"]
                     lg_ms_labels = {"— none —": None}
                     lg_ms_labels.update({m["title"]: m["id"] for m in lg_ms})
+                    lg_ms_labels[NEW_MILESTONE] = "__new__"
                     lg_ms_pick = st.selectbox(
                         "Milestone (optional)", list(lg_ms_labels.keys()),
                         key=f"lgms_{slot['id']}")
                     lg_ms_id = lg_ms_labels[lg_ms_pick]
+                    if lg_ms_id == "__new__":
+                        lg_new_ms = st.text_input(
+                            "New milestone name",
+                            placeholder="e.g. First draft",
+                            key=f"lgnewms_{slot['id']}")
             with lg2:
                 lg_mode = st.radio(
                     "How long", ["Start & end", "Minutes", "No time"],
@@ -1519,17 +1588,26 @@ def view_week(me):
                 else:
                     started = dt.datetime.combine(
                         lg_day, dt.time(9, 0)).isoformat()
+                project_id, ms_id = lg_pid, lg_ms_id
+                if not err:
+                    project_id, ms_id, err = resolve_new_project_and_milestone(
+                        lg_pid, lg_new_proj, lg_ms_id, lg_new_ms, me["id"],
+                        lg_cat_labels[lg_cat])
                 if err:
                     st.error(err)
                 else:
                     try:
+                        # a to-do with no project yet is filed under the one
+                        # just made for it, so its next sitting defaults to it
+                        if lg_pid == "__new__" and not t.get("project_id"):
+                            db.update_todo(t["id"], {"project_id": project_id})
                         res = db.log_session(
                             user_id=me["id"],
                             category_id=lg_cat_labels[lg_cat],
                             started_at=started, ended_at=ended,
-                            manual_minutes=minutes, project_id=lg_pid,
+                            manual_minutes=minutes, project_id=project_id,
                             description=lg_note or None,
-                            milestone_id=lg_ms_id, is_core=lg_core)
+                            milestone_id=ms_id, is_core=lg_core)
                         session_id = (res.data or [{}])[0].get("id") \
                             if res else None
                         if session_id:
@@ -4372,6 +4450,12 @@ def view_help(me):
             "time** records the sitting with no hours at all. Because a task "
             "usually spans several sittings, **Log it — more to do** keeps it "
             "open, while **Log it & finish the task** does both at once. "
+            "If the work belongs to a project or milestone that doesn't exist "
+            "yet, choose **+ New project…** (with an optional first "
+            "milestone) or **+ New milestone…** in that panel; it is created "
+            "when you log the sitting, private to you and in the category "
+            "you picked, and a to-do with no project yet is filed under the "
+            "new one. "
             "**⤺** re-opens a sitting if you logged it by mistake; the time "
             "block itself stays until you delete it on the time grid.\n\n"
             "A single day can be dropped without touching the rest of the "

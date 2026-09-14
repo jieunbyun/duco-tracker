@@ -63,6 +63,13 @@ class FakeStreamlit(types.ModuleType):
         self.log = []
         self.secrets = {}
         self.sidebar = _Ctx(self)
+        # Opt-in interaction, for tests that drive a write path on purpose.
+        # answers: {widget key: value} — a selectbox returns it when it is one
+        #   of the options, a text input returns it outright.
+        # clicked: button / submit labels that return True.
+        # Both start empty, so a plain render still clicks nothing.
+        self.answers = {}
+        self.clicked = set()
 
     # ---- layout ----------------------------------------------------------
     def columns(self, spec, **kw):
@@ -109,11 +116,11 @@ class FakeStreamlit(types.ModuleType):
     # ---- input: never clicked, always answers with the default -----------
     def button(self, label="", **kw):
         self.log.append(("button", str(label)))
-        return False
+        return str(label) in self.clicked
 
     def form_submit_button(self, label="", **kw):
         self.log.append(("submit", str(label)))
-        return False
+        return str(label) in self.clicked
 
     def checkbox(self, label="", value=False, **kw):
         self.log.append(("checkbox", str(label)))
@@ -125,6 +132,9 @@ class FakeStreamlit(types.ModuleType):
         if not opts:
             return None
         chosen = opts[index if 0 <= index < len(opts) else 0]
+        want = self.answers.get(kw.get("key"))
+        if want in opts:
+            chosen = want
         if format_func:
             format_func(chosen)          # run it: it is real app code
         return chosen
@@ -135,7 +145,7 @@ class FakeStreamlit(types.ModuleType):
         return opts[index] if opts else None
 
     def text_input(self, label="", value="", **kw):
-        return value or ""
+        return self.answers.get(kw.get("key"), value) or ""
 
     def text_area(self, label="", value="", **kw):
         return value or ""

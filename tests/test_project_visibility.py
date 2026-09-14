@@ -239,6 +239,56 @@ def test_gantt_roles_reflect_the_rule():
 
 
 # ==========================================================================
+# Creating a project on the fly (Log tab, Add block, logging a to-do sitting)
+# goes through get_or_create_project. Its name lookup is the leak to guard:
+# a name match on someone else's project must never hand theirs back.
+# ==========================================================================
+def test_a_new_project_named_like_someone_elses_is_my_own_and_private():
+    import copy
+    tables = copy.deepcopy(TABLES)
+    real_client = db.client
+    db.client = lambda: fake_supabase.FakeSupabase(tables)
+    try:
+        as_user(STU_B)
+        # "Sup One" already exists, owned by the supervisor
+        pid, created = db.get_or_create_project(
+            "Sup One", STU_B, "private", category_id=C_WORK)
+        assert pid != P_SUP1, (
+            "typing an existing name handed back someone else's project — "
+            "the session would be filed under a project the logger can't see")
+        assert created, "a project of my own should have been created"
+        row = next(p for p in tables["project"] if p["id"] == pid)
+        assert row["owner_id"] == STU_B and row["visibility"] == "private"
+        assert row["category_id"] == C_WORK
+        # v_project_tracker is an unscoped view; a real one would now include
+        # the new project, so the fake must too, or the leak check below
+        # would pass trivially for project_tracker
+        tables["v_project_tracker"].append(
+            {"project_id": pid, "project_name": "Sup One",
+             "status": "active", "hours_logged": 0})
+
+        # the creator sees it where the logging dropdowns look for it ...
+        assert pid in {_pid(r) for r in db.my_projects()}
+        assert pid in {_pid(r) for r in db.project_tracker()}
+        assert pid in {r["id"] for r in db.projects_for_category(C_WORK)}
+        for uid in (SUP, STU_A, STU_C):
+            as_user(uid)
+            for name, fn in LISTERS.items():
+                assert pid not in {_pid(r) for r in fn()}, (
+                    f"{name} leaked {uid}'s view of STU_B's new project")
+            assert pid not in {r["id"]
+                               for r in db.projects_for_category(C_WORK)}
+
+        # asking again finds my project rather than making a second one
+        as_user(STU_B)
+        again, created_again = db.get_or_create_project(
+            "Sup One", STU_B, "private", category_id=C_WORK)
+        assert (again, created_again) == (pid, False)
+    finally:
+        db.client = real_client
+
+
+# ==========================================================================
 # Signed-out / unresolved user must see nothing, never everything.
 # ==========================================================================
 def test_signed_out_user_sees_nothing():
