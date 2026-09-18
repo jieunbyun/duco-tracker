@@ -385,11 +385,13 @@ def add_todo(user_id, title, due_on, project_id=None, est_hours=None,
     a category with no project, or nothing at all."""
     payload = {"user_id": user_id, "title": title, "due_on": due_on,
                "is_important": bool(important)}
-    if project_id:
+    # `is not None`, not truthiness: category keys are smallint here, so a
+    # category with id 0 must still be stored rather than silently dropped
+    if project_id is not None:
         payload["project_id"] = project_id
-    if category_id:
+    if category_id is not None:
         payload["category_id"] = category_id
-    if milestone_id:
+    if milestone_id is not None:
         payload["milestone_id"] = milestone_id
     if est_hours:
         payload["est_hours"] = est_hours

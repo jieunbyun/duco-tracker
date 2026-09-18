@@ -354,6 +354,92 @@ def test_a_to_do_with_no_title_is_refused_and_nothing_is_saved():
     assert any(k == "error" for k, _ in st.log)
 
 
+# ==========================================================================
+# Key types. This schema does not use one type throughout: todo, app_user and
+# work_session have uuid keys, while `category` is a small lookup table with a
+# SMALLINT key — which is how migration 0101 first failed, by assuming uuid.
+#
+# So the picker must not care what a key looks like, and in particular must
+# not test one for truthiness: category id 0 is a perfectly good key, and
+# `if not category_id` would read it as "nothing chosen" and quietly refuse to
+# store it.
+# ==========================================================================
+INT_CATS = [{"id": 0, "code": "research", "label": "Research",
+             "domain": "work", "sort_order": 1},
+            {"id": 7, "code": "teaching", "label": "Teaching",
+             "domain": "work", "sort_order": 2}]
+INT_PROJECTS = [{"id": "p-1", "name": "Resilience Review", "category_id": 0},
+                {"id": "p-2", "name": "MSc Teaching", "category_id": 7}]
+
+
+def int_db():
+    m = stub_db(created=[])
+    m.categories = lambda domain=None: [
+        c for c in INT_CATS if domain is None or c["domain"] == domain]
+    m.projects_for_category = lambda cid: [
+        dict(p) for p in INT_PROJECTS if p["category_id"] == cid]
+    return m
+
+
+def int_pick(answers, category_id=None, project_id=None, milestone_id=None):
+    st.log.clear()
+    st.answers = dict(answers)
+    tracker.db = int_db()
+    try:
+        return tracker.work_placement_picker(
+            "int", True, category_id=category_id, project_id=project_id,
+            milestone_id=milestone_id)
+    finally:
+        st.answers = {}
+
+
+def test_an_integer_category_key_cascades_like_any_other():
+    p = int_pick({"int_cat": "Research"})
+    assert p["category_id"] == 0
+    assert offered("int_proj") and "Resilience Review" in offered("int_proj")
+
+
+def test_category_zero_is_a_real_choice_not_an_empty_one():
+    """id 0 is falsy in Python. It is still a category, and the project list
+    below it must open — a truthiness test here would stop the cascade."""
+    p = int_pick({"int_cat": "Research"})
+    assert p["category_id"] == 0
+    assert "Project" in drawn(), (
+        "the cascade stopped at a category whose key is 0")
+
+
+def test_a_todo_placed_in_category_zero_comes_back_preselected():
+    int_pick({}, category_id=0)
+    chose = dict(b.split("=", 1) for k, b in st.log if k == "selected")
+    assert chose["int_cat"] == "Research", chose
+
+
+def test_category_zero_survives_being_saved():
+    """db.add_todo drops fields that are None. It must not also drop 0."""
+    import db as real_db
+    sent = {}
+
+    class Cap:
+        def table(self, name):
+            return self
+
+        def insert(self, payload):
+            sent.update(payload)
+            return self
+
+        def execute(self):
+            return None
+    orig = real_db.client
+    real_db.client = lambda: Cap()
+    try:
+        real_db.add_todo("u-me", "Mark lab reports", "2026-08-01",
+                         category_id=0)
+    finally:
+        real_db.client = orig
+    assert sent.get("category_id") == 0, (
+        f"a category id of 0 was dropped on the way to the database: {sent}")
+
+
 # ---- plain-python runner (so `python tests/...` works without pytest) -----
 if __name__ == "__main__":
     import traceback

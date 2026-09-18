@@ -955,8 +955,11 @@ def work_placement_picker(key_prefix, is_lead, category_id=None,
             cat_ids[c["label"]] = c["id"]
             cat_domain[c["label"]] = "life"
     cat_keys = list(cat_ids.keys())
+    # `is not None`, not truthiness: category keys are smallint in this
+    # schema, so a category with id 0 would otherwise read as "not chosen"
     cat_idx = next((i for i, k in enumerate(cat_keys)
-                    if category_id and cat_ids[k] == category_id), 0)
+                    if category_id is not None
+                    and cat_ids[k] == category_id), 0)
     cat = st.selectbox("Category", cat_keys, index=cat_idx,
                        key=f"{key_prefix}_cat",
                        help="Work categories first, then life. Life "
@@ -970,7 +973,7 @@ def work_placement_picker(key_prefix, is_lead, category_id=None,
             "milestone_id": None, "new_milestone": ""}
     # life work is never project-tied, and a project cannot be placed without
     # a category to place it in — so both levels stop here in those cases
-    if not chosen_cat or is_life:
+    if chosen_cat is None or is_life:
         return pick
 
     matching = db.projects_for_category(chosen_cat)
@@ -979,7 +982,8 @@ def work_placement_picker(key_prefix, is_lead, category_id=None,
     proj_ids[NEW_PROJECT] = "__new__"
     proj_keys = list(proj_ids.keys())
     proj_idx = next((i for i, k in enumerate(proj_keys)
-                     if project_id and proj_ids[k] == project_id), 0)
+                     if project_id is not None
+                     and proj_ids[k] == project_id), 0)
     proj = st.selectbox("Project", proj_keys, index=proj_idx,
                         key=f"{key_prefix}_proj",
                         help="Projects in the chosen category. New ones are "
@@ -1009,7 +1013,8 @@ def work_placement_picker(key_prefix, is_lead, category_id=None,
         ms_ids[NEW_MILESTONE] = "__new__"
         ms_keys = list(ms_ids.keys())
         ms_idx = next((i for i, k in enumerate(ms_keys)
-                       if milestone_id and ms_ids[k] == milestone_id), 0)
+                       if milestone_id is not None
+                       and ms_ids[k] == milestone_id), 0)
         ms_pick = st.selectbox("Milestone (optional)", ms_keys, index=ms_idx,
                                key=f"{key_prefix}_ms")
         pick["milestone_id"] = ms_ids[ms_pick]
