@@ -18,6 +18,7 @@ Run it directly (no pytest needed):
 Or, if you have pytest:
     pytest tests/test_todo_placement.py
 """
+import datetime as dt
 import os
 import sys
 import types
@@ -283,6 +284,74 @@ def test_resolving_an_untouched_picker_places_nothing_and_creates_nothing():
     assert (cat, proj, ms) == (None, None, None), (
         "a to-do written without placing it must stay unplaced")
     assert made == []
+
+
+# ==========================================================================
+# The New to-do form is a FRAGMENT. It has to be: its pickers cascade, so they
+# cannot sit inside st.form, and every widget outside a form reruns the script
+# — which for this tab means redrawing the calendar, the board and the charts,
+# and re-issuing every query behind them, three times over just to place one
+# to-do. Inside a fragment, browsing the dropdowns reruns only the form.
+#
+# The bug a fragment brings with it is the opposite: a write that reruns only
+# the fragment, so the rest of the page never learns anything changed. Adding
+# a to-do must therefore ask for a whole-page rerun, and that is asserted here.
+# ==========================================================================
+WEEK_START = dt.date(2026, 8, 1)
+
+
+def writing_db(added):
+    m = stub_db(created=[])
+    m.add_todo = lambda *a, **kw: added.append((a, kw))
+    m.clear_user_caches = lambda: None
+    return m
+
+
+def submit_new_todo(answers):
+    """Fill the New to-do form in and press Add to-do."""
+    added = []
+    st.log.clear()
+    st.answers = dict(answers)
+    st.clicked = {"Add to-do"}
+    tracker.db = writing_db(added)
+    try:
+        with fake_streamlit.rendering():
+            tracker.add_todo_form({"id": ME}, True, WEEK_START)
+    finally:
+        st.answers, st.clicked = {}, set()
+    return added
+
+
+def test_the_new_todo_form_is_isolated_in_a_fragment():
+    assert "add_todo_form" in st.fragments, (
+        "the New to-do form is not a fragment, so choosing a category "
+        "redraws the whole Week tab")
+
+
+def test_adding_a_todo_reruns_the_WHOLE_page_not_just_the_form():
+    added = submit_new_todo({"td_title": "Write the abstract"})
+    assert added, "the to-do was not saved"
+    assert ("rerun", "app") in st.log, (
+        "a fragment-scoped rerun would leave the new to-do invisible: the "
+        "board above it is not redrawn")
+
+
+def test_the_placement_reaches_the_saved_todo():
+    added = submit_new_todo({"td_title": "Write the abstract",
+                             "td_cat": "Research",
+                             "td_proj": "Resilience Review",
+                             "td_ms": "Stakeholder round 1"})
+    assert added, "the to-do was not saved"
+    args, kwargs = added[0]
+    assert kwargs.get("category_id") == "c-res", kwargs
+    assert args[3] == "p-1", args          # project_id
+    assert kwargs.get("milestone_id") == "m-1", kwargs
+
+
+def test_a_to_do_with_no_title_is_refused_and_nothing_is_saved():
+    added = submit_new_todo({"td_title": ""})
+    assert added == []
+    assert any(k == "error" for k, _ in st.log)
 
 
 # ---- plain-python runner (so `python tests/...` works without pytest) -----

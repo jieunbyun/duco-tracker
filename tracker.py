@@ -1052,6 +1052,70 @@ def resolve_work_placement(pick, owner_id):
     return cat_id, proj_id, ms_id, None
 
 
+@st.fragment
+def add_todo_form(me, is_lead, week_start):
+    """The New to-do form, including its category -> project -> milestone
+    pickers.
+
+    This is a FRAGMENT, and that is the whole point of it being a separate
+    function. The pickers cascade, so they cannot live inside st.form — each
+    level has to refresh the next, which needs a rerun. Outside a fragment
+    that rerun is a whole-page one: choosing a category would redraw the
+    calendar, the board, the charts and every query behind them, three times
+    over, just to write one to-do down.
+
+    Inside a fragment, browsing the dropdowns reruns only this form. Adding
+    the to-do asks for a full rerun, because the new task has to appear on the
+    board above.
+
+    Every argument is a plain value, never a list of rows: a fragment is
+    re-called with the arguments from the last full run, so anything the rest
+    of the page can change would go stale here.
+    """
+    td_pick = work_placement_picker("td", is_lead)
+    with st.form("add_todo", clear_on_submit=True):
+        tc1, tc2 = st.columns([5, 1])
+        with tc1:
+            td_title = st.text_input("New to-do", key="td_title",
+                                     label_visibility="collapsed",
+                                     placeholder="New to-do…")
+        with tc2:
+            td_hours = st.number_input("Est. h", min_value=0.0, step=0.5,
+                                       value=0.0, key="td_hours",
+                                       label_visibility="collapsed",
+                                       help="Estimated hours (optional)")
+        td_note = st.text_input(
+            "Note (optional)", key="td_note",
+            placeholder="optional note shown under the title")
+        td_imp = st.checkbox("\u2b50 High importance", key="td_important")
+        td_submit = st.form_submit_button("Add to-do")
+    if not td_submit:
+        return
+    if not td_title.strip():
+        st.error("Give the to-do a title.")
+        return
+    td_cat, td_proj_id, td_ms_id, td_err = resolve_work_placement(
+        td_pick, me["id"])
+    if td_err:
+        st.error(td_err)
+        return
+    try:
+        # due_on is the task's start week: it defaults to the week currently
+        # being viewed (week_start), so adding a to-do while looking at a
+        # future/past week files it under that week. Used only for weekly
+        # scoping, not shown as a date in the UI.
+        db.add_todo(me["id"], td_title.strip(), week_start.isoformat(),
+                    td_proj_id, est_hours=td_hours or None,
+                    note=td_note.strip() or None, important=td_imp,
+                    category_id=td_cat, milestone_id=td_ms_id)
+        db.clear_user_caches()
+        # the board above must show the new task, so this one rerun is the
+        # whole page rather than just this fragment
+        st.rerun(scope="app")
+    except Exception as e:
+        st.error(f"Could not add. {e}")
+
+
 def todo_edit_form(t, proj_name, key_prefix, is_lead, owner_id):
     """The to-do's own fields: title, note, estimate, project, importance and
     which week it is filed under. Shared by the edit popover in the unplanned
@@ -2195,56 +2259,7 @@ def view_week(me):
 
     st.caption(f"New to-dos are filed under the week you're viewing: "
                f"{week_start:%d %b} – {week_end:%d %b %Y}.")
-    # Placing the work when you write the to-do down, rather than when you
-    # tick it off: the same category -> project -> milestone as the Log tab,
-    # so the log panel opens already filled in. The pickers cascade, so they
-    # live outside the form — inside one, choosing a category would not
-    # refresh the project list until submit.
-    ac1, ac2 = st.columns([1, 2])
-    with ac1:
-        td_pick = work_placement_picker("td", is_lead)
-    with ac2:
-        with st.form("add_todo", clear_on_submit=True):
-            tc1, tc2 = st.columns([5, 1])
-            with tc1:
-                td_title = st.text_input("New to-do", key="td_title",
-                                         label_visibility="collapsed",
-                                         placeholder="New to-do…")
-            with tc2:
-                td_hours = st.number_input("Est. h", min_value=0.0, step=0.5,
-                                           value=0.0, key="td_hours",
-                                           label_visibility="collapsed",
-                                           help="Estimated hours (optional)")
-            td_note = st.text_input(
-                "Note (optional)", key="td_note",
-                placeholder="optional note shown under the title")
-            td_imp = st.checkbox("⭐ High importance", key="td_important")
-            td_submit = st.form_submit_button("Add to-do")
-    if td_submit:
-        if not td_title.strip():
-            st.error("Give the to-do a title.")
-        else:
-            td_cat, td_proj_id, td_ms_id, td_err = resolve_work_placement(
-                td_pick, me["id"])
-            if td_err:
-                st.error(td_err)
-            else:
-                try:
-                    # due_on is the task's start week: it defaults to the
-                    # week currently being viewed (week_start), so adding a
-                    # to-do while looking at a future/past week files it under
-                    # that week. Used only for weekly scoping, not shown as a
-                    # date in the UI.
-                    db.add_todo(me["id"], td_title.strip(),
-                                week_start.isoformat(), td_proj_id,
-                                est_hours=td_hours or None,
-                                note=td_note.strip() or None,
-                                important=td_imp,
-                                category_id=td_cat, milestone_id=td_ms_id)
-                    db.clear_user_caches()
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Could not add. {e}")
+    add_todo_form(me, is_lead, week_start)
 
     st.markdown("<hr>", unsafe_allow_html=True)
 

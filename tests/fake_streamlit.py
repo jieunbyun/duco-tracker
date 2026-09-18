@@ -70,6 +70,9 @@ class FakeStreamlit(types.ModuleType):
         # Both start empty, so a plain render still clicks nothing.
         self.answers = {}
         self.clicked = set()
+        # names of functions wrapped in @st.fragment, so a test can check that
+        # a form which reruns on every keystroke is actually isolated
+        self.fragments = set()
 
     # ---- layout ----------------------------------------------------------
     def columns(self, spec, **kw):
@@ -185,7 +188,22 @@ class FakeStreamlit(types.ModuleType):
         return _Ctx(self)
 
     # ---- control flow ----------------------------------------------------
-    def rerun(self):
+    def fragment(self, func=None, **kw):
+        """Pass-through stand-in for @st.fragment.
+
+        The decorated code runs exactly as it does in production; what this
+        fake cannot reproduce is the ISOLATION — here a fragment rerun and a
+        page rerun look the same. That is why rerun() records its scope: the
+        bug a fragment introduces is a write that forgets scope="app" and so
+        never refreshes the rest of the page, and recording the scope is what
+        lets a test catch it."""
+        if func is None:
+            return self.fragment
+        self.fragments.add(getattr(func, "__name__", str(func)))
+        return func
+
+    def rerun(self, scope="app"):
+        self.log.append(("rerun", str(scope)))
         raise Rerun()
 
     def stop(self):
