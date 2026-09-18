@@ -910,7 +910,137 @@ def view_log(me):
 # ---------------------------------------------------------------------------
 # Section: Week (look ahead, plan, keep actuals current)
 # ---------------------------------------------------------------------------
-def todo_edit_form(t, proj_name, key_prefix):
+LIFE_SEPARATOR = "──── Life ────"
+NO_CATEGORY = "— no category —"
+NO_PROJECT = "— no project —"
+NO_MILESTONE = "— no milestone —"
+
+
+def work_placement_picker(key_prefix, is_lead, category_id=None,
+                          project_id=None, milestone_id=None):
+    """The app's one way of saying where a piece of work belongs: category,
+    then the projects in that category, then that project's milestones — each
+    list ending in '+ New …' so something that doesn't exist yet can be named
+    here. Pre-selects whatever the caller already has.
+
+    Nothing is created while you browse: the picker only reports the choice,
+    and resolve_work_placement() creates what was asked for when the caller
+    commits. Render it OUTSIDE st.form — each level filters the next, which
+    needs a rerun, and a form defers those until submit."""
+    cats_work = db.categories(domain="work")
+    cats_life = db.categories(domain="life") if is_lead else []
+    cat_ids = {NO_CATEGORY: None}
+    cat_domain = {NO_CATEGORY: None}
+    for c in cats_work:
+        cat_ids[c["label"]] = c["id"]
+        cat_domain[c["label"]] = "work"
+    # a visual separator between the two groups (non-selectable sentinel),
+    # exactly as the Add-a-block form draws it
+    if cats_life:
+        cat_ids[LIFE_SEPARATOR] = None
+        cat_domain[LIFE_SEPARATOR] = None
+        for c in cats_life:
+            cat_ids[c["label"]] = c["id"]
+            cat_domain[c["label"]] = "life"
+    cat_keys = list(cat_ids.keys())
+    cat_idx = next((i for i, k in enumerate(cat_keys)
+                    if category_id and cat_ids[k] == category_id), 0)
+    cat = st.selectbox("Category", cat_keys, index=cat_idx,
+                       key=f"{key_prefix}_cat",
+                       help="Work categories first, then life. Life "
+                            "categories are personal and private to you.")
+    chosen_cat = cat_ids[cat]
+    is_life = cat_domain.get(cat) == "life"
+    is_sep = chosen_cat is None and cat == LIFE_SEPARATOR
+
+    pick = {"category_id": chosen_cat, "is_life": is_life,
+            "is_separator": is_sep, "project_id": None, "new_project": "",
+            "milestone_id": None, "new_milestone": ""}
+    # life work is never project-tied, and a project cannot be placed without
+    # a category to place it in — so both levels stop here in those cases
+    if not chosen_cat or is_life:
+        return pick
+
+    matching = db.projects_for_category(chosen_cat)
+    proj_ids = {NO_PROJECT: None}
+    proj_ids.update({p["name"]: p["id"] for p in matching})
+    proj_ids[NEW_PROJECT] = "__new__"
+    proj_keys = list(proj_ids.keys())
+    proj_idx = next((i for i, k in enumerate(proj_keys)
+                     if project_id and proj_ids[k] == project_id), 0)
+    proj = st.selectbox("Project", proj_keys, index=proj_idx,
+                        key=f"{key_prefix}_proj",
+                        help="Projects in the chosen category. New ones are "
+                             "auto-linked to it.")
+    pick["project_id"] = proj_ids[proj]
+
+    if pick["project_id"] == "__new__":
+        pick["new_project"] = st.text_input(
+            "New project name", placeholder="e.g. DAFNI Fellowship",
+            key=f"{key_prefix}_newproj",
+            help="Created private to you, in the category above.")
+        # a brand-new project has no milestones yet: offer to start it with
+        # one, created together with the project
+        pick["new_milestone"] = st.text_input(
+            "First milestone (optional)", placeholder="e.g. First draft",
+            key=f"{key_prefix}_newprojms",
+            help="Add more in the Projects tab later.")
+        if pick["new_milestone"].strip():
+            pick["milestone_id"] = "__new__"
+    elif pick["project_id"]:
+        # open milestones, plus the one already chosen even if it is done, so
+        # the picker never misrepresents what the work is already tied to
+        ms = [m for m in db.project_milestones(pick["project_id"])
+              if m["status"] != "done" or m["id"] == milestone_id]
+        ms_ids = {NO_MILESTONE: None}
+        ms_ids.update({m["title"]: m["id"] for m in ms})
+        ms_ids[NEW_MILESTONE] = "__new__"
+        ms_keys = list(ms_ids.keys())
+        ms_idx = next((i for i, k in enumerate(ms_keys)
+                       if milestone_id and ms_ids[k] == milestone_id), 0)
+        ms_pick = st.selectbox("Milestone (optional)", ms_keys, index=ms_idx,
+                               key=f"{key_prefix}_ms")
+        pick["milestone_id"] = ms_ids[ms_pick]
+        if pick["milestone_id"] == "__new__":
+            pick["new_milestone"] = st.text_input(
+                "New milestone name", placeholder="e.g. First draft",
+                key=f"{key_prefix}_newms")
+    return pick
+
+
+def resolve_work_placement(pick, owner_id):
+    """Create whatever the picker was asked to create, and return
+    (category_id, project_id, milestone_id, error). Call this only when the
+    user commits — browsing the dropdowns must never write anything.
+
+    On error nothing has been created and the message is for the user."""
+    if pick.get("is_separator"):
+        return None, None, None, ("That's a divider, not a category — pick a "
+                                  "real category.")
+    cat_id = pick.get("category_id")
+    proj_id = pick.get("project_id")
+    ms_id = pick.get("milestone_id")
+
+    if proj_id == "__new__":
+        name = (pick.get("new_project") or "").strip()
+        if not name:
+            return None, None, None, ("Give the new project a name, or pick "
+                                      "an existing one.")
+        proj_id, _created = db.get_or_create_project(
+            name, owner_id, "private", category_id=cat_id)
+    if ms_id == "__new__":
+        name = (pick.get("new_milestone") or "").strip()
+        if not name:
+            return None, None, None, ("Give the new milestone a name, or pick "
+                                      "an existing one.")
+        if not proj_id:
+            return None, None, None, "A milestone needs a project."
+        res = db.add_milestone(proj_id, name)
+        ms_id = (res.data or [{}])[0].get("id") if res else None
+    return cat_id, proj_id, ms_id, None
+
+
+def todo_edit_form(t, proj_name, key_prefix, is_lead, owner_id):
     """The to-do's own fields: title, note, estimate, project, importance and
     which week it is filed under. Shared by the edit popover in the unplanned
     list and the edit panel opened from a card on the board, so both stay in
@@ -918,6 +1048,12 @@ def todo_edit_form(t, proj_name, key_prefix):
 
     Deliberately does NOT touch the to-do's planned days — those are sittings,
     edited in the day picker, so a rename can never silently drop a plan."""
+    # The placement pickers cascade, so they sit outside the form: inside one,
+    # choosing a category would not refresh the project list until submit.
+    pick = work_placement_picker(
+        f"{key_prefix}_pl_{t['id']}", is_lead,
+        category_id=t.get("category_id"), project_id=t.get("project_id"),
+        milestone_id=t.get("milestone_id"))
     with st.form(f"{key_prefix}_form_{t['id']}"):
         e_title = st.text_input("Title", value=t["title"],
                                 key=f"{key_prefix}_title_{t['id']}")
@@ -929,13 +1065,6 @@ def todo_edit_form(t, proj_name, key_prefix):
             key=f"{key_prefix}_hours_{t['id']}",
             help="The whole task's estimate. The board's progress bar "
                  "measures logged hours against it.")
-        e_projs = {"— no project —": None}
-        e_projs.update({p["name"]: p["id"] for p in db.my_projects()})
-        cur_pn = proj_name.get(t.get("project_id")) or "— no project —"
-        e_keys = list(e_projs.keys())
-        e_idx = e_keys.index(cur_pn) if cur_pn in e_keys else 0
-        e_proj = st.selectbox("Project", e_keys, index=e_idx,
-                              key=f"{key_prefix}_proj_{t['id']}")
         e_imp = st.checkbox("⭐ High importance",
                             value=bool(t.get("is_important")),
                             key=f"{key_prefix}_imp_{t['id']}")
@@ -951,18 +1080,25 @@ def todo_edit_form(t, proj_name, key_prefix):
             f"{w + dt.timedelta(days=6):%d %b %Y}",
             key=f"{key_prefix}_week_{t['id']}")
         submitted = st.form_submit_button("Save", type="primary")
-        if submitted and e_title.strip():
-            db.update_todo(t["id"], {
-                "title": e_title.strip(),
-                "note": e_note.strip() or None,
-                "est_hours": e_hours or None,
-                "project_id": e_projs[e_proj],
-                "is_important": e_imp,
-                "due_on": e_week.isoformat()})
-            db.clear_user_caches()
-            return True
-        elif submitted:
+        if submitted and not e_title.strip():
             st.error("Title can't be empty.")
+        elif submitted:
+            cat_id, proj_id, ms_id, err = resolve_work_placement(
+                pick, owner_id)
+            if err:
+                st.error(err)
+            else:
+                db.update_todo(t["id"], {
+                    "title": e_title.strip(),
+                    "note": e_note.strip() or None,
+                    "est_hours": e_hours or None,
+                    "category_id": cat_id,
+                    "project_id": proj_id,
+                    "milestone_id": ms_id,
+                    "is_important": e_imp,
+                    "due_on": e_week.isoformat()})
+                db.clear_user_caches()
+                return True
     return False
 
 
@@ -1463,9 +1599,11 @@ def view_week(me):
                     domain="work")
                 lg_cat_labels = {c["label"]: c["id"] for c in lg_cats}
                 lg_keys = list(lg_cat_labels.keys())
-                # default to the category of the to-do's project, so the
-                # common case needs no choosing at all
-                want_cat = proj_cat.get(t.get("project_id"))
+                # default to the category the to-do was placed in when it
+                # was written, falling back to its project's, so the common
+                # case needs no choosing at all
+                want_cat = (t.get("category_id")
+                            or proj_cat.get(t.get("project_id")))
                 cat_idx = next((n for n, k in enumerate(lg_keys)
                                 if lg_cat_labels[k] == want_cat), 0)
                 lg_cat = st.selectbox("Category", lg_keys, index=cat_idx,
@@ -1503,13 +1641,22 @@ def view_week(me):
                         help="Add more in the Projects tab later.")
                     lg_ms_id = "__new__" if lg_new_ms.strip() else None
                 elif lg_pid:
+                    # open milestones, plus the one the to-do already names
+                    # even if it is done, so the picker cannot quietly drop it
                     lg_ms = [m for m in db.project_milestones(lg_pid)
-                             if m["status"] != "done"]
+                             if m["status"] != "done"
+                             or m["id"] == t.get("milestone_id")]
                     lg_ms_labels = {"— none —": None}
                     lg_ms_labels.update({m["title"]: m["id"] for m in lg_ms})
                     lg_ms_labels[NEW_MILESTONE] = "__new__"
+                    # the to-do's own milestone, if it named one
+                    lg_ms_keys = list(lg_ms_labels.keys())
+                    lg_ms_idx = next(
+                        (n for n, k in enumerate(lg_ms_keys)
+                         if t.get("milestone_id")
+                         and lg_ms_labels[k] == t["milestone_id"]), 0)
                     lg_ms_pick = st.selectbox(
-                        "Milestone (optional)", list(lg_ms_labels.keys()),
+                        "Milestone (optional)", lg_ms_keys, index=lg_ms_idx,
                         key=f"lgms_{slot['id']}")
                     lg_ms_id = lg_ms_labels[lg_ms_pick]
                     if lg_ms_id == "__new__":
@@ -1752,7 +1899,8 @@ def view_week(me):
             st.markdown(f"**Edit “{t['title']}”**")
             e1, e2 = st.columns([3, 2])
             with e1:
-                if todo_edit_form(t, proj_name, "wkpan"):
+                if todo_edit_form(t, proj_name, "wkpan",
+                                  is_lead, me["id"]):
                     st.session_state.pop("wk_panel", None)
                     st.rerun()
             with e2:
@@ -1890,7 +2038,6 @@ def view_week(me):
                             db.delete_todo(t["id"])
                             db.clear_user_caches()
                             st.rerun()
-                    edit_pop = None
                 else:
                     pl, sr, ed, cx, dl = st.columns(5)
                     with pl:
@@ -1906,7 +2053,13 @@ def view_week(me):
                             db.clear_user_caches()
                             st.rerun()
                     with ed:
-                        edit_pop = st.popover("✎", help="Edit")
+                        # the edit panel, not a popover: the category ->
+                        # project -> milestone pickers rerun as you move
+                        # through them, and a rerun closes a popover
+                        if st.button("✎", key=f"tded_{t['id']}",
+                                     help="Edit"):
+                            st.session_state.wk_panel = ("edit", t["id"])
+                            st.rerun()
                     with cx:
                         if st.button("⊘", key=f"tdcan_{t['id']}",
                                      help="Cancel: keep it struck through "
@@ -1921,10 +2074,6 @@ def view_week(me):
                             db.delete_todo(t["id"])
                             db.clear_user_caches()
                             st.rerun()
-            if edit_pop is not None:
-                with edit_pop:
-                    if todo_edit_form(t, proj_name, "tded"):
-                        st.rerun()
     else:
         st.caption("Every to-do this week has a day. Anything new you add "
                    "below starts here, unplanned.")
@@ -1951,27 +2100,40 @@ def view_week(me):
 
     st.caption(f"New to-dos are filed under the week you're viewing: "
                f"{week_start:%d %b} – {week_end:%d %b %Y}.")
-    with st.form("add_todo", clear_on_submit=True):
-        tc1, tc2, tc3 = st.columns([5, 1, 2])
-        with tc1:
-            td_title = st.text_input("New to-do", key="td_title",
-                                     label_visibility="collapsed",
-                                     placeholder="New to-do…")
-        with tc2:
-            td_hours = st.number_input("Est. h", min_value=0.0, step=0.5,
-                                       value=0.0, key="td_hours",
-                                       label_visibility="collapsed",
-                                       help="Estimated hours (optional)")
-        with tc3:
-            td_projs = {"— no project —": None}
-            td_projs.update({p["name"]: p["id"] for p in db.my_projects()})
-            td_proj = st.selectbox("Project", list(td_projs.keys()),
-                                   key="td_proj", label_visibility="collapsed")
-        td_note = st.text_input("Note (optional)", key="td_note",
-                                placeholder="optional note shown under the title")
-        td_imp = st.checkbox("⭐ High importance", key="td_important")
-        if st.form_submit_button("Add to-do"):
-            if td_title.strip():
+    # Placing the work when you write the to-do down, rather than when you
+    # tick it off: the same category -> project -> milestone as the Log tab,
+    # so the log panel opens already filled in. The pickers cascade, so they
+    # live outside the form — inside one, choosing a category would not
+    # refresh the project list until submit.
+    ac1, ac2 = st.columns([1, 2])
+    with ac1:
+        td_pick = work_placement_picker("td", is_lead)
+    with ac2:
+        with st.form("add_todo", clear_on_submit=True):
+            tc1, tc2 = st.columns([5, 1])
+            with tc1:
+                td_title = st.text_input("New to-do", key="td_title",
+                                         label_visibility="collapsed",
+                                         placeholder="New to-do…")
+            with tc2:
+                td_hours = st.number_input("Est. h", min_value=0.0, step=0.5,
+                                           value=0.0, key="td_hours",
+                                           label_visibility="collapsed",
+                                           help="Estimated hours (optional)")
+            td_note = st.text_input(
+                "Note (optional)", key="td_note",
+                placeholder="optional note shown under the title")
+            td_imp = st.checkbox("⭐ High importance", key="td_important")
+            td_submit = st.form_submit_button("Add to-do")
+    if td_submit:
+        if not td_title.strip():
+            st.error("Give the to-do a title.")
+        else:
+            td_cat, td_proj_id, td_ms_id, td_err = resolve_work_placement(
+                td_pick, me["id"])
+            if td_err:
+                st.error(td_err)
+            else:
                 try:
                     # due_on is the task's start week: it defaults to the
                     # week currently being viewed (week_start), so adding a
@@ -1979,16 +2141,15 @@ def view_week(me):
                     # that week. Used only for weekly scoping, not shown as a
                     # date in the UI.
                     db.add_todo(me["id"], td_title.strip(),
-                                week_start.isoformat(), td_projs[td_proj],
+                                week_start.isoformat(), td_proj_id,
                                 est_hours=td_hours or None,
                                 note=td_note.strip() or None,
-                                important=td_imp)
+                                important=td_imp,
+                                category_id=td_cat, milestone_id=td_ms_id)
                     db.clear_user_caches()
                     st.rerun()
                 except Exception as e:
                     st.error(f"Could not add. {e}")
-            else:
-                st.error("Give the to-do a title.")
 
     st.markdown("<hr>", unsafe_allow_html=True)
 
@@ -4464,6 +4625,17 @@ def view_help(me):
             "the board; press **📅** to choose its days. You only ever choose "
             "*days*, never clock times, and giving it a number of hours is "
             "optional — a day on its own is a complete plan.\n\n"
+            "When you write a to-do down you can also say where the work "
+            "belongs, in the same **category → project → milestone** order "
+            "used everywhere else: each choice narrows the next, and both the "
+            "project and the milestone lists end in **+ New …** so something "
+            "that doesn't exist yet can be named on the spot. Nothing is "
+            "created until you press **Add to-do**, so changing your mind "
+            "costs nothing. All three are optional and independent — a task "
+            "can name a category and no project (marking is *Teaching*, and "
+            "belongs to no project), or nothing at all. The point of filling "
+            "them in is that ticking the task off later needs no choosing: "
+            "the log panel opens with your answers already in place.\n\n"
             "A real task is rarely one sitting, so you can tick several days "
             "at once. Choose **Split evenly** to share the task's estimate "
             "across them, **Same each day** to give each the same number of "

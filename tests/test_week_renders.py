@@ -82,12 +82,14 @@ TODOS = [
     # split over three days: Tue logged, Wed and Thu still open
     {"id": "t-split", "title": "Draft review section 3", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
+     "category_id": "c-res", "milestone_id": "m-1",
      "est_hours": 6, "sort_order": 0, "done_at": None,
      "is_important": False, "is_cancelled": False},
     # planned with NO hours at all, on a day that has already passed: the
     # "stale" branch on the card
     {"id": "t-nohours", "title": "Mark lab reports", "note": "20 of them",
      "due_on": DAY[0], "is_done": False, "project_id": None,
+     "category_id": "c-adm",
      "est_hours": None, "sort_order": 1, "done_at": None,
      "is_important": True, "is_cancelled": False},
     # finished, with its sitting logged
@@ -405,6 +407,37 @@ def test_only_logged_sittings_offer_to_add_another():
     # for a fifth button and no need of it — you would just log it.
     assert OUT.count("button: ＋") == 3, (
         "the + button appeared on a sitting that has not been logged")
+
+
+# ==========================================================================
+# Placement: a to-do carries category -> project -> milestone from the moment
+# it is written, so ticking it off needs no re-choosing.
+# ==========================================================================
+def test_the_new_todo_form_asks_for_a_category():
+    assert "selectbox: Category" in OUT, (
+        "the New to-do form must place work the same way the Log tab does")
+
+
+def test_the_log_panel_preselects_the_todos_own_placement():
+    out = render_week(panel=("log", "sl-b"))          # a sitting of t-split
+    chose = dict(b.split("=", 1) for line in out.splitlines()
+                 if line.startswith("selected: ")
+                 for b in [line[len("selected: "):]])
+    assert chose.get("lgcat_sl-b") == "Research", chose
+    assert chose.get("lgproj_sl-b") == "Resilience Review", chose
+    assert chose.get("lgms_sl-b") == "Stakeholder round 1", (
+        "the to-do named a milestone; the log panel must open on it rather "
+        "than making you find it again")
+
+
+def test_a_todo_can_be_categorised_with_no_project():
+    """"Mark lab reports" is Admin and belongs to no project — a placement the
+    old flat project dropdown could not express at all."""
+    out = render_week(panel=("log", "sl-d"))          # t-nohours' sitting
+    chose = dict(b.split("=", 1) for line in out.splitlines()
+                 if line.startswith("selected: ")
+                 for b in [line[len("selected: "):]])
+    assert chose.get("lgcat_sl-d") == "Admin", chose
 
 
 # ==========================================================================

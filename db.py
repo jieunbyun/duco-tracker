@@ -336,8 +336,9 @@ def todos_in_range(date_from, date_to, include_open_before=True):
 
     Cancelled todos stay visible in their own week (struck through) but never
     carry forward: they are excluded from the "due before date_from" pulls."""
-    cols = ("id,title,note,due_on,is_done,project_id,est_hours,"
-            "sort_order,done_at,is_important,is_cancelled")
+    cols = ("id,title,note,due_on,is_done,project_id,category_id,"
+            "milestone_id,est_hours,sort_order,done_at,is_important,"
+            "is_cancelled")
     rows = (client().table("todo").select(cols)
             .gte("due_on", date_from).lte("due_on", date_to)
             .order("sort_order").order("due_on").execute().data or [])
@@ -377,11 +378,19 @@ def update_todo(todo_id, fields: dict):
 
 
 def add_todo(user_id, title, due_on, project_id=None, est_hours=None,
-             note=None, important=False):
+             note=None, important=False, category_id=None, milestone_id=None):
+    """Add a to-do. category_id and milestone_id place the work the same way
+    the Log tab does, so ticking the to-do off later needs no re-choosing.
+    All three placement fields are optional and independent: a to-do may name
+    a category with no project, or nothing at all."""
     payload = {"user_id": user_id, "title": title, "due_on": due_on,
                "is_important": bool(important)}
     if project_id:
         payload["project_id"] = project_id
+    if category_id:
+        payload["category_id"] = category_id
+    if milestone_id:
+        payload["milestone_id"] = milestone_id
     if est_hours:
         payload["est_hours"] = est_hours
     if note:

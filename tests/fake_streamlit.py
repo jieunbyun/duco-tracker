@@ -124,7 +124,7 @@ class FakeStreamlit(types.ModuleType):
 
     def checkbox(self, label="", value=False, **kw):
         self.log.append(("checkbox", str(label)))
-        return bool(value)
+        return bool(self.answers.get(kw.get("key"), value))
 
     def selectbox(self, label, options, index=0, format_func=None, **kw):
         opts = list(options)
@@ -137,6 +137,11 @@ class FakeStreamlit(types.ModuleType):
             chosen = want
         if format_func:
             format_func(chosen)          # run it: it is real app code
+        self.log.append(("selected", f"{kw.get('key')}={chosen}"))
+        # the whole option list, so a test can assert on what was OFFERED and
+        # not merely on what happened to be selected
+        self.log.append(("options", f"{kw.get('key')}="
+                         + " | ".join(str(o) for o in opts)))
         return chosen
 
     def radio(self, label, options, index=0, **kw):
