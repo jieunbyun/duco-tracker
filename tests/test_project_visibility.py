@@ -300,6 +300,14 @@ def test_signed_out_user_sees_nothing():
 # ---- plain-python runner (so `python tests/...` works without pytest) -----
 if __name__ == "__main__":
     import traceback
+    # Failure messages quote the UI's own glyphs, which a Windows console
+    # (cp1252) cannot encode. Without this, a REAL failure dies in the print
+    # and is reported as a crash instead of as the assertion it is.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+        sys.stderr.reconfigure(errors="replace")
+    except Exception:
+        pass
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
     failures = 0

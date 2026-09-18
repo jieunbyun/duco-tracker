@@ -66,6 +66,11 @@ SESSIONS = [
      "hours": 2, "started_at": DAY[2] + "T13:00:00",
      "ended_at": DAY[2] + "T15:00:00", "is_core": False,
      "milestone_id": None, "description": None},
+    {"id": "s-3", "session_date": DAY[4], "category_id": "c-res",
+     "category_label": "Research", "project_id": "p-1",
+     "project_name": "Resilience Review", "hours": 1,
+     "started_at": DAY[4] + "T09:00:00", "ended_at": DAY[4] + "T10:00:00",
+     "is_core": False, "milestone_id": None, "description": "reviewer 1"},
     {"id": "s-untimed", "session_date": DAY[3], "category_id": "c-res",
      "category_label": "Research", "project_id": "p-1",
      "project_name": "Resilience Review", "hours": 0.33,
@@ -114,6 +119,14 @@ TODOS = [
      "is_important": False, "is_cancelled": False},
 ]
 
+TODOS.append(
+    # done in two disconnected windows on ONE day: the morning is logged, the
+    # afternoon was added with ＋ and is still open
+    {"id": "t-twice", "title": "Reply to reviewers", "note": None,
+     "due_on": DAY[0], "is_done": False, "project_id": "p-1",
+     "est_hours": 2, "sort_order": 7, "done_at": None,
+     "is_important": False, "is_cancelled": False})
+
 SLOTS = [
     {"id": "sl-a", "todo_id": "t-split", "user_id": "u-me",
      "planned_on": DAY[3], "planned_hours": 2, "session_id": "s-1",
@@ -142,6 +155,13 @@ SLOTS = [
     {"id": "sl-h", "todo_id": "t-dropday", "user_id": "u-me",
      "planned_on": DAY[6], "planned_hours": 2, "session_id": None,
      "sort_order": 1, "is_cancelled": True},
+    # two windows of one task on the SAME day — the pair the ＋ button makes
+    {"id": "sl-j", "todo_id": "t-twice", "user_id": "u-me",
+     "planned_on": DAY[4], "planned_hours": 1, "session_id": "s-3",
+     "sort_order": 0, "is_cancelled": False},
+    {"id": "sl-k", "todo_id": "t-twice", "user_id": "u-me",
+     "planned_on": DAY[4], "planned_hours": None, "session_id": None,
+     "sort_order": 1, "is_cancelled": False},
     # the task's one and only day, dropped: no plan left at all
     {"id": "sl-i", "todo_id": "t-noday", "user_id": "u-me",
      "planned_on": DAY[1], "planned_hours": 1, "session_id": None,
@@ -159,7 +179,8 @@ def fake_db():
     m.todos_in_range = lambda a, b: [dict(t) for t in TODOS]
     m.todo_slots_in_range = lambda a, b: [
         dict(s) for s in SLOTS if a <= s["planned_on"] <= b]
-    m.todo_logged_hours = lambda ids: {"t-split": 2.5, "t-done": 2}
+    m.todo_logged_hours = lambda ids: {"t-split": 2.5, "t-done": 2,
+                                       "t-twice": 1}
     m.my_projects = lambda: [dict(p) for p in PROJECTS]
     m.projects_for_category = lambda cid: [
         dict(p) for p in PROJECTS if p["category_id"] == cid]
@@ -169,7 +190,8 @@ def fake_db():
     # Any write is a bug in a read-only render: nothing is clicked.
     for name in ("set_todo_order", "set_todo_done", "set_todo_important",
                  "set_todo_cancelled", "delete_todo", "update_todo",
-                 "add_todo", "move_todo_slot", "delete_todo_slot",
+                 "add_todo", "add_todo_slot", "move_todo_slot",
+                 "delete_todo_slot",
                  "set_slot_cancelled",
                  "set_slot_session", "set_todo_plan", "log_session",
                  "add_milestone", "get_or_create_project",
@@ -356,6 +378,36 @@ def test_a_cancelled_todo_is_struck_through_and_not_on_the_board():
 
 
 # ==========================================================================
+# Two windows of one task on one day. A task is rarely done in one unbroken
+# sitting, so the board must show each window as its own card and let a logged
+# one spawn the next.
+# ==========================================================================
+def test_a_day_shows_both_windows_of_the_same_task():
+    assert OUT.count("Reply to reviewers") == 2, (
+        "two sittings on one day must render as two cards, not collapse")
+
+
+def test_the_two_windows_are_numbered_apart():
+    for marker in ("1/2", "2/2"):
+        assert marker in OUT, (
+            f"sitting marker {marker} missing — same-day windows must still "
+            f"be numbered over the task's live sittings")
+
+
+def test_the_logged_window_offers_to_add_another_that_day():
+    assert "button: ＋" in OUT, (
+        "a logged sitting must offer the + button to log a second "
+        "window that day")
+
+
+def test_only_logged_sittings_offer_to_add_another():
+    # sl-a, sl-e and sl-j are the logged ones; an open sitting has no room
+    # for a fifth button and no need of it — you would just log it.
+    assert OUT.count("button: ＋") == 3, (
+        "the + button appeared on a sitting that has not been logged")
+
+
+# ==========================================================================
 # The privacy rule, at the level the user actually sees. The fake db returns
 # only my rows; nothing another person owns may ever reach the page.
 # ==========================================================================
@@ -374,6 +426,14 @@ def test_rendering_the_page_never_writes():
 # ---- plain-python runner (so `python tests/...` works without pytest) -----
 if __name__ == "__main__":
     import traceback
+    # Failure messages quote the UI's own glyphs, which a Windows console
+    # (cp1252) cannot encode. Without this, a REAL failure dies in the print
+    # and is reported as a crash instead of as the assertion it is.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+        sys.stderr.reconfigure(errors="replace")
+    except Exception:
+        pass
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
     failures = 0

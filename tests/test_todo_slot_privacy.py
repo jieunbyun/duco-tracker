@@ -229,6 +229,51 @@ def test_replanning_leaves_hours_open_when_none_given():
         "a day planned with no hours must stay that way")
 
 
+# ==========================================================================
+# A day may hold SEVERAL open sittings of one task — a morning window and an
+# afternoon one. The day picker cannot express that (one checkbox per day), so
+# re-planning must neither lose the extras nor silently merge them.
+# ==========================================================================
+def _seed_two_on_one_day():
+    """Two open sittings of my task on 2026-08-05, as the board's ＋ makes."""
+    tables = seed()
+    tables["todo_slot"].append(
+        slot("sl-2b", T_MINE, ME, "2026-08-05", 1.5))
+    return tables
+
+
+def test_a_day_can_hold_two_sittings_of_the_same_task():
+    tables = _seed_two_on_one_day()
+    use(tables, ME)
+    same_day = [s for s in db.todo_slots_in_range(THIS_FROM, THIS_TO)
+                if s["planned_on"] == "2026-08-05"]
+    assert len(same_day) == 2, (
+        "the data layer must return both windows of a day, not collapse them")
+
+
+def test_replanning_keeps_an_extra_sitting_on_a_day_it_keeps():
+    tables = _seed_two_on_one_day()
+    use(tables, ME)
+    db.set_todo_plan(T_MINE, ME, THIS_FROM, THIS_TO, {"2026-08-05": 2})
+    kept = [r for r in _my_slots(tables, T_MINE)
+            if r["planned_on"] == "2026-08-05"]
+    assert len(kept) == 2, (
+        "re-planning a day that already had two windows dropped one of them")
+    # the picker sets the first sitting's hours and leaves the second alone,
+    # rather than merging both into a single number
+    assert sorted(r["planned_hours"] for r in kept) == [1.5, 2], kept
+
+
+def test_replanning_deletes_every_sitting_on_a_day_it_drops():
+    tables = _seed_two_on_one_day()
+    use(tables, ME)
+    db.set_todo_plan(T_MINE, ME, THIS_FROM, THIS_TO, {"2026-08-07": 1})
+    left = [r["planned_on"] for r in _my_slots(tables, T_MINE)]
+    assert "2026-08-05" not in left, (
+        "dropping a day left one of its two windows behind — keying open "
+        "sittings by day hides the extras from the delete pass")
+
+
 def test_replanning_my_task_cannot_touch_another_users_rows():
     tables = seed()
     use(tables, ME)
@@ -244,6 +289,14 @@ def test_replanning_my_task_cannot_touch_another_users_rows():
 # ---- plain-python runner (so `python tests/...` works without pytest) -----
 if __name__ == "__main__":
     import traceback
+    # Failure messages quote the UI's own glyphs, which a Windows console
+    # (cp1252) cannot encode. Without this, a REAL failure dies in the print
+    # and is reported as a crash instead of as the assertion it is.
+    try:
+        sys.stdout.reconfigure(errors="replace")
+        sys.stderr.reconfigure(errors="replace")
+    except Exception:
+        pass
     tests = [(n, f) for n, f in sorted(globals().items())
              if n.startswith("test_") and callable(f)]
     failures = 0

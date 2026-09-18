@@ -589,20 +589,31 @@ def set_todo_plan(todo_id, user_id, date_from, date_to, day_hours):
                 .gte("planned_on", date_from).lte("planned_on", date_to)
                 .execute().data or [])
     logged_days = {r["planned_on"] for r in existing if r.get("session_id")}
-    open_slots = {r["planned_on"]: r for r in existing
-                  if not r.get("session_id")}
+    # A day can hold SEVERAL open sittings — a morning and an afternoon window
+    # of the same task — so group them rather than keying one per day, which
+    # would leave the extras invisible here: never updated, and never deleted
+    # when the day is dropped.
+    open_by_day = {}
+    for r in existing:
+        if not r.get("session_id"):
+            open_by_day.setdefault(r["planned_on"], []).append(r)
     wanted = {d: h for d, h in day_hours.items() if d not in logged_days}
 
-    for day, row in open_slots.items():
+    for day, group in open_by_day.items():
         if day not in wanted:
-            delete_todo_slot(row["id"])
+            for row in group:
+                delete_todo_slot(row["id"])
     for i, day in enumerate(sorted(wanted)):
         hours = wanted[day]
-        if day in open_slots:
+        group = open_by_day.get(day)
+        if group:
+            # the day picker can only express one number per day, so it sets
+            # the first sitting's hours and leaves any extra ones on that day
+            # exactly as they are, rather than silently merging them into one
             (client().table("todo_slot")
              .update({"planned_hours": hours, "sort_order": i,
                       "is_cancelled": False})
-             .eq("id", open_slots[day]["id"]).execute())
+             .eq("id", group[0]["id"]).execute())
         else:
             add_todo_slot(todo_id, user_id, day, hours, sort_order=i)
 

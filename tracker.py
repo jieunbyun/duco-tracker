@@ -1037,11 +1037,21 @@ def view_week(me):
                   if s["todo_id"] in todo_by_id]
     slots_by_day = {d.isoformat(): [] for d in days}
     slots_by_todo = {}
+    # A day may hold more than one sitting of the same task — a morning and an
+    # afternoon window — so both groupings are lists, ordered the same way, and
+    # the order must be total: two sittings sharing a day are separated by
+    # sort_order, and finally by id, so the cards never swap places between
+    # reruns (which would make the ‹ › and ✓ buttons appear to jump).
+    def slot_order(s):
+        return (s["planned_on"], s.get("sort_order") or 0, s["id"])
+
     for s in week_slots:
         slots_by_day.setdefault(s["planned_on"], []).append(s)
         slots_by_todo.setdefault(s["todo_id"], []).append(s)
     for v in slots_by_todo.values():
-        v.sort(key=lambda s: s["planned_on"])
+        v.sort(key=slot_order)
+    for v in slots_by_day.values():
+        v.sort(key=slot_order)
     slot_session_ids = {s["session_id"] for s in week_slots
                         if s.get("session_id")}
 
@@ -1270,7 +1280,7 @@ def view_week(me):
                     st.rerun()
             return
         if logged:
-            b1, b2 = st.columns(2)
+            b1, b2, b3 = st.columns(3)
             with b1:
                 if st.button("⤺", key=f"slunlog_{s['id']}",
                              use_container_width=True,
@@ -1281,6 +1291,26 @@ def view_week(me):
                     db.clear_user_caches()
                     st.rerun()
             with b2:
+                # a task is rarely done in one unbroken window: this adds a
+                # SECOND sitting on the same day, so the afternoon's work is
+                # logged as its own block and still counts towards the task.
+                if st.button("＋", key=f"sladd_{s['id']}",
+                             use_container_width=True,
+                             help="Log another window of this task today"):
+                    try:
+                        res = db.add_todo_slot(
+                            t["id"], me["id"], day.isoformat(),
+                            sort_order=len(slots_by_todo.get(t["id"], [])))
+                        new_id = (res.data or [{}])[0].get("id") if res else None
+                        db.clear_user_caches()
+                        # open the new sitting's log panel straight away, so
+                        # adding and logging the second window is one gesture
+                        if new_id:
+                            st.session_state.wk_panel = ("log", new_id)
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Could not add another sitting. {e}")
+            with b3:
                 if st.button("✎", key=f"sledit_{s['id']}",
                              use_container_width=True, help="Edit the task"):
                     st.session_state.wk_panel = ("edit", t["id"])
@@ -4458,6 +4488,13 @@ def view_help(me):
             "new one. "
             "**⤺** re-opens a sitting if you logged it by mistake; the time "
             "block itself stays until you delete it on the time grid.\n\n"
+            "Work rarely happens in one unbroken stretch, so a day can hold "
+            "more than one sitting. Once you have logged one, press **＋** on "
+            "its card to add another window the same day: a fresh sitting "
+            "appears with its log panel already open, so you can record the "
+            "afternoon's block separately from the morning's. Each window is "
+            "its own block on the calendar, and all of them count towards the "
+            "task. Use it as often as the day needs.\n\n"
             "A single day can be dropped without touching the rest of the "
             "task: press **✓** on its card and then **⊘ Cancel this "
             "sitting**. The day stays on the board struck through, so you can "
