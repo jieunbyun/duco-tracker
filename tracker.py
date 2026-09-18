@@ -267,6 +267,18 @@ def time_field(label, default, key):
     return typed or picked
 
 
+def hhmm_of(stamp):
+    """The clock time inside an ISO timestamp, as a dt.time, or None. Used to
+    bring a logged block's own times back into the editor instead of starting
+    the fields from scratch."""
+    if not stamp or len(stamp) < 16:
+        return None
+    try:
+        return dt.time(int(stamp[11:13]), int(stamp[14:16]))
+    except (ValueError, TypeError):
+        return None
+
+
 def resolve_block_times(day, start, end):
     """Return (started_iso, ended_iso, error). An end time of 00:00 is treated
     as midnight at the END of the day (so 23:00–00:00 is a one-hour block).
@@ -1420,11 +1432,11 @@ def view_week(me):
             with b1:
                 if st.button("⤺", key=f"slunlog_{s['id']}",
                              use_container_width=True,
-                             help="Re-open this sitting. The time block stays "
-                                  "— delete it on the time grid if it was "
-                                  "wrong."):
-                    db.set_slot_session(s["id"], None)
-                    db.clear_user_caches()
+                             help="Re-open what you logged. Everything comes "
+                                  "back as you saved it, and correcting it "
+                                  "edits that block rather than adding "
+                                  "another."):
+                    st.session_state.wk_panel = ("log", s["id"])
                     st.rerun()
             with b2:
                 # a task is rarely done in one unbroken window: this adds a
@@ -1544,10 +1556,23 @@ def view_week(me):
             idx = mine.index(slot) + 1 if slot in mine else 1
             of = f" · sitting {idx} of {len(mine)}" if len(mine) > 1 else ""
             slot_day = dt.date.fromisoformat(slot["planned_on"])
+            # A sitting that already has a block is being CORRECTED, not
+            # logged again: every field below comes back as it was saved, and
+            # saving updates that block instead of adding a second one beside
+            # it. lg_sess is empty if the block sits outside the week on
+            # screen — then the fields cannot be pre-filled, but the id is
+            # still known, so saving still edits the right block.
+            editing = bool(slot.get("session_id"))
+            lg_sess = sess_by_id.get(slot.get("session_id")) or {}
             # the panel answers "what became of this day?", so it carries
             # both answers: log it, or drop it
-            st.markdown(f"**This sitting** — {t['title']}{of} · "
-                        f"{slot_day:%a %d %b}")
+            st.markdown(
+                f"**{'Correct this sitting' if editing else 'This sitting'}"
+                f"** — {t['title']}{of} · {slot_day:%a %d %b}")
+            if editing and not lg_sess:
+                st.caption("This sitting's block is not in the week on "
+                           "screen, so the fields below start empty. Saving "
+                           "still edits that block, not a new one.")
 
             # The other answer to "what became of this day?": it did not
             # happen and is not going to. The day is kept struck through, and
@@ -1602,8 +1627,9 @@ def view_week(me):
                 # default to the category the to-do was placed in when it
                 # was written, falling back to its project's, so the common
                 # case needs no choosing at all
-                want_cat = (t.get("category_id")
-                            or proj_cat.get(t.get("project_id")))
+                want_cat = (lg_sess.get("category_id") if editing
+                            else (t.get("category_id")
+                                  or proj_cat.get(t.get("project_id"))))
                 cat_idx = next((n for n, k in enumerate(lg_keys)
                                 if lg_cat_labels[k] == want_cat), 0)
                 lg_cat = st.selectbox("Category", lg_keys, index=cat_idx,
@@ -1619,7 +1645,11 @@ def view_week(me):
                                 if c["id"] == lg_cat_labels[lg_cat]), False)
                 if not lg_life:
                     lg_projs[NEW_PROJECT] = "__new__"
-                cur_pn = proj_name.get(t.get("project_id")) or "— none —"
+                want_pid = (lg_sess.get("project_id") if editing
+                            else t.get("project_id"))
+                want_ms = (lg_sess.get("milestone_id") if editing
+                           else t.get("milestone_id"))
+                cur_pn = proj_name.get(want_pid) or "— none —"
                 lg_pkeys = list(lg_projs.keys())
                 p_idx = lg_pkeys.index(cur_pn) if cur_pn in lg_pkeys else 0
                 lg_proj = st.selectbox("Project", lg_pkeys, index=p_idx,
@@ -1644,8 +1674,7 @@ def view_week(me):
                     # open milestones, plus the one the to-do already names
                     # even if it is done, so the picker cannot quietly drop it
                     lg_ms = [m for m in db.project_milestones(lg_pid)
-                             if m["status"] != "done"
-                             or m["id"] == t.get("milestone_id")]
+                             if m["status"] != "done" or m["id"] == want_ms]
                     lg_ms_labels = {"— none —": None}
                     lg_ms_labels.update({m["title"]: m["id"] for m in lg_ms})
                     lg_ms_labels[NEW_MILESTONE] = "__new__"
@@ -1653,8 +1682,7 @@ def view_week(me):
                     lg_ms_keys = list(lg_ms_labels.keys())
                     lg_ms_idx = next(
                         (n for n, k in enumerate(lg_ms_keys)
-                         if t.get("milestone_id")
-                         and lg_ms_labels[k] == t["milestone_id"]), 0)
+                         if want_ms and lg_ms_labels[k] == want_ms), 0)
                     lg_ms_pick = st.selectbox(
                         "Milestone (optional)", lg_ms_keys, index=lg_ms_idx,
                         key=f"lgms_{slot['id']}")
@@ -1665,39 +1693,67 @@ def view_week(me):
                             placeholder="e.g. First draft",
                             key=f"lgnewms_{slot['id']}")
             with lg2:
+                if editing and lg_sess.get("ended_at"):
+                    mode_idx = 0
+                elif editing and lg_sess.get("hours"):
+                    mode_idx = 1
+                elif editing and lg_sess:
+                    mode_idx = 2
+                else:
+                    mode_idx = 0
                 lg_mode = st.radio(
                     "How long", ["Start & end", "Minutes", "No time"],
-                    horizontal=True, key=f"lgmode_{slot['id']}",
+                    horizontal=True, index=mode_idx,
+                    key=f"lgmode_{slot['id']}",
                     help="Start & end draws a block on the calendar above; "
                          "Minutes records the hours without clock times; "
                          "No time records the sitting with no hours at all.")
-                day_idx = days.index(slot_day) if slot_day in days else 0
+                default_day = slot_day
+                if editing and lg_sess.get("session_date"):
+                    try:
+                        default_day = dt.date.fromisoformat(
+                            lg_sess["session_date"])
+                    except ValueError:
+                        pass
+                day_idx = (days.index(default_day) if default_day in days
+                           else 0)
                 lg_day = st.selectbox("Day", days, index=day_idx,
                                       format_func=lambda d: f"{d:%a %d %b}",
                                       key=f"lgday_{slot['id']}")
                 lg_start = lg_end = None
                 lg_minutes = None
                 if lg_mode == "Start & end":
-                    # default to the end of the last block already on that day
-                    prior = [r["ended_at"][11:16] for r in rows
-                             if r.get("session_date") == lg_day.isoformat()
-                             and r.get("ended_at")]
-                    start_default = dt.time(9, 0)
-                    if prior:
-                        hh, mm = max(prior).split(":")
-                        start_default = dt.time(int(hh), int(mm))
-                    est_h = slot.get("planned_hours") or 1
-                    end_dt = (dt.datetime.combine(lg_day, start_default)
-                              + dt.timedelta(hours=float(est_h)))
+                    start_default = end_default = None
+                    # correcting: the times the block actually holds
+                    if editing and lg_sess.get("started_at"):
+                        start_default = hhmm_of(lg_sess["started_at"])
+                        end_default = hhmm_of(lg_sess.get("ended_at"))
+                    if start_default is None:
+                        # logging afresh: start where the last block on that
+                        # day ended, so a second sitting follows the first
+                        prior = [r["ended_at"][11:16] for r in rows
+                                 if r.get("session_date") == lg_day.isoformat()
+                                 and r.get("ended_at")]
+                        start_default = dt.time(9, 0)
+                        if prior:
+                            hh, mm = max(prior).split(":")
+                            start_default = dt.time(int(hh), int(mm))
+                    if end_default is None:
+                        est_h = slot.get("planned_hours") or 1
+                        end_default = (
+                            dt.datetime.combine(lg_day, start_default)
+                            + dt.timedelta(hours=float(est_h))).time()
                     lg_start = time_field("Start", start_default,
                                           f"lgstart_{slot['id']}")
-                    lg_end = time_field("End", end_dt.time(),
+                    lg_end = time_field("End", end_default,
                                         f"lgend_{slot['id']}")
                 elif lg_mode == "Minutes":
+                    logged_h = lg_sess.get("hours") if editing else None
+                    mins_default = int(round(
+                        (logged_h or slot.get("planned_hours") or 0.5) * 60))
                     lg_minutes = st.number_input(
                         "Minutes", min_value=1, max_value=960, step=5,
-                        value=int(round((slot.get("planned_hours") or 0.5)
-                                        * 60)),
+                        value=max(mins_default, 1),
                         key=f"lgmin_{slot['id']}")
             with lg3:
                 lg_cv_enabled = st.checkbox(
@@ -1706,10 +1762,16 @@ def view_week(me):
                     help="Optional. Saved as a private CV record linked to "
                          "this session.")
                 with st.form(f"lgform_{slot['id']}"):
-                    lg_note = st.text_input("Note", value=t["title"],
-                                            key=f"lgnote_{slot['id']}")
-                    lg_core = st.checkbox("🎯 Core session",
-                                          key=f"lgcore_{slot['id']}")
+                    lg_note = st.text_input(
+                        "Note",
+                        value=(lg_sess.get("description") or t["title"])
+                        if editing else t["title"],
+                        key=f"lgnote_{slot['id']}")
+                    lg_core = st.checkbox(
+                        "🎯 Core session",
+                        value=bool(lg_sess.get("is_core")) if editing
+                        else False,
+                        key=f"lgcore_{slot['id']}")
                     lg_cv_dest = lg_cv_title = lg_cv_desc = None
                     lg_cv_outcome = lg_cv_metrics = None
                     lg_cv_evidence = lg_cv_status = None
@@ -1736,14 +1798,32 @@ def view_week(me):
                         lg_cv_status = st.selectbox(
                             "Status", CV_STATUS_OPTIONS, index=0,
                             key=f"lgcvst_{slot['id']}")
-                    go_more = st.form_submit_button("Log it — more to do",
-                                                    type="primary")
-                    go_done = st.form_submit_button("Log it & finish the task")
-                    just_done = st.form_submit_button(
-                        "Finish without logging time")
+                    unlink = False
+                    if editing:
+                        go_more = st.form_submit_button("Save changes",
+                                                        type="primary")
+                        go_done = st.form_submit_button(
+                            "Save changes & finish the task")
+                        just_done = False
+                        unlink = st.form_submit_button(
+                            "Detach the block from this sitting",
+                            help="The sitting goes back to unlogged and the "
+                                 "block stays on the calendar, untouched.")
+                    else:
+                        go_more = st.form_submit_button(
+                            "Log it — more to do", type="primary")
+                        go_done = st.form_submit_button(
+                            "Log it & finish the task")
+                        just_done = st.form_submit_button(
+                            "Finish without logging time")
                     cancel = st.form_submit_button("Close")
 
             if cancel:
+                st.session_state.pop("wk_panel", None)
+                st.rerun()
+            if unlink:
+                db.set_slot_session(slot["id"], None)
+                db.clear_user_caches()
                 st.session_state.pop("wk_panel", None)
                 st.rerun()
             if just_done:
@@ -1778,15 +1858,30 @@ def view_week(me):
                         # just made for it, so its next sitting defaults to it
                         if lg_pid == "__new__" and not t.get("project_id"):
                             db.update_todo(t["id"], {"project_id": project_id})
-                        res = db.log_session(
-                            user_id=me["id"],
-                            category_id=lg_cat_labels[lg_cat],
-                            started_at=started, ended_at=ended,
-                            manual_minutes=minutes, project_id=project_id,
-                            description=lg_note or None,
-                            milestone_id=ms_id, is_core=lg_core)
-                        session_id = (res.data or [{}])[0].get("id") \
-                            if res else None
+                        if editing:
+                            # correcting the block this sitting already has.
+                            # Every field is written explicitly, including the
+                            # empty ones, so switching from clock times to
+                            # minutes actually clears the end time rather than
+                            # leaving the old one behind.
+                            session_id = slot["session_id"]
+                            db.update_session(session_id, {
+                                "category_id": lg_cat_labels[lg_cat],
+                                "started_at": started, "ended_at": ended,
+                                "manual_minutes": minutes,
+                                "project_id": project_id,
+                                "description": lg_note or None,
+                                "milestone_id": ms_id, "is_core": lg_core})
+                        else:
+                            res = db.log_session(
+                                user_id=me["id"],
+                                category_id=lg_cat_labels[lg_cat],
+                                started_at=started, ended_at=ended,
+                                manual_minutes=minutes, project_id=project_id,
+                                description=lg_note or None,
+                                milestone_id=ms_id, is_core=lg_core)
+                            session_id = (res.data or [{}])[0].get("id") \
+                                if res else None
                         if session_id:
                             db.set_slot_session(slot["id"], session_id)
                             if lg_day != slot_day:
@@ -4658,8 +4753,14 @@ def view_help(me):
             "when you log the sitting, private to you and in the category "
             "you picked, and a to-do with no project yet is filed under the "
             "new one. "
-            "**⤺** re-opens a sitting if you logged it by mistake; the time "
-            "block itself stays until you delete it on the time grid.\n\n"
+            "**⤺** re-opens what you logged, to correct it. Everything comes "
+            "back as you saved it — the category, project and milestone, the "
+            "times or minutes, the note and the core flag — so you change "
+            "only what was wrong and press **Save changes**. That edits the "
+            "block you already have rather than adding a second one beside "
+            "it. If you would rather keep the block but untie it from the "
+            "task, **Detach the block from this sitting** leaves it on the "
+            "calendar and marks the day unlogged again.\n\n"
             "Work rarely happens in one unbroken stretch, so a day can hold "
             "more than one sitting. Once you have logged one, press **＋** on "
             "its card to add another window the same day: a fresh sitting "

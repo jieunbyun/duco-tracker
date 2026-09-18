@@ -122,6 +122,14 @@ TODOS = [
 ]
 
 TODOS.append(
+    # logged as minutes rather than clock times, so re-opening it must come
+    # back as minutes and not offer to invent a 09:00 block
+    {"id": "t-mins", "title": "Chase interview consents", "note": None,
+     "due_on": DAY[0], "is_done": False, "project_id": "p-1",
+     "est_hours": None, "sort_order": 8, "done_at": None,
+     "is_important": False, "is_cancelled": False})
+
+TODOS.append(
     # done in two disconnected windows on ONE day: the morning is logged, the
     # afternoon was added with ＋ and is still open
     {"id": "t-twice", "title": "Reply to reviewers", "note": None,
@@ -157,6 +165,10 @@ SLOTS = [
     {"id": "sl-h", "todo_id": "t-dropday", "user_id": "u-me",
      "planned_on": DAY[6], "planned_hours": 2, "session_id": None,
      "sort_order": 1, "is_cancelled": True},
+    # a sitting logged as minutes rather than clock times
+    {"id": "sl-untimed", "todo_id": "t-mins", "user_id": "u-me",
+     "planned_on": DAY[3], "planned_hours": None, "session_id": "s-untimed",
+     "sort_order": 3, "is_cancelled": False},
     # two windows of one task on the SAME day — the pair the ＋ button makes
     {"id": "sl-j", "todo_id": "t-twice", "user_id": "u-me",
      "planned_on": DAY[4], "planned_hours": 1, "session_id": "s-3",
@@ -189,6 +201,9 @@ def fake_db():
     m.project_milestones = lambda pid: [
         {"id": "m-1", "title": "Stakeholder round 1", "status": "open"}]
     m.clear_user_caches = lambda: None
+    # update_session is what correcting a sitting must use. Record it so a
+    # test can prove the block was edited rather than duplicated.
+    m.update_session = lambda sid, fields: WROTE.append(("update", sid, fields))
     # Any write is a bug in a read-only render: nothing is clicked.
     for name in ("set_todo_order", "set_todo_done", "set_todo_important",
                  "set_todo_cancelled", "delete_todo", "update_todo",
@@ -196,10 +211,14 @@ def fake_db():
                  "delete_todo_slot",
                  "set_slot_cancelled",
                  "set_slot_session", "set_todo_plan", "log_session",
+                 "delete_session",
                  "add_milestone", "get_or_create_project",
                  "set_project_importance"):
         setattr(m, name, _forbidden(name))
     return m
+
+
+WROTE = []
 
 
 def _forbidden(name):
@@ -209,14 +228,16 @@ def _forbidden(name):
     return _fn
 
 
-def render_week(panel=None):
+def render_week(panel=None, click=None):
     """Render the Week tab once and return everything it drew, as one string.
 
     Pass panel=("log", slot_id) (or any other wk_panel value) to render with
-    that card's panel already open, which is the only way those branches run —
-    nothing is ever clicked here."""
+    that card's panel already open, which is the only way those branches run.
+    Pass click="⤺" to press every button with that label — the first one
+    reached wins, because acting on it reruns."""
     st.log.clear()
     st.session_state.clear()
+    st.clicked = {click} if click else set()
     if panel:
         st.session_state["wk_panel"] = panel
     tracker.db = fake_db()
@@ -403,9 +424,9 @@ def test_the_logged_window_offers_to_add_another_that_day():
 
 
 def test_only_logged_sittings_offer_to_add_another():
-    # sl-a, sl-e and sl-j are the logged ones; an open sitting has no room
-    # for a fifth button and no need of it — you would just log it.
-    assert OUT.count("button: ＋") == 3, (
+    # sl-a, sl-e, sl-j and sl-untimed are the logged ones; an open sitting
+    # has no room for a fifth button and no need of it — you would log it.
+    assert OUT.count("button: ＋") == 4, (
         "the + button appeared on a sitting that has not been logged")
 
 
@@ -438,6 +459,78 @@ def test_a_todo_can_be_categorised_with_no_project():
                  if line.startswith("selected: ")
                  for b in [line[len("selected: "):]])
     assert chose.get("lgcat_sl-d") == "Admin", chose
+
+
+# ==========================================================================
+# Re-opening a logged sitting. The point of the back-out button is to CORRECT
+# what was recorded, so the editor must come up holding it — an empty form
+# would mean retyping what is already there, and saving it would leave a
+# second block beside the first.
+# ==========================================================================
+def _chosen(out):
+    return dict(b.split("=", 1) for line in out.splitlines()
+                if line.startswith("selected: ")
+                for b in [line[len("selected: "):]])
+
+
+CORRECTING = render_week(panel=("log", "sl-a"))   # sl-a holds session s-1
+
+
+def test_re_opening_a_sitting_says_it_is_a_correction():
+    assert "Correct this sitting" in CORRECTING, (
+        "re-opening a logged sitting must not look like logging a fresh one")
+
+
+def test_the_editor_holds_the_times_that_were_logged():
+    # s-1 ran 09:30-12:00 on DAY[3]
+    assert "09:30" in CORRECTING and "12:00" in CORRECTING, (
+        "the logged times did not come back into the editor")
+
+
+def test_the_editor_holds_the_placement_that_was_logged():
+    chose = _chosen(CORRECTING)
+    assert chose.get("lgcat_sl-a") == "Research", chose
+    assert chose.get("lgproj_sl-a") == "Resilience Review", chose
+
+
+def test_the_editor_opens_in_the_mode_the_block_was_saved_in():
+    chose = _chosen(CORRECTING)
+    assert chose.get("lgday_sl-a") == DAY[3], chose
+    # s-1 has an end time, so it is a clock-time block, not minutes
+    assert "radio: How long" in CORRECTING
+
+
+def test_an_untimed_block_re_opens_as_minutes_not_clock_times():
+    """s-untimed was logged as minutes. Re-opening it must not silently
+    offer to turn it into a 09:00 clock-time block."""
+    out = render_week(panel=("log", "sl-untimed"))
+    assert _chosen(out).get("lgmode_sl-untimed") == "Minutes", _chosen(out)
+
+
+def test_correcting_offers_to_save_not_to_log_again():
+    assert "submit: Save changes" in CORRECTING
+    assert "submit: Log it \u2014 more to do" not in CORRECTING, (
+        "a sitting that already has a block must not offer to log a second")
+
+
+def test_pressing_the_back_out_button_opens_the_log_it_already_has():
+    """The button must OPEN the editor, not quietly unlink the block: every
+    write is forbidden in fake_db(), so unlinking here would fail outright,
+    and the panel it leaves behind names the sitting that was pressed."""
+    render_week(click="⤺")
+    assert st.session_state.get("wk_panel", (None, None))[0] == "log", (
+        "pressing it did not open the sitting's log")
+
+
+def test_correcting_offers_a_way_to_detach_the_block():
+    assert "Detach the block from this sitting" in CORRECTING
+
+
+def test_an_unlogged_sitting_still_offers_to_log():
+    out = render_week(panel=("log", "sl-b"))       # open, never logged
+    assert "submit: Log it \u2014 more to do" in out
+    assert "submit: Save changes" not in out
+    assert "Correct this sitting" not in out
 
 
 # ==========================================================================

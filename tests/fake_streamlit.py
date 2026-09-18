@@ -147,7 +147,18 @@ class FakeStreamlit(types.ModuleType):
     def radio(self, label, options, index=0, **kw):
         opts = list(options)
         self.log.append(("radio", str(label)))
-        return opts[index] if opts else None
+        if not opts:
+            return None
+        chosen = opts[index if 0 <= index < len(opts) else 0]
+        want = self.answers.get(kw.get("key"))
+        if want in opts:
+            chosen = want
+        # like selectbox: record what it RESOLVED to, so a test can assert on
+        # the pre-selection and not merely that the control was drawn
+        self.log.append(("selected", f"{kw.get('key')}={chosen}"))
+        self.log.append(("options", f"{kw.get('key')}="
+                         + " | ".join(str(o) for o in opts)))
+        return chosen
 
     def text_input(self, label="", value="", **kw):
         return self.answers.get(kw.get("key"), value) or ""
