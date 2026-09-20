@@ -228,19 +228,28 @@ def _forbidden(name):
     return _fn
 
 
-def render_week(panel=None, click=None):
+def render_week(panel=None, click=None, answers=None, order_writes=None):
     """Render the Week tab once and return everything it drew, as one string.
 
     Pass panel=("log", slot_id) (or any other wk_panel value) to render with
     that card's panel already open, which is the only way those branches run.
     Pass click="⤺" to press every button with that label — the first one
-    reached wins, because acting on it reruns."""
+    reached wins, because acting on it reruns.
+
+    Pass answers={widget key: value} to type into a field — the order
+    boxes under the board are read that way. Pass order_writes=[] to
+    allow db.set_todo_order and collect what it was given; a plain
+    render still forbids it."""
     st.log.clear()
     st.session_state.clear()
     st.clicked = {click} if click else set()
     if panel:
         st.session_state["wk_panel"] = panel
-    tracker.db = fake_db()
+    st.answers = dict(answers or {})
+    fdb = fake_db()
+    if order_writes is not None:
+        fdb.set_todo_order = lambda tid, so: order_writes.append((tid, so))
+    tracker.db = fdb
 
     real_date = dt.date
 
@@ -547,6 +556,79 @@ def test_rendering_the_page_never_writes():
     — no button pressed — changed nothing, so merely opening the tab cannot
     reorder, complete or re-plan anything."""
     render_week()
+
+
+# ==========================================================================
+# Ordering the "Not yet planned" list: a typed position, not up/down arrows.
+# ==========================================================================
+def order_fields(rendered):
+    """[(todo id, the position its box shows)] down the list."""
+    out = []
+    for line in rendered.splitlines():
+        if not line.startswith("number: tdpos_"):
+            continue
+        key, shown = line[len("number: "):].rsplit("=", 1)
+        todo_id = key[len("tdpos_"):].rpartition("_")[0]
+        out.append((todo_id, int(shown)))
+    return out
+
+
+def test_the_list_numbers_its_rows_instead_of_drawing_arrows():
+    fields = order_fields(OUT)
+    assert fields, "the Not yet planned list drew no order box"
+    assert [n for _, n in fields] == list(range(1, len(fields) + 1)), (
+        f"the boxes must count 1..n down the list: {fields}")
+    for arrow in ("button: ↑", "button: ↓"):
+        assert arrow not in OUT, (
+            "the up/down reorder arrows are still drawn")
+
+
+def test_typing_a_position_moves_that_todo_there():
+    fields = order_fields(OUT)
+    last_id, last_pos = fields[-1]
+    writes = []
+    render_week(answers={f"tdpos_{last_id}_{last_pos - 1}": 1},
+                order_writes=writes)
+    assert writes, "typing a position over the board wrote nothing"
+    listed = [tid for tid, _ in fields]
+    now = [tid for tid in resulting_order(writes) if tid in listed]
+    assert now[0] == last_id, (
+        f"the to-do typed to position 1 landed at {now.index(last_id) + 1}")
+    assert now == [last_id] + listed[:-1], (
+        f"the others must close up behind it: {now}")
+
+
+def test_moving_a_listed_todo_leaves_the_planned_ones_in_order():
+    """The list and the board share one global sort_order, so a move made in
+    the list must not shuffle the tasks that are out on the calendar."""
+    fields = order_fields(OUT)
+    first_id, _ = fields[0]
+    writes = []
+    render_week(answers={f"tdpos_{first_id}_0": len(fields)},
+                order_writes=writes)
+    listed = {tid for tid, _ in fields}
+    before = [t["id"] for t in TODOS if t["id"] not in listed]
+    after = [tid for tid in resulting_order(writes) if tid not in listed]
+    assert after == before, (
+        f"the planned to-dos were reshuffled by a move in the list: {after}")
+
+
+def resulting_order(writes):
+    """The board's to-dos in the order they would be drawn after `writes`."""
+    order = {t["id"]: i for i, t in enumerate(TODOS)}
+    order.update({tid: so for tid, so in writes})
+    return sorted(order, key=lambda tid: order[tid])
+
+
+def test_typing_the_position_a_todo_already_has_writes_nothing():
+    """The box is read on every rerun, not only when it is typed into, so a
+    number that changes nothing must not start a write-and-rerun loop."""
+    fields = order_fields(OUT)
+    todo_id, pos = fields[0]
+    writes = []
+    render_week(answers={f"tdpos_{todo_id}_{pos - 1}": pos},
+                order_writes=writes)
+    assert writes == [], f"an unchanged position still wrote: {writes}"
 
 
 # ---- plain-python runner (so `python tests/...` works without pytest) -----

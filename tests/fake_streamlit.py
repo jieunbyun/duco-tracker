@@ -170,7 +170,9 @@ class FakeStreamlit(types.ModuleType):
         return value or ""
 
     def number_input(self, label="", value=0, **kw):
-        return value
+        # answerable by key, like the other inputs, so a test can type into it
+        self.log.append(("number", f"{kw.get('key')}={value}"))
+        return self.answers.get(kw.get("key"), value)
 
     def date_input(self, label="", value=None, **kw):
         return value or dt.date.today()

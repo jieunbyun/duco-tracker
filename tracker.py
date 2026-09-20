@@ -1183,6 +1183,35 @@ def todo_edit_form(t, proj_name, key_prefix, is_lead, owner_id):
     return False
 
 
+def todo_order_after_move(todos, listed_ids, todo_id, target_pos):
+    """Renumber sort_order so `todo_id` lands at 1-based `target_pos` among
+    `listed_ids` — the ids of the rows shown in the "Not yet planned" list.
+
+    The up/down arrows this replaced swapped two neighbours, so the board only
+    ever wrote two rows. Typing a position moves an item past many others at
+    once, so the whole list is renumbered instead: the listed items are written
+    back, in their new order, into the slots the listed items already occupy in
+    the global order. Planned to-dos sit between those slots and stay where
+    they were.
+
+    Returns {todo_id: sort_order} for the rows that actually changed, so asking
+    for the position an item already holds writes nothing."""
+    order = [t["id"] for t in todos]
+    known = set(order)
+    listed = [i for i in listed_ids if i in known]
+    if todo_id not in listed:
+        return {}
+    target = max(1, min(int(target_pos), len(listed)))
+    rest = [i for i in listed if i != todo_id]
+    moved = rest[:target - 1] + [todo_id] + rest[target - 1:]
+    slots = [pos for pos, i in enumerate(order) if i in set(listed)]
+    for pos, i in zip(slots, moved):
+        order[pos] = i
+    by_id = {t["id"]: t for t in todos}
+    return {i: pos for pos, i in enumerate(order)
+            if by_id[i].get("sort_order") != pos}
+
+
 def view_week(me):
     section("Week", "Plan & track the week",
             "Future blocks are plans; past blocks are what happened. "
@@ -2122,10 +2151,11 @@ def view_week(me):
             head += f", {est_un:g} h"
         st.markdown(head)
         st.caption("📅 opens the day picker, where one task can be put on "
-                   "several days at once.")
+                   "several days at once. Type a number in the order "
+                   "box to move a task to that position.")
         n = len(unplanned)
         for i, t in enumerate(unplanned):
-            tc1, tc2, tc3, tc4 = st.columns([4.0, 1.8, 1.3, 2.8])
+            tc1, tc2, tc3, tc4 = st.columns([3.8, 1.6, 1.6, 2.8])
             cancelled = bool(t.get("is_cancelled"))
             overdue = (not t["is_done"] and not cancelled
                        and dt.date.fromisoformat(t["due_on"]) < week_start)
@@ -2167,26 +2197,25 @@ def view_week(me):
                 if bits:
                     st.caption(" · ".join(bits))
             with tc3:
-                # up / down reorder, side by side to save vertical space
-                ua, da = st.columns(2)
-                with ua:
-                    up = st.button("↑", key=f"tdup_{t['id']}",
-                                   disabled=(i == 0), help="Move up")
-                with da:
-                    dn = st.button("↓", key=f"tddn_{t['id']}",
-                                   disabled=(i == n - 1), help="Move down")
-                if up and i > 0:
-                    above = unplanned[i - 1]
-                    db.set_todo_order(t["id"], above["sort_order"])
-                    db.set_todo_order(above["id"], t["sort_order"])
-                    db.clear_user_caches()
-                    st.rerun()
-                if dn and i < n - 1:
-                    below = unplanned[i + 1]
-                    db.set_todo_order(t["id"], below["sort_order"])
-                    db.set_todo_order(below["id"], t["sort_order"])
-                    db.clear_user_caches()
-                    st.rerun()
+                # Type the position instead of clicking arrows: moving a task
+                # ten places up took ten clicks and a rerun for each one.
+                # The row's position is part of the widget key, so once the
+                # list has been reordered every field re-reads its new number
+                # rather than holding on to what was typed into it.
+                pos = st.number_input(
+                    "Order", min_value=1, max_value=n, value=i + 1,
+                    step=1, key=f"tdpos_{t['id']}_{i}",
+                    label_visibility="collapsed",
+                    help=f"Position in this list (1–{n}). Type a number "
+                         f"to move this to-do there.")
+                if int(pos) != i + 1:
+                    moves = todo_order_after_move(
+                        todos, [u["id"] for u in unplanned], t["id"], pos)
+                    for tid, so in moves.items():
+                        db.set_todo_order(tid, so)
+                    if moves:
+                        db.clear_user_caches()
+                        st.rerun()
             with tc4:
                 if cancelled:
                     rs, dl = st.columns(2)
