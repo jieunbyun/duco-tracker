@@ -1281,6 +1281,23 @@ def view_week(me):
     week_slots = [s for s in db.todo_slots_in_range(week_start.isoformat(),
                                                     week_end.isoformat())
                   if s["todo_id"] in todo_by_id]
+    # A sitting made by the list's ✓ belongs to the log panel that made it,
+    # and to nothing else. If the panel has moved on — to another card, to
+    # another task, or closed outright — that sitting was abandoned before it
+    # was ever logged, so it goes here, rather than staying on the board as an
+    # empty day nobody planned. A logged one is a real sitting and is kept.
+    prov = st.session_state.get("wk_provisional")
+    if prov and st.session_state.get("wk_panel") != ("log", prov):
+        st.session_state.pop("wk_provisional", None)
+        if not any(s["id"] == prov and s.get("session_id")
+                   for s in week_slots):
+            try:
+                db.delete_todo_slot(prov)
+            except Exception:
+                pass
+            db.clear_user_caches()
+            st.rerun()
+
     slots_by_day = {d.isoformat(): [] for d in days}
     slots_by_todo = {}
     # A day may hold more than one sitting of the same task — a morning and an
@@ -1662,51 +1679,84 @@ def view_week(me):
             # still known, so saving still edits the right block.
             editing = bool(slot.get("session_id"))
             lg_sess = sess_by_id.get(slot.get("session_id")) or {}
+            # A PROVISIONAL sitting is one the list's ✓ made a moment ago so
+            # that an unplanned to-do could be logged without being planned
+            # first. It is not a plan and was never meant to be one: it exists
+            # only to carry this panel, and closing without logging removes it
+            # again, leaving the to-do as unplanned as it was.
+            provisional = st.session_state.get("wk_provisional") == slot["id"]
+
+            def drop_provisional():
+                if not provisional:
+                    return
+                # A failure here leaves an empty sitting on the board, which
+                # the card's own ✕ removes. Never worth refusing to close.
+                try:
+                    db.delete_todo_slot(slot["id"])
+                except Exception:
+                    pass
+                st.session_state.pop("wk_provisional", None)
+
             # the panel answers "what became of this day?", so it carries
             # both answers: log it, or drop it
-            st.markdown(
-                f"**{'Correct this sitting' if editing else 'This sitting'}"
-                f"** — {t['title']}{of} · {slot_day:%a %d %b}")
+            head = ("Log this to-do" if provisional
+                    else ("Correct this sitting" if editing
+                          else "This sitting"))
+            st.markdown(f"**{head}** — {t['title']}{of} · "
+                        f"{slot_day:%a %d %b}")
+            if provisional:
+                st.caption("Straight from the list, with no day planned for "
+                           "it: the day and the time below are both still "
+                           "free to change. Closing without logging leaves "
+                           "the to-do unplanned, exactly as it was.")
             if editing and not lg_sess:
                 st.caption("This sitting's block is not in the week on "
                            "screen, so the fields below start empty. Saving "
                            "still edits that block, not a new one.")
 
-            # The other answer to "what became of this day?": it did not
-            # happen and is not going to. The day is kept struck through, and
-            # for a task spread over several days its hours come off the
-            # estimate, so what is left says what is still to do.
-            est_now = t.get("est_hours") or 0
-            drop_h = slot.get("planned_hours") or 0
-            subtract = drop_h if (len(mine) > 1 and drop_h and est_now) else 0
-            dc1, dc2 = st.columns([2, 8])
-            with dc1:
-                drop_it = st.button("⊘ Cancel this sitting",
-                                    key=f"lgcan_{slot['id']}",
-                                    use_container_width=True,
-                                    disabled=bool(slot.get("session_id")))
-            with dc2:
-                if subtract:
-                    st.caption(
-                        f"{slot_day:%a %d %b} stays on the board struck "
-                        f"through and counts towards no hours. This task is "
-                        f"spread over {len(mine)} days, so its estimate drops "
-                        f"by {subtract:g} h: {est_now:g} h → "
-                        f"{max(est_now - subtract, 0):g} h. ↺ on the card "
-                        f"puts both back.")
-                elif len(mine) > 1:
-                    st.caption(
-                        f"{slot_day:%a %d %b} stays on the board struck "
-                        f"through and counts towards no hours. Nothing comes "
-                        f"off the estimate — this sitting has no hours of its "
-                        f"own. ↺ on the card puts it back.")
-                else:
-                    st.caption(
-                        f"{slot_day:%a %d %b} stays on the board struck "
-                        f"through and counts towards no hours. The estimate "
-                        f"is untouched: this is the task's only planned day, "
-                        f"so the job itself still stands. ↺ on the card puts "
-                        f"it back.")
+            # A provisional sitting has no plan to drop — it was made to
+            # carry this panel and nothing more — so the whole ⊘ question
+            # only arises for a day that was genuinely planned.
+            drop_it = False
+            if not provisional:
+                # The other answer to "what became of this day?": it did
+                # not happen and is not going to. The day is kept struck
+                # through, and for a task spread over several days its hours
+                # come off the estimate, so what is left says what is still
+                # to do.
+                est_now = t.get("est_hours") or 0
+                drop_h = slot.get("planned_hours") or 0
+                subtract = (drop_h if (len(mine) > 1 and drop_h and est_now)
+                            else 0)
+                dc1, dc2 = st.columns([2, 8])
+                with dc1:
+                    drop_it = st.button("⊘ Cancel this sitting",
+                                        key=f"lgcan_{slot['id']}",
+                                        use_container_width=True,
+                                        disabled=bool(slot.get("session_id")))
+                with dc2:
+                    if subtract:
+                        st.caption(
+                            f"{slot_day:%a %d %b} stays on the board struck "
+                            f"through and counts towards no hours. This "
+                            f"task is spread over {len(mine)} days, so its "
+                            f"estimate drops by {subtract:g} h: "
+                            f"{est_now:g} h → "
+                            f"{max(est_now - subtract, 0):g} h. ↺ on the "
+                            f"card puts both back.")
+                    elif len(mine) > 1:
+                        st.caption(
+                            f"{slot_day:%a %d %b} stays on the board struck "
+                            f"through and counts towards no hours. Nothing "
+                            f"comes off the estimate — this sitting has no "
+                            f"hours of its own. ↺ on the card puts it back.")
+                    else:
+                        st.caption(
+                            f"{slot_day:%a %d %b} stays on the board struck "
+                            f"through and counts towards no hours. The "
+                            f"estimate is untouched: this is the task's only "
+                            f"planned day, so the job itself still stands. "
+                            f"↺ on the card puts it back.")
             if drop_it:
                 try:
                     db.set_slot_cancelled(slot["id"], True)
@@ -1917,6 +1967,8 @@ def view_week(me):
                     cancel = st.form_submit_button("Close")
 
             if cancel:
+                drop_provisional()
+                db.clear_user_caches()
                 st.session_state.pop("wk_panel", None)
                 st.rerun()
             if unlink:
@@ -1925,6 +1977,9 @@ def view_week(me):
                 st.session_state.pop("wk_panel", None)
                 st.rerun()
             if just_done:
+                # finished, but no time recorded: a provisional sitting would
+                # be an empty day on the board, so it goes with the panel
+                drop_provisional()
                 db.set_todo_done(t["id"], True)
                 db.clear_user_caches()
                 st.session_state.pop("wk_panel", None)
@@ -2002,6 +2057,10 @@ def view_week(me):
                                 milestone_id=lg_ms_id, project_id=lg_pid)
                         if go_done:
                             db.set_todo_done(t["id"], True)
+                        # it has a block now, so it is a real sitting: it
+                        # stays on the board like any other. (An error below
+                        # leaves it provisional, so closing still tidies up.)
+                        st.session_state.pop("wk_provisional", None)
                         db.clear_user_caches()
                         st.session_state.pop("wk_panel", None)
                         st.rerun()
@@ -2142,6 +2201,38 @@ def view_week(me):
                  if not [s for s in slots_by_todo.get(t["id"], [])
                          if not s.get("is_cancelled")]
                  or t.get("is_cancelled")]
+
+    def start_logging_now(t):
+        """Log a to-do straight into the calendar, skipping the plan.
+
+        The board's ✓ lives on a sitting, so until now an unplanned task had
+        to be given a day through 📅 before any of it could be logged — two
+        steps for work that is already done. This makes the sitting on the
+        spot, on today (or the first day of the week being viewed, if that is
+        not this week), and opens the same log panel, where the day, the
+        hours and everything else are still free to change.
+
+        The sitting is provisional until it is logged: see the panel. 📅 is
+        untouched and remains the way to plan a task over several days.
+        """
+        day = today if week_start <= today <= week_end else week_start
+        try:
+            res = db.add_todo_slot(
+                t["id"], me["id"], day.isoformat(),
+                planned_hours=t.get("est_hours"),
+                sort_order=len(slots_by_todo.get(t["id"], [])))
+            new_id = (res.data or [{}])[0].get("id") if res else None
+        except Exception as e:
+            st.error(f"Could not open the log for this to-do. {e}")
+            return
+        if not new_id:
+            st.error("Could not open the log for this to-do.")
+            return
+        db.clear_user_caches()
+        st.session_state.wk_panel = ("log", new_id)
+        st.session_state.wk_provisional = new_id
+        st.rerun()
+
     st.markdown("<hr>", unsafe_allow_html=True)
     if unplanned:
         open_unplanned = [t for t in unplanned if not t.get("is_cancelled")]
@@ -2151,11 +2242,12 @@ def view_week(me):
             head += f", {est_un:g} h"
         st.markdown(head)
         st.caption("📅 opens the day picker, where one task can be put on "
-                   "several days at once. Type a number in the order "
-                   "box to move a task to that position.")
+                   "several days at once; ✓ goes straight to the calendar "
+                   "entry, for work that needs no plan. Type a number in "
+                   "the order box to move a task to that position.")
         n = len(unplanned)
         for i, t in enumerate(unplanned):
-            tc1, tc2, tc3, tc4 = st.columns([3.8, 1.6, 1.6, 2.8])
+            tc1, tc2, tc3, tc4 = st.columns([3.4, 1.5, 1.5, 3.4])
             cancelled = bool(t.get("is_cancelled"))
             overdue = (not t["is_done"] and not cancelled
                        and dt.date.fromisoformat(t["due_on"]) < week_start)
@@ -2232,12 +2324,20 @@ def view_week(me):
                             db.clear_user_caches()
                             st.rerun()
                 else:
-                    pl, sr, ed, cx, dl = st.columns(5)
+                    pl, lg, sr, ed, cx, dl = st.columns(6)
                     with pl:
                         if st.button("📅", key=f"tdplan_{t['id']}",
                                      help="Plan this across days"):
                             st.session_state.wk_panel = ("plan", t["id"])
                             st.rerun()
+                    with lg:
+                        # the other way in: straight to the calendar entry,
+                        # for work that is already done and never needed a
+                        # plan of its own
+                        if st.button("✓", key=f"tdlog_{t['id']}",
+                                     help="Log it straight into the calendar "
+                                          "— no need to plan a day first"):
+                            start_logging_now(t)
                     with sr:
                         star = "★" if important else "☆"
                         if st.button(star, key=f"tdimp_{t['id']}",
