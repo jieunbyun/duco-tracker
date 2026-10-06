@@ -29,7 +29,7 @@ def todo(tid, due_on, *, done=False, done_at=None, cancelled=False):
     return {"id": tid, "title": tid, "due_on": due_on, "is_done": done,
             "done_at": done_at, "is_cancelled": cancelled, "sort_order": 0,
             "note": None, "project_id": None, "est_hours": 1,
-            "is_important": False}
+            "is_core": False}
 
 
 TODOS = [

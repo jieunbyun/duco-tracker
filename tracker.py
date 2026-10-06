@@ -702,18 +702,6 @@ def view_log(me):
                                         help="This project will belong to the "
                                              "'" + cat + "' category. Add details "
                                              "in the Projects tab later.")
-            elif proj != "— none —":
-                # inline high-importance toggle for the chosen project
-                cur_imp = next((p.get("high_importance") for p in matching
-                                if p["name"] == proj), False)
-                new_imp = st.checkbox("⭐ High importance", value=bool(cur_imp),
-                                      key=f"imp_log_{proj_labels[proj]}",
-                                      help="Highlights this project's hours in "
-                                           "the Time tab.")
-                if new_imp != bool(cur_imp):
-                    db.set_project_importance(proj_labels[proj], new_imp)
-                    db.clear_user_caches()
-                    st.rerun()
         # optional milestone. For an existing project, pick from its open
         # milestones (or add one); for a brand-new project, offer to start it
         # with a first milestone — both are created together on Save.
@@ -762,8 +750,8 @@ def view_log(me):
                 "Minutes (used if 'Just minutes' is chosen)", min_value=1,
                 max_value=960, value=30, step=5)
             desc = st.text_input("Note (optional)")
-            # per-session flag, independent of the project's ⭐ high-importance
-            # setting: the same project can have core and non-core sessions.
+            # a per-session flag, not a project setting: the same project can
+            # have core and non-core sessions.
             log_core = st.checkbox(
                 "🎯 Core session", key="log_core",
                 help="Counts toward your core hours in the Week and Time tabs.")
@@ -1092,7 +1080,17 @@ def add_todo_form(me, is_lead, week_start):
         td_note = st.text_input(
             "Note (optional)", key="td_note",
             placeholder="optional note shown under the title")
-        td_imp = st.checkbox("\u2b50 High importance", key="td_important")
+        tf1, tf2 = st.columns(2)
+        with tf1:
+            td_must = st.checkbox(
+                "\ud83d\udccc Must be done this week", key="td_must",
+                help="Lists it under 'Must do this week' rather than "
+                     "'Flexible'.")
+        with tf2:
+            td_core = st.checkbox(
+                "\ud83c\udfaf Core", key="td_core",
+                help="Counts its planned hours as core on the board, and "
+                     "logging it starts ticked as a core session.")
         td_submit = st.form_submit_button("Add to-do")
     if not td_submit:
         return
@@ -1111,7 +1109,8 @@ def add_todo_form(me, is_lead, week_start):
         # scoping, not shown as a date in the UI.
         db.add_todo(me["id"], td_title.strip(), week_start.isoformat(),
                     td_proj_id, est_hours=td_hours or None,
-                    note=td_note.strip() or None, important=td_imp,
+                    note=td_note.strip() or None, core=td_core,
+                    must_this_week=td_must,
                     category_id=td_cat, milestone_id=td_ms_id)
         db.clear_user_caches()
         # the board above must show the new task, so this one rerun is the
@@ -1122,8 +1121,8 @@ def add_todo_form(me, is_lead, week_start):
 
 
 def todo_edit_form(t, proj_name, key_prefix, is_lead, owner_id):
-    """The to-do's own fields: title, note, estimate, project, importance and
-    which week it is filed under. Shared by the edit popover in the unplanned
+    """The to-do's own fields: title, note, estimate, project, the core and
+    must-this-week flags, and which week it is filed under. Shared by the edit popover in the unplanned
     list and the edit panel opened from a card on the board, so both stay in
     step. Returns True when something was saved (the caller should rerun).
 
@@ -1146,9 +1145,12 @@ def todo_edit_form(t, proj_name, key_prefix, is_lead, owner_id):
             key=f"{key_prefix}_hours_{t['id']}",
             help="The whole task's estimate. The board's progress bar "
                  "measures logged hours against it.")
-        e_imp = st.checkbox("⭐ High importance",
-                            value=bool(t.get("is_important")),
-                            key=f"{key_prefix}_imp_{t['id']}")
+        e_must = st.checkbox("📌 Must be done this week",
+                             value=bool(t.get("must_this_week")),
+                             key=f"{key_prefix}_must_{t['id']}")
+        e_core = st.checkbox("🎯 Core",
+                             value=bool(t.get("is_core")),
+                             key=f"{key_prefix}_core_{t['id']}")
         # start-week picker: Saturday-anchored weeks around this to-do's
         # current week (8 back, 26 ahead). Moving it re-files the to-do under
         # the chosen week.
@@ -1176,11 +1178,31 @@ def todo_edit_form(t, proj_name, key_prefix, is_lead, owner_id):
                     "category_id": cat_id,
                     "project_id": proj_id,
                     "milestone_id": ms_id,
-                    "is_important": e_imp,
+                    "is_core": e_core,
+                    "must_this_week": e_must,
                     "due_on": e_week.isoformat()})
                 db.clear_user_caches()
                 return True
     return False
+
+
+def core_split(core, total):
+    """Hours as non-core, core and their sum, e.g.
+    "3 non-core · 🎯 4 core · Σ 7 h". Used by the calendar, the board and the
+    to-do list so the three always read the same way."""
+    return (f"{total - core:g} non-core · 🎯 {core:g} core · "
+            f"Σ {total:g} h")
+
+
+def estimate_split(todos, open_only=True):
+    """(core, total) estimated hours of `todos`. Cancelled to-dos never
+    count, and by default neither do finished ones, so the figure is the
+    work still to do."""
+    live = [t for t in todos if not t.get("is_cancelled")
+            and not (open_only and t.get("is_done"))]
+    total = sum((t.get("est_hours") or 0) for t in live)
+    core = sum((t.get("est_hours") or 0) for t in live if t.get("is_core"))
+    return core, total
 
 
 def todo_order_after_move(todos, listed_ids, todo_id, target_pos):
@@ -1401,16 +1423,14 @@ def view_week(me):
                     f"<b style='color:#3F7A5E'>⊙ {amount}</b><br>{label}"
                     f"{note}</div>", unsafe_allow_html=True)
             if day_total:
-                # total, the work/life split as before, then core appended so
-                # it shows for any domain, e.g. "21.5 h (12.5 / 9) 🎯4"
-                split = (f" <span style='color:#9aa5b1'>"
-                         f"({day_work:g} / {day_life:g})</span>"
+                # non-core, core and their sum, for any domain; the
+                # work/life split follows underneath when there is life time
+                split = (f"<br><span style='color:#9aa5b1'>work "
+                         f"{day_work:g} / life {day_life:g}</span>"
                          if day_life else "")
-                core_txt = (f" <span style='color:#3A5A78'>🎯{day_core:g}"
-                            f"</span>" if day_core else "")
                 st.markdown(f"<div style='text-align:center;font-size:0.72rem;"
-                            f"color:#6b7280'>{day_total:g} h{split}"
-                            f"{core_txt}</div>",
+                            f"color:#6b7280'>{core_split(day_core, day_total)}"
+                            f"{split}</div>",
                             unsafe_allow_html=True)
 
     st.markdown("<hr>", unsafe_allow_html=True)
@@ -1449,7 +1469,7 @@ def view_week(me):
         sess = sess_by_id.get(s.get("session_id"))
         done = bool(t.get("is_done"))
         logged = sess is not None or bool(s.get("session_id"))
-        important = bool(t.get("is_important"))
+        core = bool(t.get("is_core"))
         # a cancelled sitting is a day dropped from the plan: kept here struck
         # through so it can be restored, but it is no longer work to do
         dropped = bool(s.get("is_cancelled"))
@@ -1460,11 +1480,11 @@ def view_week(me):
             edge, bg = "#3F7A5E", "#E9F1EC"
         elif stale:
             edge, bg = "#8A5B2E", "#F7EFE4"
-        elif important:
+        elif core:
             edge, bg = "#3A5A78", "#ffffff"
         else:
             edge, bg = "#cfc8bd", "#ffffff"
-        title = ("⭐ " + t["title"]) if important else t["title"]
+        title = ("🎯 " + t["title"]) if core else t["title"]
         if dropped:
             title = f"<s>{title}</s>"
         title_style = ("color:#9aa5b1;font-weight:500" if dropped
@@ -1626,6 +1646,7 @@ def view_week(me):
                          if s["todo_id"] in todo_by_id
                          and not todo_by_id[s["todo_id"]].get("is_cancelled")]
             planned = 0
+            planned_core = 0
             open_no_hours = 0
             dropped_here = 0
             for s in day_slots:
@@ -1640,11 +1661,13 @@ def view_week(me):
                     dropped_here += 1
                 elif s.get("planned_hours"):
                     planned += s["planned_hours"]
+                    if t.get("is_core"):
+                        planned_core += s["planned_hours"]
                 elif not s.get("session_id") and not t.get("is_done"):
                     open_no_hours += 1
             bits = []
             if planned:
-                bits.append(f"{planned:g} h planned")
+                bits.append("planned: " + core_split(planned_core, planned))
             if open_no_hours:
                 bits.append(f"{open_no_hours} open")
             if dropped_here:
@@ -1918,7 +1941,7 @@ def view_week(me):
                     lg_core = st.checkbox(
                         "🎯 Core session",
                         value=bool(lg_sess.get("is_core")) if editing
-                        else False,
+                        else bool(t.get("is_core")),
                         key=f"lgcore_{slot['id']}")
                     lg_cv_dest = lg_cv_title = lg_cv_desc = None
                     lg_cv_outcome = lg_cv_metrics = None
@@ -2156,13 +2179,6 @@ def view_week(me):
                     st.session_state.pop("wk_panel", None)
                     st.rerun()
             with e2:
-                important = bool(t.get("is_important"))
-                if st.button("★ Toggle high importance"
-                             if important else "☆ Toggle high importance",
-                             key=f"pnimp_{t['id']}", use_container_width=True):
-                    db.set_todo_important(t["id"], not important)
-                    db.clear_user_caches()
-                    st.rerun()
                 if st.button("📅 Plan across days", key=f"pnplan_{t['id']}",
                              use_container_width=True):
                     st.session_state.wk_panel = ("plan", t["id"])
@@ -2233,140 +2249,169 @@ def view_week(me):
         st.session_state.wk_provisional = new_id
         st.rerun()
 
+    def unplanned_row(t, i, group):
+        """One row of the "Not yet planned" list. `i` and `group` are the
+        row's place in its own section (must / flexible): positions and
+        reordering are per section."""
+        n = len(group)
+        tc1, tc2, tc3, tc4 = st.columns([3.2, 1.4, 1.3, 4.1])
+        cancelled = bool(t.get("is_cancelled"))
+        overdue = (not t["is_done"] and not cancelled
+                   and dt.date.fromisoformat(t["due_on"]) < week_start)
+        core = bool(t.get("is_core"))
+        must = bool(t.get("must_this_week"))
+        with tc1:
+            label = ("🎯 " + t["title"]) if core else t["title"]
+            if cancelled:
+                # dropped, but kept for the record: struck through, no
+                # checkbox (it can't be completed), and it stays in this
+                # week only — todos_in_range never carries it forward.
+                st.markdown(
+                    f"<div style='color:#9aa5b1;margin:6px 0 4px 28px'>"
+                    f"<s>{label}</s></div>", unsafe_allow_html=True)
+            else:
+                checked = st.checkbox(
+                    label, value=t["is_done"], key=f"todo_{t['id']}")
+                if checked != t["is_done"]:
+                    db.set_todo_done(t["id"], checked)
+                    db.clear_user_caches()
+                    st.rerun()
+            if t.get("note"):
+                note = f"<s>{t['note']}</s>" if cancelled else t["note"]
+                st.markdown(
+                    f"<div style='font-size:0.72rem;color:#6b7280;"
+                    f"margin:-6px 0 4px 28px'>{note}</div>",
+                    unsafe_allow_html=True)
+        with tc2:
+            bits = []
+            if cancelled:
+                bits.append("cancelled")
+            if overdue:
+                bits.append("carried")
+            est = t.get("est_hours")
+            if est:
+                bits.append(f"{est:g}h")
+            pn = proj_name.get(t.get("project_id"))
+            if pn:
+                bits.append(pn)
+            if bits:
+                st.caption(" · ".join(bits))
+        with tc3:
+            # Type the position instead of clicking arrows: moving a task
+            # ten places up took ten clicks and a rerun for each one.
+            # The row's position is part of the widget key, so once the
+            # list has been reordered every field re-reads its new number
+            # rather than holding on to what was typed into it.
+            pos = st.number_input(
+                "Order", min_value=1, max_value=n, value=i + 1,
+                step=1, key=f"tdpos_{t['id']}_{i}",
+                label_visibility="collapsed",
+                help=f"Position in this list (1–{n}). Type a number "
+                     f"to move this to-do there.")
+            if int(pos) != i + 1:
+                moves = todo_order_after_move(
+                    todos, [u["id"] for u in group], t["id"], pos)
+                for tid, so in moves.items():
+                    db.set_todo_order(tid, so)
+                if moves:
+                    db.clear_user_caches()
+                    st.rerun()
+        with tc4:
+            if cancelled:
+                rs, dl = st.columns(2)
+                with rs:
+                    if st.button("↺", key=f"tdunc_{t['id']}",
+                                 help="Restore this to-do"):
+                        db.set_todo_cancelled(t["id"], False)
+                        db.clear_user_caches()
+                        st.rerun()
+                with dl:
+                    if st.button("✕", key=f"tddel_{t['id']}",
+                                 help="Delete permanently"):
+                        db.delete_todo(t["id"])
+                        db.clear_user_caches()
+                        st.rerun()
+            else:
+                pl, lg, cr, mu, ed, cx, dl = st.columns(7)
+                with pl:
+                    if st.button("📅", key=f"tdplan_{t['id']}",
+                                 help="Plan this across days"):
+                        st.session_state.wk_panel = ("plan", t["id"])
+                        st.rerun()
+                with lg:
+                    # the other way in: straight to the calendar entry,
+                    # for work that is already done and never needed a
+                    # plan of its own
+                    if st.button("✓", key=f"tdlog_{t['id']}",
+                                 help="Log it straight into the calendar "
+                                      "— no need to plan a day first"):
+                        start_logging_now(t)
+                with cr:
+                    if st.button("🎯" if core else "◎",
+                                 key=f"tdcore_{t['id']}",
+                                 help="Core — click to make it non-core"
+                                 if core else "Non-core — click to make it "
+                                              "core"):
+                        db.set_todo_core(t["id"], not core)
+                        db.clear_user_caches()
+                        st.rerun()
+                with mu:
+                    if st.button("⇣" if must else "⇡",
+                                 key=f"tdmust_{t['id']}",
+                                 help="Move to Flexible" if must
+                                 else "Move to Must do this week"):
+                        db.set_todo_must(t["id"], not must)
+                        db.clear_user_caches()
+                        st.rerun()
+                with ed:
+                    # the edit panel, not a popover: the category ->
+                    # project -> milestone pickers rerun as you move
+                    # through them, and a rerun closes a popover
+                    if st.button("✎", key=f"tded_{t['id']}",
+                                 help="Edit"):
+                        st.session_state.wk_panel = ("edit", t["id"])
+                        st.rerun()
+                with cx:
+                    if st.button("⊘", key=f"tdcan_{t['id']}",
+                                 help="Cancel: keep it struck through "
+                                      "here, don't carry it forward"):
+                        db.set_todo_cancelled(
+                            t["id"], True, due_on=week_start.isoformat())
+                        db.clear_user_caches()
+                        st.rerun()
+                with dl:
+                    if st.button("✕", key=f"tddel_{t['id']}",
+                                 help="Delete permanently"):
+                        db.delete_todo(t["id"])
+                        db.clear_user_caches()
+                        st.rerun()
+
     st.markdown("<hr>", unsafe_allow_html=True)
     if unplanned:
         open_unplanned = [t for t in unplanned if not t.get("is_cancelled")]
-        est_un = sum((t.get("est_hours") or 0) for t in open_unplanned)
-        head = f"**Not yet planned** — {len(open_unplanned)} item(s)"
-        if est_un:
-            head += f", {est_un:g} h"
-        st.markdown(head)
+        st.markdown(f"**Not yet planned** — {len(open_unplanned)} item(s)")
         st.caption("📅 opens the day picker, where one task can be put on "
                    "several days at once; ✓ goes straight to the calendar "
-                   "entry, for work that needs no plan. Type a number in "
-                   "the order box to move a task to that position.")
-        n = len(unplanned)
-        for i, t in enumerate(unplanned):
-            tc1, tc2, tc3, tc4 = st.columns([3.4, 1.5, 1.5, 3.4])
-            cancelled = bool(t.get("is_cancelled"))
-            overdue = (not t["is_done"] and not cancelled
-                       and dt.date.fromisoformat(t["due_on"]) < week_start)
-            important = bool(t.get("is_important"))
-            with tc1:
-                label = ("⭐ " + t["title"]) if important else t["title"]
-                if cancelled:
-                    # dropped, but kept for the record: struck through, no
-                    # checkbox (it can't be completed), and it stays in this
-                    # week only — todos_in_range never carries it forward.
-                    st.markdown(
-                        f"<div style='color:#9aa5b1;margin:6px 0 4px 28px'>"
-                        f"<s>{label}</s></div>", unsafe_allow_html=True)
-                else:
-                    checked = st.checkbox(
-                        label, value=t["is_done"], key=f"todo_{t['id']}")
-                    if checked != t["is_done"]:
-                        db.set_todo_done(t["id"], checked)
-                        db.clear_user_caches()
-                        st.rerun()
-                if t.get("note"):
-                    note = f"<s>{t['note']}</s>" if cancelled else t["note"]
-                    st.markdown(
-                        f"<div style='font-size:0.72rem;color:#6b7280;"
-                        f"margin:-6px 0 4px 28px'>{note}</div>",
-                        unsafe_allow_html=True)
-            with tc2:
-                bits = []
-                if cancelled:
-                    bits.append("cancelled")
-                if overdue:
-                    bits.append("carried")
-                est = t.get("est_hours")
-                if est:
-                    bits.append(f"{est:g}h")
-                pn = proj_name.get(t.get("project_id"))
-                if pn:
-                    bits.append(pn)
-                if bits:
-                    st.caption(" · ".join(bits))
-            with tc3:
-                # Type the position instead of clicking arrows: moving a task
-                # ten places up took ten clicks and a rerun for each one.
-                # The row's position is part of the widget key, so once the
-                # list has been reordered every field re-reads its new number
-                # rather than holding on to what was typed into it.
-                pos = st.number_input(
-                    "Order", min_value=1, max_value=n, value=i + 1,
-                    step=1, key=f"tdpos_{t['id']}_{i}",
-                    label_visibility="collapsed",
-                    help=f"Position in this list (1–{n}). Type a number "
-                         f"to move this to-do there.")
-                if int(pos) != i + 1:
-                    moves = todo_order_after_move(
-                        todos, [u["id"] for u in unplanned], t["id"], pos)
-                    for tid, so in moves.items():
-                        db.set_todo_order(tid, so)
-                    if moves:
-                        db.clear_user_caches()
-                        st.rerun()
-            with tc4:
-                if cancelled:
-                    rs, dl = st.columns(2)
-                    with rs:
-                        if st.button("↺", key=f"tdunc_{t['id']}",
-                                     help="Restore this to-do"):
-                            db.set_todo_cancelled(t["id"], False)
-                            db.clear_user_caches()
-                            st.rerun()
-                    with dl:
-                        if st.button("✕", key=f"tddel_{t['id']}",
-                                     help="Delete permanently"):
-                            db.delete_todo(t["id"])
-                            db.clear_user_caches()
-                            st.rerun()
-                else:
-                    pl, lg, sr, ed, cx, dl = st.columns(6)
-                    with pl:
-                        if st.button("📅", key=f"tdplan_{t['id']}",
-                                     help="Plan this across days"):
-                            st.session_state.wk_panel = ("plan", t["id"])
-                            st.rerun()
-                    with lg:
-                        # the other way in: straight to the calendar entry,
-                        # for work that is already done and never needed a
-                        # plan of its own
-                        if st.button("✓", key=f"tdlog_{t['id']}",
-                                     help="Log it straight into the calendar "
-                                          "— no need to plan a day first"):
-                            start_logging_now(t)
-                    with sr:
-                        star = "★" if important else "☆"
-                        if st.button(star, key=f"tdimp_{t['id']}",
-                                     help="Toggle high importance"):
-                            db.set_todo_important(t["id"], not important)
-                            db.clear_user_caches()
-                            st.rerun()
-                    with ed:
-                        # the edit panel, not a popover: the category ->
-                        # project -> milestone pickers rerun as you move
-                        # through them, and a rerun closes a popover
-                        if st.button("✎", key=f"tded_{t['id']}",
-                                     help="Edit"):
-                            st.session_state.wk_panel = ("edit", t["id"])
-                            st.rerun()
-                    with cx:
-                        if st.button("⊘", key=f"tdcan_{t['id']}",
-                                     help="Cancel: keep it struck through "
-                                          "here, don't carry it forward"):
-                            db.set_todo_cancelled(
-                                t["id"], True, due_on=week_start.isoformat())
-                            db.clear_user_caches()
-                            st.rerun()
-                    with dl:
-                        if st.button("✕", key=f"tddel_{t['id']}",
-                                     help="Delete permanently"):
-                            db.delete_todo(t["id"])
-                            db.clear_user_caches()
-                            st.rerun()
+                   "entry, for work that needs no plan. 🎯 marks a task as "
+                   "core; ⇡ / ⇣ moves it between the two lists. Type a "
+                   "number in the order box to move a task to that "
+                   "position.")
+        for must_flag, name, empty in (
+                (True, "📌 Must do this week",
+                 "Nothing unplanned that has to be done this week."),
+                (False, "Flexible", "Nothing flexible left unplanned.")):
+            group = [t for t in unplanned
+                     if bool(t.get("must_this_week")) == must_flag]
+            core_h, total_h = estimate_split(group)
+            n_open = sum(1 for t in group if not t.get("is_cancelled"))
+            head = f"**{name}** — {n_open} item(s)"
+            if total_h:
+                head += f" · {core_split(core_h, total_h)}"
+            st.markdown(head)
+            if not group:
+                st.caption(empty)
+            for i, t in enumerate(group):
+                unplanned_row(t, i, group)
     else:
         st.caption("Every to-do this week has a day. Anything new you add "
                    "below starts here, unplanned.")
@@ -2381,15 +2426,17 @@ def view_week(me):
         if est_all:
             st.caption(f"Estimated effort: {est_open:g} h remaining "
                        f"of {est_all:g} h planned ({est_done:g} h done)")
-        # high-importance subset, shown alongside the overall totals
-        if any(t.get("is_important") for t in live_todos):
-            est_imp = sum((t.get("est_hours") or 0) for t in live_todos
-                          if t.get("is_important"))
-            est_imp_open = sum((t.get("est_hours") or 0) for t in live_todos
-                               if t.get("is_important") and not t["is_done"])
-            est_imp_done = est_imp - est_imp_open
-            st.caption(f"⭐ High importance: {est_imp_open:g} h remaining "
-                       f"of {est_imp:g} h planned ({est_imp_done:g} h done)")
+        # the same, per list, over the whole week — planned days included —
+        # split into non-core and core
+        for must_flag, name in ((True, "📌 Must do this week"),
+                                (False, "Flexible")):
+            group = [t for t in live_todos
+                     if bool(t.get("must_this_week")) == must_flag]
+            core_h, total_h = estimate_split(group)
+            core_all, all_h = estimate_split(group, open_only=False)
+            if all_h:
+                st.caption(f"{name}: remaining {core_split(core_h, total_h)}"
+                           f" (of {all_h:g} h, 🎯 {core_all:g} core)")
 
     st.caption(f"New to-dos are filed under the week you're viewing: "
                f"{week_start:%d %b} – {week_end:%d %b %Y}.")
@@ -2462,16 +2509,6 @@ def view_week(me):
                          "Add more in the Projects tab later.")
                 wk_milestone_id = "__new__" if wk_new_ms.strip() else None
             elif b_proj != "— none —":
-                cur_imp = next((p.get("high_importance") for p in matching
-                                if p["name"] == b_proj), False)
-                new_imp = st.checkbox("⭐ High importance", value=bool(cur_imp),
-                                      key=f"imp_wk_{proj_labels[b_proj]}",
-                                      help="Highlights this project's hours in "
-                                           "the Time tab.")
-                if new_imp != bool(cur_imp):
-                    db.set_project_importance(proj_labels[b_proj], new_imp)
-                    db.clear_user_caches()
-                    st.rerun()
                 # milestone dropdown with inline creation
                 wk_pid = proj_labels[b_proj]
                 wms = [m for m in db.project_milestones(wk_pid)
@@ -2493,8 +2530,8 @@ def view_week(me):
         # it doesn't re-run the page each keystroke.
         with st.form("wk_addblock_form", clear_on_submit=True):
             b_note = st.text_input("What will you work on?", key="wk_note")
-            # per-session flag, independent of the project's ⭐ high-importance
-            # setting: the same project can have core and non-core sessions.
+            # a per-session flag, not a project setting: the same project can
+            # have core and non-core sessions.
             wk_core = st.checkbox(
                 "🎯 Core session", key="wk_core",
                 help="Counts toward your core hours in the Week and Time tabs.")
@@ -3211,11 +3248,6 @@ def render_project_details_and_milestones(r, me, is_lead):
             key=f"projcat_{pid}",
             help="Determines which category this project appears under "
                  "when logging.")
-        new_importance = st.checkbox(
-            "⭐ High importance",
-            value=bool(det.get("high_importance")),
-            key=f"projimp_{pid}",
-            help="Highlights this project's hours in the Time tab.")
         ec1, ec2 = st.columns(2)
         with ec1:
             if is_lead:
@@ -3260,7 +3292,6 @@ def render_project_details_and_milestones(r, me, is_lead):
                     "category_id": (cat_label_to_id.get(new_proj_cat)
                                     if new_proj_cat != "— none —"
                                     else None),
-                    "high_importance": new_importance,
                 })
                 st.success("Saved.")
                 db.clear_user_caches()
@@ -3853,18 +3884,6 @@ def view_time(me):
             p = round(100 * h["hours"] / ch["core"]) if ch["core"] else 0
             st.markdown(f"🎯 {h['name']} &nbsp;·&nbsp; **{h['hours']:g} h** "
                         f"&nbsp;·&nbsp; {p}%", unsafe_allow_html=True)
-
-    # ---- high-importance projects ----
-    hi = db.high_importance_hours(d_from.isoformat(), d_to.isoformat())
-    if hi:
-        st.markdown("<hr>", unsafe_allow_html=True)
-        st.markdown("**⭐ High-importance projects** — your hours this period")
-        hi_total = sum(h["hours"] for h in hi) or 1
-        for h in hi:
-            pct = round(100 * h["hours"] / hi_total)
-            st.markdown(f"⭐ {h['name']} &nbsp;·&nbsp; **{h['hours']:g} h**",
-                        unsafe_allow_html=True)
-            st.progress(min(h["hours"] / hi_total, 1.0))
 
     st.markdown("<hr>", unsafe_allow_html=True)
     section("Forecast", "Project load forecast",
@@ -5013,9 +5032,9 @@ def view_help(me):
         st.markdown(
             "The **Time** tab summarises your recorded hours over a period you "
             "choose (week, month, year, or a custom range). It shows how your "
-            "time splits across categories and highlights the hours on "
-            "projects you have marked as high importance, so you can see "
-            "whether your effort matches your priorities.")
+            "time splits across categories and highlights your core hours — "
+            "the sessions you ticked 🎯 Core — so you can see whether your "
+            "effort matches your priorities.")
 
     if is_lead:
         with st.expander("Budget (lead only)"):

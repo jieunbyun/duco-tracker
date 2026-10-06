@@ -46,7 +46,7 @@ CATS = [{"id": "c-res", "code": "research", "label": "Research",
          "domain": "work", "sort_order": 2}]
 
 PROJECTS = [{"id": "p-1", "name": "Resilience Review", "category_id": "c-res",
-             "high_importance": True, "estimated_hours": 40}]
+             "estimated_hours": 40}]
 
 TODOS = [
     # never planned, and has an estimate: the plain case for the shortcut
@@ -54,25 +54,25 @@ TODOS = [
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
      "category_id": "c-res", "milestone_id": None,
      "est_hours": 1.5, "sort_order": 0, "done_at": None,
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
     # never planned, no estimate either: the shortcut must still open
     {"id": "t-noest", "title": "Chase the archive request", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": None,
      "category_id": "c-adm", "milestone_id": None,
      "est_hours": None, "sort_order": 1, "done_at": None,
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
     # cancelled: struck through in the list, and offered neither way in
     {"id": "t-cancelled", "title": "Pilot survey", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": None,
      "category_id": None, "milestone_id": None,
      "est_hours": 3, "sort_order": 2, "done_at": None,
-     "is_important": False, "is_cancelled": True},
+     "is_core": False, "is_cancelled": True},
     # already planned onto a day: it is on the board, not in the list
     {"id": "t-planned", "title": "Draft review section 3", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
      "category_id": "c-res", "milestone_id": None,
      "est_hours": 2, "sort_order": 3, "done_at": None,
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
 ]
 
 # The one sitting that exists before anything is clicked. "sl-prov" is added
@@ -138,11 +138,12 @@ def fake_db(writes, slots, sessions, todos):
     m.log_session = log_session
     for name in ("delete_todo_slot", "set_slot_session", "set_todo_done",
                  "move_todo_slot", "set_slot_cancelled", "set_todo_order",
-                 "set_todo_important", "set_todo_cancelled", "delete_todo",
+                 "set_todo_core", "set_todo_must", "set_todo_cancelled",
+                 "delete_todo",
                  "update_todo", "update_session", "set_todo_plan"):
         setattr(m, name, _record(writes, name))
     for name in ("add_todo", "delete_session", "add_milestone",
-                 "get_or_create_project", "set_project_importance"):
+                 "get_or_create_project"):
         setattr(m, name, _forbidden(name))
     return m
 

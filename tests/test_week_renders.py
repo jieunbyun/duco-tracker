@@ -51,7 +51,7 @@ CATS = [{"id": "c-res", "code": "research", "label": "Research",
          "domain": "life", "sort_order": 3}]
 
 PROJECTS = [{"id": "p-1", "name": "Resilience Review", "category_id": "c-res",
-             "high_importance": True, "estimated_hours": 40}]
+             "estimated_hours": 40}]
 
 # Sessions: one timed block from a to-do, one plain block, one UNTIMED
 # (minutes only, no ended_at) which must land in the new dashed strip.
@@ -84,41 +84,41 @@ TODOS = [
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
      "category_id": "c-res", "milestone_id": "m-1",
      "est_hours": 6, "sort_order": 0, "done_at": None,
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
     # planned with NO hours at all, on a day that has already passed: the
     # "stale" branch on the card
     {"id": "t-nohours", "title": "Mark lab reports", "note": "20 of them",
      "due_on": DAY[0], "is_done": False, "project_id": None,
      "category_id": "c-adm",
      "est_hours": None, "sort_order": 1, "done_at": None,
-     "is_important": True, "is_cancelled": False},
+     "is_core": True, "is_cancelled": False},
     # finished, with its sitting logged
     {"id": "t-done", "title": "Re-run flood scenarios", "note": None,
      "due_on": DAY[0], "is_done": True, "project_id": "p-1",
      "est_hours": 2, "sort_order": 2, "done_at": DAY[2] + "T15:00:00",
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
     # never planned: belongs in the list under the board
     {"id": "t-unplanned", "title": "Ethics form", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
      "est_hours": 1.5, "sort_order": 3, "done_at": None,
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
     # cancelled: struck through in the list, never on the board
     {"id": "t-cancelled", "title": "Pilot survey", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": None,
      "est_hours": 3, "sort_order": 4, "done_at": None,
-     "is_important": False, "is_cancelled": True},
+     "is_core": False, "is_cancelled": True},
     # alive, but one of its two planned days has been dropped: the estimate
     # below is what is left after that day's 2 h came off
     {"id": "t-dropday", "title": "Rebuild the flood mesh", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
      "est_hours": 2, "sort_order": 5, "done_at": None,
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
     # every one of its days dropped: the task itself still stands, so it must
     # come back to the list where it can be given fresh days
     {"id": "t-noday", "title": "Chase the archive request", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": None,
      "est_hours": 1, "sort_order": 6, "done_at": None,
-     "is_important": False, "is_cancelled": False},
+     "is_core": False, "is_cancelled": False},
 ]
 
 TODOS.append(
@@ -127,7 +127,7 @@ TODOS.append(
     {"id": "t-mins", "title": "Chase interview consents", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
      "est_hours": None, "sort_order": 8, "done_at": None,
-     "is_important": False, "is_cancelled": False})
+     "is_core": False, "is_cancelled": False})
 
 TODOS.append(
     # done in two disconnected windows on ONE day: the morning is logged, the
@@ -135,7 +135,7 @@ TODOS.append(
     {"id": "t-twice", "title": "Reply to reviewers", "note": None,
      "due_on": DAY[0], "is_done": False, "project_id": "p-1",
      "est_hours": 2, "sort_order": 7, "done_at": None,
-     "is_important": False, "is_cancelled": False})
+     "is_core": False, "is_cancelled": False})
 
 SLOTS = [
     {"id": "sl-a", "todo_id": "t-split", "user_id": "u-me",
@@ -205,15 +205,15 @@ def fake_db():
     # test can prove the block was edited rather than duplicated.
     m.update_session = lambda sid, fields: WROTE.append(("update", sid, fields))
     # Any write is a bug in a read-only render: nothing is clicked.
-    for name in ("set_todo_order", "set_todo_done", "set_todo_important",
+    for name in ("set_todo_order", "set_todo_done", "set_todo_core",
+                 "set_todo_must",
                  "set_todo_cancelled", "delete_todo", "update_todo",
                  "add_todo", "add_todo_slot", "move_todo_slot",
                  "delete_todo_slot",
                  "set_slot_cancelled",
                  "set_slot_session", "set_todo_plan", "log_session",
                  "delete_session",
-                 "add_milestone", "get_or_create_project",
-                 "set_project_importance"):
+                 "add_milestone", "get_or_create_project"):
         setattr(m, name, _forbidden(name))
     return m
 
@@ -629,6 +629,82 @@ def test_typing_the_position_a_todo_already_has_writes_nothing():
     render_week(answers={f"tdpos_{todo_id}_{pos - 1}": pos},
                 order_writes=writes)
     assert writes == [], f"an unchanged position still wrote: {writes}"
+
+
+# ==========================================================================
+# Core (🎯) is the only marker, and the list splits into must / flexible.
+# ==========================================================================
+def render_with(fields, **kw):
+    """Render with some to-dos' fields overridden: {todo id: {field: value}}.
+    TODOS is restored afterwards, so no other test sees the change."""
+    saved = [dict(t) for t in TODOS]
+    try:
+        for t in TODOS:
+            t.update(fields.get(t["id"], {}))
+        return render_week(**kw)
+    finally:
+        TODOS[:] = saved
+
+
+SPLIT = render_with({"t-split": {"is_core": True},
+                     "t-unplanned": {"must_this_week": True}})
+
+
+def test_no_high_importance_marker_is_drawn():
+    for gone in ("⭐", "High importance", "☆", "★"):
+        assert gone not in OUT and gone not in SPLIT, (
+            f"the high-importance marker is still drawn: {gone}")
+
+
+def test_a_core_todo_is_marked_on_its_cards():
+    assert SPLIT.count("🎯 Draft review section 3") == 3, (
+        "every card of a core to-do must carry the 🎯")
+
+
+def test_a_days_planned_hours_split_into_non_core_and_core():
+    # Wed: 2 h of the core split task, 1 h of a non-core one
+    assert "planned: 1 non-core · 🎯 2 core · Σ 3 h" in SPLIT, (
+        "the board's day footer must split planned hours into core and not")
+
+
+def test_the_calendar_day_splits_into_non_core_and_core():
+    # Tue: a 2.5 h core block and 20 min of untimed non-core work
+    assert "0.33 non-core · 🎯 2.5 core · Σ 2.83 h" in OUT
+
+
+def test_the_list_separates_must_do_from_flexible():
+    must_at = SPLIT.index("📌 Must do this week**")
+    flex_at = SPLIT.index("Flexible**")
+    assert must_at < SPLIT.index("Ethics form") < flex_at, (
+        "a must-this-week to-do belongs under its own heading")
+    assert flex_at < SPLIT.rindex("Chase the archive request"), (
+        "a flexible to-do belongs under Flexible")
+
+
+def test_each_list_heads_with_its_hours_split():
+    assert ("📌 Must do this week** — 1 item(s) · 1.5 non-core · "
+            "🎯 0 core · Σ 1.5 h") in SPLIT
+    # the cancelled to-do is listed, but counts towards neither figure
+    assert "Flexible** — 1 item(s) · 1 non-core · 🎯 0 core · Σ 1 h" in SPLIT
+
+
+def test_an_empty_list_says_so():
+    assert "Nothing unplanned that has to be done this week." in OUT
+
+
+def test_the_week_summary_splits_each_list():
+    assert ("📌 Must do this week: remaining 1.5 non-core · 🎯 0 core · "
+            "Σ 1.5 h (of 1.5 h, 🎯 0 core)") in SPLIT
+    # every live flexible to-do, planned or not: 6 (core) + 2 + 1 + 2 open,
+    # and the finished 2 h one only in the overall figure
+    assert ("Flexible: remaining 5 non-core · 🎯 6 core · Σ 11 h "
+            "(of 13 h, 🎯 6 core)") in SPLIT
+
+
+def test_positions_count_within_each_list():
+    assert order_fields(SPLIT) == [("t-unplanned", 1), ("t-cancelled", 1),
+                                   ("t-noday", 2)], (
+        "each list numbers its own rows from 1")
 
 
 # ---- plain-python runner (so `python tests/...` works without pytest) -----

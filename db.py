@@ -231,7 +231,7 @@ def _my_projects(u):
         return []
     return (client().table("project").select(
         "id,name,status_id,visibility,estimated_hours,category_id,"
-        "high_importance,owner_id")
+        "owner_id")
         .in_("id", list(vis)).order("name").execute().data or [])
 
 
@@ -255,7 +255,7 @@ def projects_for_category(category_id, active_only=True):
     if not vis:
         return []
     q = client().table("project").select(
-        "id,name,category_id,high_importance,status_id") \
+        "id,name,category_id,status_id") \
         .eq("category_id", category_id).in_("id", list(vis))
     if active_only:
         active_ids = [s["id"] for s in project_statuses()
@@ -263,11 +263,6 @@ def projects_for_category(category_id, active_only=True):
         if active_ids:
             q = q.in_("status_id", active_ids)
     return q.order("name").execute().data or []
-
-
-def set_project_importance(project_id, high):
-    return client().table("project").update({"high_importance": bool(high)}) \
-        .eq("id", project_id).execute()
 
 
 def core_hours(date_from, date_to):
@@ -301,31 +296,6 @@ def core_hours(date_from, date_to):
     return {"core": core_total, "total": total, "by_project": by_project}
 
 
-def high_importance_hours(date_from, date_to):
-    """Hours the caller logged on high-importance projects in the range.
-    Returns list of {name, hours} sorted by hours desc."""
-    hi = client().table("project").select("id,name") \
-        .eq("high_importance", True).execute().data or []
-    if not hi:
-        return []
-    hi_ids = {p["id"]: p["name"] for p in hi}
-    me_id = my_app_user_id()
-    if not me_id:
-        return []
-    sess = (client().table("v_session_detail")
-            .select("project_id,hours,session_date")
-            .eq("user_id", me_id)
-            .gte("session_date", date_from)
-            .lte("session_date", date_to).execute().data or [])
-    agg = {}
-    for s in sess:
-        pid = s.get("project_id")
-        if pid in hi_ids:
-            agg[pid] = agg.get(pid, 0) + (s.get("hours") or 0)
-    out = [{"name": hi_ids[pid], "hours": h} for pid, h in agg.items()]
-    return sorted(out, key=lambda x: -x["hours"])
-
-
 # ---- to-do items ----------------------------------------------------------
 def todos_in_range(date_from, date_to, include_open_before=True):
     """The caller's todos with due_on in [date_from, date_to], ordered by
@@ -337,8 +307,8 @@ def todos_in_range(date_from, date_to, include_open_before=True):
     Cancelled todos stay visible in their own week (struck through) but never
     carry forward: they are excluded from the "due before date_from" pulls."""
     cols = ("id,title,note,due_on,is_done,project_id,category_id,"
-            "milestone_id,est_hours,sort_order,done_at,is_important,"
-            "is_cancelled")
+            "milestone_id,est_hours,sort_order,done_at,is_core,"
+            "must_this_week,is_cancelled")
     rows = (client().table("todo").select(cols)
             .gte("due_on", date_from).lte("due_on", date_to)
             .order("sort_order").order("due_on").execute().data or [])
@@ -378,13 +348,15 @@ def update_todo(todo_id, fields: dict):
 
 
 def add_todo(user_id, title, due_on, project_id=None, est_hours=None,
-             note=None, important=False, category_id=None, milestone_id=None):
+             note=None, core=False, must_this_week=False, category_id=None,
+             milestone_id=None):
     """Add a to-do. category_id and milestone_id place the work the same way
     the Log tab does, so ticking the to-do off later needs no re-choosing.
     All three placement fields are optional and independent: a to-do may name
     a category with no project, or nothing at all."""
     payload = {"user_id": user_id, "title": title, "due_on": due_on,
-               "is_important": bool(important)}
+               "is_core": bool(core),
+               "must_this_week": bool(must_this_week)}
     # `is not None`, not truthiness: category keys are smallint here, so a
     # category with id 0 must still be stored rather than silently dropped
     if project_id is not None:
@@ -423,8 +395,17 @@ def set_todo_cancelled(todo_id, cancelled, due_on=None):
     return client().table("todo").update(fields).eq("id", todo_id).execute()
 
 
-def set_todo_important(todo_id, important):
-    return client().table("todo").update({"is_important": bool(important)}) \
+def set_todo_core(todo_id, core):
+    """Mark a to-do as core work (🎯), the same flag a logged session carries:
+    the board counts its planned hours as core, and logging it starts ticked
+    as a core session."""
+    return client().table("todo").update({"is_core": bool(core)}) \
+        .eq("id", todo_id).execute()
+
+
+def set_todo_must(todo_id, must):
+    """File a to-do under "must be done this week" (True) or "flexible"."""
+    return client().table("todo").update({"must_this_week": bool(must)}) \
         .eq("id", todo_id).execute()
 
 
@@ -685,8 +666,7 @@ def update_project(project_id, fields: dict):
 def project_detail(project_id):
     rows = client().table("project").select(
         "id,name,status_id,visibility,estimated_hours,started_on,due_on,"
-        "purpose,final_outcomes,stakeholders,risks,category_id,"
-        "high_importance") \
+        "purpose,final_outcomes,stakeholders,risks,category_id") \
         .eq("id", project_id).execute().data or []
     return rows[0] if rows else None
 
