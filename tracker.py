@@ -2217,6 +2217,12 @@ def view_week(me):
                  if not [s for s in slots_by_todo.get(t["id"], [])
                          if not s.get("is_cancelled")]
                  or t.get("is_cancelled")]
+    unplanned_ids = {t["id"] for t in unplanned}
+
+    def is_must(t):
+        """Must be done this week: ticked 📌, or already given a day on the
+        board — a task planned into this week is a commitment to it."""
+        return bool(t.get("must_this_week")) or t["id"] not in unplanned_ids
 
     def start_logging_now(t):
         """Log a to-do straight into the calendar, skipping the plan.
@@ -2426,12 +2432,11 @@ def view_week(me):
         if est_all:
             st.caption(f"Estimated effort: {est_open:g} h remaining "
                        f"of {est_all:g} h planned ({est_done:g} h done)")
-        # the same, per list, over the whole week — planned days included —
-        # split into non-core and core
+        # the same, per list, over the whole week, split into non-core and
+        # core. Everything planned on the board counts as must.
         for must_flag, name in ((True, "📌 Must do this week"),
                                 (False, "Flexible")):
-            group = [t for t in live_todos
-                     if bool(t.get("must_this_week")) == must_flag]
+            group = [t for t in live_todos if is_must(t) == must_flag]
             core_h, total_h = estimate_split(group)
             core_all, all_h = estimate_split(group, open_only=False)
             if all_h:

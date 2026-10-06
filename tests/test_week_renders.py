@@ -692,13 +692,21 @@ def test_an_empty_list_says_so():
     assert "Nothing unplanned that has to be done this week." in OUT
 
 
-def test_the_week_summary_splits_each_list():
-    assert ("📌 Must do this week: remaining 1.5 non-core · 🎯 0 core · "
-            "Σ 1.5 h (of 1.5 h, 🎯 0 core)") in SPLIT
-    # every live flexible to-do, planned or not: 6 (core) + 2 + 1 + 2 open,
-    # and the finished 2 h one only in the overall figure
-    assert ("Flexible: remaining 5 non-core · 🎯 6 core · Σ 11 h "
-            "(of 13 h, 🎯 6 core)") in SPLIT
+def test_the_week_summary_counts_everything_planned_as_must():
+    # must = the ticked 📌 one (1.5) plus every to-do with a day on the
+    # board: 6 (core) + 2 + 2 open, and the finished 2 h one only in the
+    # overall figure
+    assert ("📌 Must do this week: remaining 5.5 non-core · 🎯 6 core · "
+            "Σ 11.5 h (of 13.5 h, 🎯 6 core)") in SPLIT
+    # flexible = unplanned and not ticked: only the task whose every day
+    # was dropped, back on the list
+    assert ("Flexible: remaining 1 non-core · 🎯 0 core · Σ 1 h "
+            "(of 1 h, 🎯 0 core)") in SPLIT
+
+
+def test_a_planned_todo_is_must_even_unticked():
+    # nothing ticked 📌 at all, yet the planned work is still must
+    assert "📌 Must do this week: remaining" in OUT
 
 
 def test_positions_count_within_each_list():
