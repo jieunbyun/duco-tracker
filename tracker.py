@@ -1083,12 +1083,12 @@ def add_todo_form(me, is_lead, week_start):
         tf1, tf2 = st.columns(2)
         with tf1:
             td_must = st.checkbox(
-                "\ud83d\udccc Must be done this week", key="td_must",
+                "📌 Must be done this week", key="td_must",
                 help="Lists it under 'Must do this week' rather than "
                      "'Flexible'.")
         with tf2:
             td_core = st.checkbox(
-                "\ud83c\udfaf Core", key="td_core",
+                "🎯 Core", key="td_core",
                 help="Counts its planned hours as core on the board, and "
                      "logging it starts ticked as a core session.")
         td_submit = st.form_submit_button("Add to-do")
