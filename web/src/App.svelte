@@ -3,16 +3,15 @@
   import { supabase } from "./lib/supabase";
   import { loadTaxonomy } from "./lib/data";
   import Login from "./lib/Login.svelte";
-  import Log from "./views/Log.svelte";
   import Week from "./views/Week.svelte";
   import Planning from "./views/Planning.svelte";
   import Time from "./views/Time.svelte";
   import CV from "./views/CV.svelte";
   import Help from "./views/Help.svelte";
 
-  const views = { log: Log, week: Week, planning: Planning, time: Time, cv: CV, help: Help };
+  const views = { week: Week, planning: Planning, time: Time, cv: CV, help: Help };
   const labels: Record<keyof typeof views, string> = {
-    log: "Log", week: "Week", planning: "Planning", time: "Time", cv: "CV", help: "Help",
+    week: "Week", planning: "Planning", time: "Time", cv: "CV", help: "Help",
   };
   type Route = keyof typeof views;
 
@@ -24,7 +23,7 @@
   // back button moves between views.
   function routeFromHash(): Route {
     const r = location.hash.replace(/^#\/?/, "");
-    return r in views ? (r as Route) : "log";
+    return r in views ? (r as Route) : "week"; // anything else, including the old #/log
   }
 
   $effect(() => {

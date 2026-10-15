@@ -8,6 +8,7 @@
   import type { Meeting } from "../lib/ics";
   import EntryForm from "../lib/EntryForm.svelte";
   import TodoForm from "../lib/TodoForm.svelte";
+  import CvForm from "../lib/CvForm.svelte";
 
   const SHOW_LOGGED = "week.showLogged";
   const LAST_CATEGORY = "log.category";
@@ -31,15 +32,17 @@
   let request = 0;
 
   loadTaxonomy().then((t) => (tax = t)).catch((e) => (error = e.message));
-  loadProjects().then((p) => (projects = p)).catch((e) => (error = e.message));
 
   async function load() {
     const id = ++request;
     const [from, to, carry] = [start, end, isCurrent];
     loading = true;
     try {
-      const [plan, logged] = await Promise.all([loadWeekPlan(from, to, carry), loadEntriesBetween(from, to)]);
+      const [plan, logged, p] = await Promise.all([
+        loadWeekPlan(from, to, carry), loadEntriesBetween(from, to), loadProjects(),
+      ]);
       if (id !== request) return;
+      projects = p;
       todos = plan.todos;
       slots = plan.slots;
       carried = plan.carried;
@@ -142,9 +145,11 @@
   // ---- dialogs: edit/add a to-do, log a sitting ----------------------------------------
   type Panel =
     | { kind: "todo"; todo: Todo | null; day?: string; as?: "task" | "meeting"; place?: boolean }
-    | { kind: "log"; todo: Todo; slot: Slot | null; day: string };
+    | { kind: "log"; todo: Todo; slot: Slot | null; day: string }
+    | { kind: "entry"; entry: TimeEntry | null; day: string };
   let panel = $state<Panel | null>(null);
   let markDone = $state(false);
+  let cvOpen = $state(false); // the CV form inside an entry's dialog
   let dialog = $state<HTMLDialogElement | null>(null);
 
   $effect(() => {
@@ -152,6 +157,11 @@
     if (panel && !dialog.open) dialog.showModal();
     if (!panel && dialog.open) dialog.close();
   });
+
+  function openEntry(entry: TimeEntry | null, day: string) {
+    cvOpen = false;
+    panel = { kind: "entry", entry, day };
+  }
 
   function openLog(t: Todo, slot: Slot | null, day: string) {
     markDone = t.kind === "meeting" || slotsOf(t).filter((s) => !s.entry_id && !s.is_cancelled).length <= 1;
@@ -182,6 +192,29 @@
       date: p.day, start: s, end: e!, categoryId, projectId: t.project_id,
       milestoneId: t.milestone_id, description: t.title, isCore: t.is_core,
     };
+  }
+
+  // A plain log starts where that day's last entry ended (else 09:00) and, for
+  // today, ends now rounded to the quarter hour when that is later.
+  function entryDefaults(day: string) {
+    const ends = entriesOn(day).map((x) => x.ended_at?.slice(11, 16)).filter((x): x is string => !!x).sort();
+    const s = ends.length ? ends[ends.length - 1] : "09:00";
+    let e = plusHours(s, 1);
+    if (day === today()) {
+      const now = new Date();
+      const q = Math.round((now.getHours() * 60 + now.getMinutes()) / 15) * 15;
+      const [sh, sm] = s.split(":").map(Number);
+      if (q > sh * 60 + sm) e = q >= 24 * 60 ? "00:00" : `${pad(Math.floor(q / 60))}:${pad(q % 60)}`;
+    }
+    const saved = lastCategory();
+    const categoryId = catById.has(saved) ? saved : tax?.categories[0]?.id ?? "";
+    return { date: day, start: s, end: e, categoryId };
+  }
+
+  async function entrySaved(f: TimeEntryFields) {
+    try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
+    panel = null;
+    await load();
   }
 
   async function logged(p: Extract<Panel, { kind: "log" }>, f: TimeEntryFields, entryId: string) {
@@ -296,7 +329,8 @@
   </p>
 
   <div class="toolbar">
-    <button class="primary" onclick={() => (panel = { kind: "todo", todo: null, as: "task" })}>+ To-do</button>
+    <button class="primary" onclick={() => openEntry(null, isCurrent ? today() : start)}>+ Log</button>
+    <button onclick={() => (panel = { kind: "todo", todo: null, as: "task" })}>+ To-do</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: isCurrent ? today() : start })}>+ Meeting</button>
     <label class="toggle"><input type="checkbox" bind:checked={showLogged} /> Show logged time</label>
   </div>
@@ -361,14 +395,15 @@
 
         {#if showLogged}
           {#each entriesOn(d) as e (e.id)}
-            <div class="entry">
+            <button class="entry" title={e.description ?? "Edit this entry"} onclick={() => openEntry(e, d)}>
               <span class="time">{e.ended_at ? `${e.started_at.slice(11, 16)}–${e.ended_at.slice(11, 16)}` : `${e.manual_minutes} min`}</span>
               {e.is_core ? "🎯 " : ""}{label(e)}
-            </div>
+            </button>
           {/each}
         {/if}
 
         <div class="add-day">
+          <button onclick={() => openEntry(null, d)}>+ log</button>
           <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: d })}>+ meeting</button>
           <button onclick={() => (panel = { kind: "todo", todo: null, as: "task", day: d, place: true })}>+ to-do</button>
         </div>
@@ -488,6 +523,28 @@
       <TodoForm todo={panel.todo} slots={panel.todo ? slotsOf(panel.todo) : []} {tax} {projects}
                 weekStart={start} day={panel.day} placeOnDay={panel.place} kind={panel.as}
                 onsaved={closed} oncancel={() => (panel = null)} />
+    {:else if panel.kind === "entry"}
+      {@const p = panel}
+      <h2>{p.entry ? "Edit entry" : "Log time"}</h2>
+      {#key p}
+        <EntryForm entry={p.entry} {tax} {projects} defaults={entryDefaults(p.day)}
+                   onsaved={(f) => entrySaved(f)} oncancel={() => (panel = null)} />
+      {/key}
+      {#if p.entry}
+        {@const e = p.entry}
+        {#if cvOpen}
+          <div class="cv-add">
+            <h3>CV achievement from this session</h3>
+            <CvForm entry={null}
+                    preset={{ source_type: "entry", entry_id: e.id, project_id: e.project_id, milestone_id: e.milestone_id,
+                              entry_date: e.started_at.slice(0, 10),
+                              title: e.description ?? (e.project_id ? projById.get(e.project_id)?.name ?? "" : "") }}
+                    onsaved={() => (panel = null)} oncancel={() => (cvOpen = false)} />
+          </div>
+        {:else}
+          <button class="cv-btn" onclick={() => (cvOpen = true)}>Add as CV achievement…</button>
+        {/if}
+      {/if}
     {:else}
       {@const p = panel}
       <h2>Log “{p.todo.title}”</h2>
@@ -531,8 +588,22 @@
   .acts { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.15rem; align-items: center; }
   .mini { font-size: 0.72rem; padding: 0.1rem 0.4rem; }
   .ok { font-size: 0.72rem; color: var(--accent); margin-right: auto; }
-  .entry { font-size: 0.72rem; color: var(--ink-soft); padding-left: 0.2rem; }
-  .add-day { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; }
+  .entry {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    padding: 0.1rem 0.2rem;
+    font-size: 0.72rem;
+    color: var(--ink-soft);
+  }
+  .entry:hover { background: var(--paper); color: var(--ink); }
+  .cv-btn { margin-top: 0.9rem; font-size: 0.82rem; }
+  .cv-add { margin-top: 1rem; border-top: 1px solid var(--rule); padding-top: 0.8rem; }
+  .cv-add h3 { font-size: 0.92rem; font-family: var(--font-ui); }
+  .add-day { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.25rem; }
   .add-day button { font-size: 0.72rem; padding: 0.15rem; background: none; border: 1px dashed var(--rule); color: var(--ink-soft); }
 
   .week h2 { margin-top: 2rem; }

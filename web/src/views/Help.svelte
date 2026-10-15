@@ -21,17 +21,13 @@
 
   <h2>The views</h2>
   <dl>
-    <dt>Log</dt>
-    <dd>
-      Record a session against a category, and optionally a project and milestone — new ones can be created on
-      the spot. Give start and end times (an end of 00:00 means midnight) or just minutes. The form starts where
-      today's last entry ended. Click a recent entry to edit, delete, copy it to another date, or turn it into a
-      CV achievement.
-    </dd>
-
     <dt>Week</dt>
     <dd>
-      Plan a chosen week. <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
+      Log time and plan a chosen week, in one place. <em>+ Log</em> (top, or under any day) records a session
+      against a category, and optionally a project and milestone — new ones can be created on the spot — by start
+      and end times (an end of 00:00 means midnight) or by minutes. It starts where that day's last entry ended.
+      Click a logged entry on a day to edit, delete, copy it to another date, or turn it into a CV achievement.
+      <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
       more days; mark them must-do or flexible. <em>✓ Log</em> on a card opens the log form already filled in and
       ties the logged time back to the plan. Open to-dos from earlier weeks are carried into the current week until
