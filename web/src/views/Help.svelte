@@ -36,6 +36,8 @@
       more days; mark them must-do or flexible. <em>✓ Log</em> on a card opens the log form already filled in and
       ties the logged time back to the plan. Open to-dos from earlier weeks are carried into the current week until
       done or cancelled. A red edge marks a planned day that has passed without being logged.
+      <em>Cancel</em> on a card keeps it on its day, struck through and restorable, as a record of what was
+      planned; <em>✕</em> takes it off the calendar altogether (for a meeting, deletes it).
     </dd>
 
     <dt>Planning</dt>

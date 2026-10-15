@@ -111,7 +111,7 @@
   // ---- summary ----------------------------------------------------------------------
   const summary = $derived.by(() => {
     const meetingH = weekSlots
-      .filter((s) => todoById.get(s.todo_id)?.kind === "meeting")
+      .filter((s) => todoById.get(s.todo_id)?.kind === "meeting" && !s.is_cancelled)
       .reduce((s, x) => s + (x.planned_hours ?? 0), 0);
     const open = live.filter((t) => !t.is_done);
     const dutyH = open.reduce((s, t) => s + (t.est_hours ?? 0), 0);
@@ -132,6 +132,9 @@
     if (s.entry_id && !confirm("This day was logged. Remove it from the plan? The logged time stays.")) return;
     return act(() => deleteSlot(s.id));
   }
+  // Cancelling keeps the card on its day, struck through, so the week still
+  // shows what was planned; it can be restored. ✕ takes it off altogether.
+  const setCancelled = (s: Slot, cancelled: boolean) => act(() => saveSlot(s.id, { is_cancelled: cancelled }));
   const setDone = (t: Todo, done: boolean) => act(() => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null } as Partial<Todo>));
   const setMust = (t: Todo) => act(() => saveTodo(t.id, { must_this_week: !t.must_this_week }));
   const restore = (t: Todo) => act(() => saveTodo(t.id, { is_cancelled: false }));
@@ -151,7 +154,7 @@
   });
 
   function openLog(t: Todo, slot: Slot | null, day: string) {
-    markDone = t.kind === "meeting" || slotsOf(t).filter((s) => !s.entry_id).length <= 1;
+    markDone = t.kind === "meeting" || slotsOf(t).filter((s) => !s.entry_id && !s.is_cancelled).length <= 1;
     panel = { kind: "log", todo: t, slot, day };
   }
 
@@ -311,18 +314,22 @@
 
         {#each meetings as s (s.id)}
           {@const t = todoById.get(s.todo_id)!}
-          <div class="card meeting" class:logged={!!s.entry_id}>
+          <div class="card meeting" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled}>
             <span class="time">{hhmm(s.start_time)}–{hhmm(s.end_time)}</span>
             <span class="title">{t.is_core ? "🎯 " : ""}{t.title}</span>
             {#if label(t)}<span class="sub">{label(t)}</span>{/if}
             <span class="acts">
-              {#if s.entry_id}
+              {#if s.is_cancelled}
+                <span class="off">cancelled</span>
+                <button class="mini" title="Restore this meeting" onclick={() => setCancelled(s, false)}>Restore</button>
+              {:else if s.entry_id}
                 <span class="ok">✓ logged</span>
               {:else}
                 <button class="mini" title="Log this meeting" onclick={() => openLog(t, s, d)}>✓ Log</button>
+                <button class="mini" title="Cancel — stays on the day, struck through" onclick={() => setCancelled(s, true)}>Cancel</button>
               {/if}
-              <button class="mini" title="Edit" onclick={() => (panel = { kind: "todo", todo: t })}>Edit</button>
-              <button class="mini" title="Remove" aria-label="Remove meeting" onclick={() => unplan(s)}>✕</button>
+              {#if !s.is_cancelled}<button class="mini" title="Edit" onclick={() => (panel = { kind: "todo", todo: t })}>Edit</button>{/if}
+              <button class="mini" title="Delete the meeting" aria-label="Delete meeting" onclick={() => unplan(s)}>✕</button>
             </span>
           </div>
         {/each}
@@ -331,18 +338,23 @@
           {@const t = todoById.get(s.todo_id)!}
           {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
           <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done && !s.entry_id}
-               class:stale={!s.entry_id && !t.is_done && d < today()}>
+               class:cancelled={s.is_cancelled}
+               class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}>
             <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
             {#if label(t)}<span class="sub">{label(t)}</span>{/if}
             <span class="acts">
-              {#if s.entry_id}
+              {#if s.is_cancelled}
+                <span class="off">cancelled</span>
+                <button class="mini" title="Restore this day" onclick={() => setCancelled(s, false)}>Restore</button>
+              {:else if s.entry_id}
                 <span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>
               {:else}
                 <button class="mini" title="Log time for this" onclick={() => openLog(t, s, d)}>✓ Log</button>
                 <button class="mini" title="Day before" aria-label="Move to the day before" onclick={() => move(s, -1)}>‹</button>
                 <button class="mini" title="Day after" aria-label="Move to the day after" onclick={() => move(s, 1)}>›</button>
+                <button class="mini" title="Cancel this day — stays on the day, struck through" onclick={() => setCancelled(s, true)}>Cancel</button>
               {/if}
-              <button class="mini" title="Take off this day" aria-label="Remove from this day" onclick={() => unplan(s)}>✕</button>
+              <button class="mini" title="Take off the calendar" aria-label="Take off the calendar" onclick={() => unplan(s)}>✕</button>
             </span>
           </div>
         {/each}
@@ -391,7 +403,7 @@
                 {#if ts.length}
                   <span class="t-days">
                     {#each ts as s (s.id)}
-                      <span class="daychip" class:logged={!!s.entry_id}>{dayName(s.planned_on)} {dayNum(s.planned_on)}{s.entry_id ? " ✓" : ""}</span>
+                      <span class="daychip" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled}>{dayName(s.planned_on)} {dayNum(s.planned_on)}{s.entry_id ? " ✓" : ""}</span>
                     {/each}
                   </span>
                 {/if}
@@ -510,6 +522,9 @@
   .card.logged { opacity: 0.7; }
   .card.done .title { text-decoration: line-through; }
   .card.stale { border-left-color: var(--danger); }
+  .card.cancelled { opacity: 0.55; border-left-color: var(--rule); }
+  .card.cancelled .title, .card.cancelled .time { text-decoration: line-through; }
+  .off { font-size: 0.72rem; color: var(--ink-soft); margin-right: auto; font-style: italic; }
   .card .time, .entry .time { font-variant-numeric: tabular-nums; font-weight: 600; }
   .card .title { font-weight: 500; overflow-wrap: anywhere; }
   .card .sub { color: var(--ink-soft); font-size: 0.72rem; }
@@ -535,6 +550,7 @@
   .t-days { display: flex; flex-wrap: wrap; gap: 0.25rem; }
   .daychip { font-size: 0.7rem; border: 1px solid var(--rule); border-radius: 999px; padding: 0 0.4rem; }
   .daychip.logged { border-color: var(--accent); color: var(--accent); }
+  .daychip.cancelled { text-decoration: line-through; color: var(--ink-soft); }
   .t-acts { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .t-acts select { width: auto; font-size: 0.78rem; padding: 0.15rem 0.3rem; }
   .cancelled .t-title-static { text-decoration: line-through; color: var(--ink-soft); font-size: 0.88rem; }
