@@ -96,11 +96,15 @@
   // ---- the week's to-do list ------------------------------------------------------
   const tasks = $derived(todos.filter((t) => t.kind === "task"));
   const live = $derived(tasks.filter((t) => !t.is_cancelled));
+  // A to-do on a day this week shows on the calendar only; the list holds the
+  // ones not placed yet. Cancelling its last day puts it back on the list.
+  const onCalendar = $derived(new Set(weekSlots.filter((s) => !s.is_cancelled).map((s) => s.todo_id)));
+  const unplaced = $derived(live.filter((t) => !onCalendar.has(t.id)));
   const groups = $derived([
-    { key: "must", title: "Must do this week", rows: live.filter((t) => !t.is_done && t.must_this_week && !carried.has(t.id)) },
-    { key: "flex", title: "Flexible", rows: live.filter((t) => !t.is_done && !t.must_this_week && !carried.has(t.id)) },
-    { key: "carried", title: "Carried over from earlier weeks", rows: live.filter((t) => !t.is_done && carried.has(t.id)) },
-    { key: "done", title: "Done", rows: live.filter((t) => t.is_done) },
+    { key: "must", title: "Must do this week", rows: unplaced.filter((t) => !t.is_done && t.must_this_week && !carried.has(t.id)) },
+    { key: "flex", title: "Flexible", rows: unplaced.filter((t) => !t.is_done && !t.must_this_week && !carried.has(t.id)) },
+    { key: "carried", title: "Carried over from earlier weeks", rows: unplaced.filter((t) => !t.is_done && carried.has(t.id)) },
+    { key: "done", title: "Done", rows: unplaced.filter((t) => t.is_done) },
   ].map((g) => ({ ...g, rows: [...g.rows].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)) })));
   const cancelled = $derived(tasks.filter((t) => t.is_cancelled));
 
@@ -473,9 +477,11 @@
   </div>
 
   <!-- ================= to-do list ================= -->
-  <h2>To-dos</h2>
+  <h2>To-dos not yet on a day</h2>
   {#if !tasks.length}
     <p class="muted">No to-dos for this week yet.</p>
+  {:else if !unplaced.length}
+    <p class="muted">Everything for this week is on the calendar.</p>
   {/if}
   {#each groups as g (g.key)}
     {#if g.rows.length}

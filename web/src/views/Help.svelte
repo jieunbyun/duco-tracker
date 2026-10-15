@@ -29,7 +29,8 @@
       Click a logged entry on a day to edit, delete, copy it to another date, or turn it into a CV achievement.
       <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
-      more days; mark them must-do or flexible. <em>✓ Log</em> on a card opens the log form already filled in and
+      more days; mark them must-do or flexible. Once a to-do is on a day it shows on the calendar only, and the list
+      below keeps the ones not yet placed. <em>✓ Log</em> on a card opens the log form already filled in and
       ties the logged time back to the plan. Open to-dos from earlier weeks are carried into the current week until
       done or cancelled. A red edge marks a planned day that has passed without being logged.
       Click or right-click a meeting or duty on the calendar for its actions: log time, move it a day, cancel it
