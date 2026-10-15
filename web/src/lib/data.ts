@@ -122,22 +122,31 @@ export async function loadProjects(): Promise<Project[]> {
 export type ProjectFields = Omit<Project, "id" | "milestone">;
 export type MilestoneFields = Omit<Milestone, "id">;
 
-async function check<T>(q: PromiseLike<{ error: { message: string } | null; data?: T }>): Promise<T | undefined> {
+async function check<T>(q: PromiseLike<{ error: { message: string } | null; data?: T | null }>): Promise<T | null | undefined> {
   const { error, data } = await q;
   if (error) throw new Error(error.message);
   return data;
 }
 
-export async function saveProject(id: string | null, fields: ProjectFields): Promise<void> {
-  await check(id ? supabase.from("project").update(fields).eq("id", id)
-                 : supabase.from("project").insert(fields));
+/** Insert (id null) or update; returns the row's id either way. */
+export async function saveProject(id: string | null, fields: ProjectFields): Promise<string> {
+  if (id) {
+    await check(supabase.from("project").update(fields).eq("id", id));
+    return id;
+  }
+  const row = await check<{ id: string }>(supabase.from("project").insert(fields).select("id").single());
+  return row!.id;
 }
 export async function deleteProject(id: string): Promise<void> {
   await check(supabase.from("project").delete().eq("id", id));
 }
-export async function saveMilestone(id: string | null, fields: MilestoneFields): Promise<void> {
-  await check(id ? supabase.from("milestone").update(fields).eq("id", id)
-                 : supabase.from("milestone").insert(fields));
+export async function saveMilestone(id: string | null, fields: MilestoneFields): Promise<string> {
+  if (id) {
+    await check(supabase.from("milestone").update(fields).eq("id", id));
+    return id;
+  }
+  const row = await check<{ id: string }>(supabase.from("milestone").insert(fields).select("id").single());
+  return row!.id;
 }
 export async function deleteMilestone(id: string): Promise<void> {
   await check(supabase.from("milestone").delete().eq("id", id));
@@ -155,6 +164,45 @@ export async function loadAllHours(): Promise<HourRow[]> {
       .range(a, b),
   );
   return rows.map((r) => ({ ...r, hours: Number(r.hours) }));
+}
+
+// ---- time entries ----------------------------------------------------------
+export type TimeEntry = {
+  id: string;
+  category_id: string;
+  project_id: string | null;
+  milestone_id: string | null;
+  started_at: string;
+  ended_at: string | null;
+  manual_minutes: number | null;
+  minutes: number;
+  description: string | null;
+  is_core: boolean;
+};
+export type TimeEntryFields = Omit<TimeEntry, "id" | "minutes">;
+
+const ENTRY_COLS = "id,category_id,project_id,milestone_id,started_at,ended_at,manual_minutes,minutes,description,is_core";
+
+export async function loadRecentEntries(limit = 20): Promise<TimeEntry[]> {
+  const { data, error } = await supabase
+    .from("time_entry")
+    .select(ENTRY_COLS)
+    .order("started_at", { ascending: false })
+    .limit(limit);
+  if (error) throw new Error(error.message);
+  return (data ?? []).map((e) => ({ ...e, minutes: Number(e.minutes) }));
+}
+
+export async function saveEntry(id: string | null, fields: TimeEntryFields): Promise<string> {
+  if (id) {
+    await check(supabase.from("time_entry").update(fields).eq("id", id));
+    return id;
+  }
+  const row = await check<{ id: string }>(supabase.from("time_entry").insert(fields).select("id").single());
+  return row!.id;
+}
+export async function deleteEntry(id: string): Promise<void> {
+  await check(supabase.from("time_entry").delete().eq("id", id));
 }
 
 /** The target an area had on a given day: the latest effective_from not after it. */

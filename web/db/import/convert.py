@@ -16,7 +16,9 @@ Only rows that fit the new taxonomy come across:
   * every CV entry is kept; links to rows that did not come across are cleared.
 
 Old ids are reused so the links between projects, milestones, sessions, to-dos
-and CV entries survive. The output holds personal data: out/ is git-ignored.
+and CV entries survive, and every insert skips ids already present: re-running
+a fresh export adds only what is new since the last import (rows changed in
+the new app are left alone; rows deleted there come back). The output holds personal data: out/ is git-ignored.
 """
 import csv
 import json
@@ -298,7 +300,8 @@ def insert_sql(table, rows):
     return (f"insert into {table} ({cols})\n"
             f"select {exprs}\n"
             f"from json_to_recordset({tag}{payload}{tag}::json) as x({record})\n"
-            f"{join};\n")
+            f"{join}\n"
+            f"on conflict (id) do nothing;\n")
 
 
 def write_files(data, out_dir):
