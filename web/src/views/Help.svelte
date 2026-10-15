@@ -34,7 +34,7 @@
       done or cancelled. A red edge marks a planned day that has passed without being logged.
       Click or right-click a meeting or duty on the calendar for its actions: log time, move it a day, cancel it
       (it stays on its day, struck through and restorable, as a record of what was planned), edit it, or take it off
-      the calendar (for a meeting, delete it). The tick box on a duty marks the to-do done.
+      the calendar (for a meeting, delete it). For a duty, the menu also marks the to-do done or reopens it.
     </dd>
 
     <dt>Planning</dt>

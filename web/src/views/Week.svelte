@@ -148,7 +148,7 @@
   type Item = { label: string; run: () => unknown; danger?: boolean };
   let menu = $state<Menu | null>(null);
   const MENU_W = 220;
-  const MENU_H = 250;
+  const MENU_H = 290;
 
   function openMenu(ev: MouseEvent, slot: Slot, day: string) {
     ev.preventDefault();
@@ -181,10 +181,15 @@
     const remove: Item = meeting
       ? { label: "Delete meeting", run: () => unplan(s), danger: true }
       : { label: "Take off the calendar", run: () => unplan(s), danger: true };
+    const done: Item[] = meeting
+      ? []
+      : [t.is_done
+          ? { label: "Reopen to-do", run: () => setDone(t, false) }
+          : { label: "✔ Mark to-do done", run: () => setDone(t, true) }];
     if (s.is_cancelled) return [{ label: "Restore", run: () => setCancelled(s, false) }, edit, remove];
     if (s.entry_id) {
       const e = entryById.get(s.entry_id);
-      return [...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
+      return [...done, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
     }
     const moves: Item[] = meeting
       ? []
@@ -194,6 +199,7 @@
         ];
     return [
       { label: "✓ Log time", run: () => openLog(t, s, m.day) },
+      ...done,
       ...moves,
       { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
       edit,
@@ -439,16 +445,12 @@
                class:cancelled={s.is_cancelled}
                class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}
                role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
-            <div class="duty-row">
-              <input type="checkbox" checked={t.is_done} title={t.is_done ? "Done — untick to reopen" : "Mark the to-do done"}
-                     aria-label={`${t.title} done`} onchange={(ev) => setDone(t, (ev.target as HTMLInputElement).checked)} />
-              <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
-                      onclick={(ev) => openMenu(ev, s, d)}>
-                <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
-                {#if label(t)}<span class="sub">{label(t)}</span>{/if}
-                {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{/if}
-              </button>
-            </div>
+            <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
+                    onclick={(ev) => openMenu(ev, s, d)}>
+              <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
+              {#if label(t)}<span class="sub">{label(t)}</span>{/if}
+              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if t.is_done}<span class="ok">done</span>{/if}
+            </button>
           </div>
         {/each}
 
@@ -660,8 +662,6 @@
     cursor: pointer;
   }
   .card:hover { box-shadow: 0 0 0 1px var(--rule); }
-  .duty-row { display: flex; align-items: flex-start; gap: 0.3rem; }
-  .duty-row input { width: auto; margin: 0.12rem 0 0; flex: none; }
   .menu-backdrop { position: fixed; inset: 0; z-index: 50; }
   .menu {
     position: fixed;
