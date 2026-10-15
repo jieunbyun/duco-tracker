@@ -282,6 +282,7 @@
         ];
     return [
       { label: "✓ Log time", run: () => openLog(t, s, m.day) },
+      ...(meeting ? [] : [{ label: "Plan across days…", run: () => openSpread(t) }]),
       ...done,
       ...moves,
       { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
@@ -317,7 +318,9 @@
   type Panel =
     | { kind: "todo"; todo: Todo | null; day?: string; as?: "task" | "meeting"; place?: boolean }
     | { kind: "log"; todo: Todo; slot: Slot | null; day: string }
-    | { kind: "entry"; entry: TimeEntry | null; day: string };
+    | { kind: "entry"; entry: TimeEntry | null; day: string }
+    | { kind: "spread"; todo: Todo }
+    | { kind: "email" };
   let panel = $state<Panel | null>(null);
   let markDone = $state(false);
   let cvOpen = $state(false); // the CV form inside an entry's dialog
@@ -446,6 +449,107 @@
     }
     panel = null;
     await load();
+  }
+
+  // ---- plan a to-do across several days ------------------------------------------------
+  // Tick the days and give the total; the hours are split evenly over them.
+  // A day already logged stays ticked (its time is part of the total).
+  let spreadPick = $state<Record<string, boolean>>({});
+  let spreadHours = $state<number | null>(null);
+
+  function openSpread(t: Todo) {
+    const live = slotsOf(t).filter((x) => !x.is_cancelled && x.planned_on >= start && x.planned_on <= end);
+    spreadPick = Object.fromEntries(days.map((d) => [d, live.some((x) => x.planned_on === d)]));
+    const planned = live.reduce((sum, x) => sum + (x.planned_hours ?? 0), 0);
+    spreadHours = t.est_hours ?? (planned || null);
+    panel = { kind: "spread", todo: t };
+  }
+  const spreadDays = $derived(days.filter((d) => spreadPick[d]));
+  const perDay = $derived(spreadHours && spreadDays.length ? Math.round((spreadHours / spreadDays.length) * 100) / 100 : null);
+
+  async function saveSpread(t: Todo) {
+    const before = slotsOf(t).filter((x) => x.planned_on >= start && x.planned_on <= end).map(snapSlot);
+    const estBefore = t.est_hours;
+    const created: string[] = [];
+    const removed: Slot[] = [];
+    try {
+      for (const d of days) {
+        const here = before.filter((x) => x.planned_on === d && !x.is_cancelled);
+        if (spreadPick[d]) {
+          if (here.length) {
+            for (const x of here) await saveSlot(x.id, { planned_hours: perDay });
+          } else {
+            created.push(await saveSlot(null, { todo_id: t.id, planned_on: d, planned_hours: perDay }));
+          }
+        } else {
+          for (const x of here.filter((x) => !x.entry_id)) {
+            await deleteSlot(x.id);
+            removed.push(x);
+          }
+        }
+      }
+      if (spreadHours !== estBefore) await saveTodo(t.id, { est_hours: spreadHours });
+      remember(`Planned ${q(t)} over ${spreadDays.length} ${spreadDays.length === 1 ? "day" : "days"}`, async () => {
+        for (const id of created) await deleteSlot(id);
+        for (const x of removed) await reinsertSlot(x);
+        for (const x of before.filter((b) => !removed.some((r) => r.id === b.id))) {
+          await saveSlot(x.id, { planned_hours: x.planned_hours });
+        }
+        await saveTodo(t.id, { est_hours: estBefore });
+      });
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    panel = null;
+    await load();
+  }
+
+  // ---- email checks: one to-do per weekday ------------------------------------------------
+  const EMAIL_TITLE = "Email check";
+  const weekdays = $derived(days.filter((d) => { const w = parse(d).getDay(); return w >= 1 && w <= 5; }));
+  let emailPick = $state<Record<string, boolean>>({});
+  let emailHours = $state(1.5);
+  let emailCategory = $state("");
+
+  function hasEmailCheck(d: string): boolean {
+    return weekSlots.some((x) => x.planned_on === d && !x.is_cancelled &&
+      todoById.get(x.todo_id)?.title.trim().toLowerCase() === EMAIL_TITLE.toLowerCase());
+  }
+  function openEmail() {
+    emailPick = Object.fromEntries(weekdays.map((d) => [d, !hasEmailCheck(d)]));
+    emailHours = 1.5;
+    emailCategory = tax?.categories.find((c) => c.code === "ADM_MAIL")?.id
+      ?? tax?.categories.find((c) => c.kind === "email")?.id ?? "";
+    panel = { kind: "email" };
+  }
+  async function createEmailChecks() {
+    const picked = weekdays.filter((d) => emailPick[d]);
+    const added: string[] = [];
+    try {
+      for (const d of picked) {
+        const id = await saveTodo(null, {
+          kind: "task", title: EMAIL_TITLE, due_on: d, category_id: emailCategory || null,
+          est_hours: emailHours, must_this_week: false,
+        });
+        added.push(id);
+        await saveSlot(null, { todo_id: id, planned_on: d, planned_hours: null });
+      }
+      if (added.length) {
+        remember(`Added ${added.length} email ${added.length === 1 ? "check" : "checks"}`,
+          async () => { for (const id of added) await deleteTodo(id); });
+      }
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    panel = null;
+    await load();
+  }
+
+  /** Hours planned for this card: its own share, or the to-do's estimate when it has just one day. */
+  function cardHours(s: Slot, t: Todo): number | null {
+    if (s.planned_hours !== null) return s.planned_hours;
+    const live = slotsOf(t).filter((x) => !x.is_cancelled);
+    return live.length === 1 ? t.est_hours : null;
   }
 
   // ---- show logged entries on the days ------------------------------------------------
@@ -581,6 +685,7 @@
         {#each duties as s (s.id)}
           {@const t = todoById.get(s.todo_id)!}
           {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
+          {@const h = cardHours(s, t)}
           <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done}
                class:cancelled={s.is_cancelled}
                class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}
@@ -588,7 +693,7 @@
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
-              {#if label(t)}<span class="sub">{label(t)}</span>{/if}
+              {#if label(t) || h}<span class="sub">{label(t)}{label(t) && h ? " · " : ""}{h ? fmtHours(h) : ""}</span>{/if}
               {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if t.is_done}<span class="ok">done</span>{/if}
             </button>
           </div>
@@ -610,6 +715,9 @@
         </div>
       </div>
     {/each}
+  </div>
+  <div class="below-days">
+    <button onclick={openEmail}>✉ Create email checks (Mon–Fri)</button>
   </div>
 
   <!-- ================= to-do list ================= -->
@@ -652,6 +760,7 @@
                     <option value="">Plan on…</option>
                     {#each days as d (d)}<option value={d}>{dayName(d)} {dayNum(d)}</option>{/each}
                   </select>
+                  <button class="mini" onclick={() => openSpread(t)}>Plan across days…</button>
                   <button class="mini" onclick={() => openLog(t, null, isCurrent ? today() : start)}>✓ Log</button>
                   <button class="mini" title={t.must_this_week ? "Make flexible" : "Make a must-do"} onclick={() => setMust(t)}>{t.must_this_week ? "→ flexible" : "→ must"}</button>
                 {/if}
@@ -747,6 +856,69 @@
       <TodoForm todo={panel.todo} slots={panel.todo ? slotsOf(panel.todo) : []} {tax} {projects}
                 weekStart={start} day={panel.day} placeOnDay={panel.place} kind={panel.as}
                 onsaved={closed} oncancel={() => (panel = null)} />
+    {:else if panel.kind === "spread"}
+      {@const t = panel.todo}
+      <h2>Plan “{t.title}” across days</h2>
+      <div class="pick">
+        <div class="pick-days">
+          {#each days as d (d)}
+            {@const lockedIn = slotsOf(t).some((x) => x.planned_on === d && !!x.entry_id)}
+            <label class:locked={lockedIn} title={lockedIn ? "Already logged — stays planned" : ""}>
+              <input type="checkbox" bind:checked={spreadPick[d]} disabled={lockedIn} />
+              {dayName(d)} {dayNum(d)}
+            </label>
+          {/each}
+        </div>
+        <label class="pick-hours">Total hours <input type="number" min="0" step="0.5" bind:value={spreadHours} /></label>
+        <p class="muted small">
+          {#if !spreadDays.length}Tick at least one day.
+          {:else if perDay}{fmtHours(spreadHours ?? 0)} over {spreadDays.length} {spreadDays.length === 1 ? "day" : "days"} = <strong>{fmtHours(perDay)}</strong> a day.
+          {:else}No hours given: the days are planned without hours.{/if}
+          Unticking a day takes it off the calendar.
+        </p>
+        <div class="pick-actions">
+          <button class="primary" disabled={!spreadDays.length} onclick={() => saveSpread(t)}>Save plan</button>
+          <button onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </div>
+    {:else if panel.kind === "email"}
+      <h2>Create email checks</h2>
+      <div class="pick">
+        <p class="muted small">One “{EMAIL_TITLE}” to-do on each ticked day. Edit any day's afterwards from its card.</p>
+        <div class="pick-days">
+          {#each weekdays as d (d)}
+            {@const exists = hasEmailCheck(d)}
+            <label class:locked={exists} title={exists ? "Already has an email check" : ""}>
+              <input type="checkbox" bind:checked={emailPick[d]} disabled={exists} />
+              {dayName(d)} {dayNum(d)}{exists ? " (already)" : ""}
+            </label>
+          {/each}
+        </div>
+        <div class="pick-row">
+          <label class="pick-hours">Hours each day <input type="number" min="0" step="0.25" bind:value={emailHours} /></label>
+          {#if tax}
+            <label class="pick-hours">Category
+              <select bind:value={emailCategory}>
+                <option value="">— none —</option>
+                {#each tax.areas as a (a.id)}
+                  <optgroup label={a.label}>
+                    {#each tax.categories.filter((c) => c.area_id === a.id) as c (c.id)}<option value={c.id}>{c.label}</option>{/each}
+                  </optgroup>
+                {/each}
+              </select>
+            </label>
+          {/if}
+        </div>
+        <div class="pick-actions">
+          {#if weekdays.some((d) => emailPick[d])}
+            {@const n = weekdays.filter((d) => emailPick[d]).length}
+            <button class="primary" onclick={createEmailChecks}>Create {n} email {n === 1 ? "check" : "checks"}</button>
+          {:else}
+            <button class="primary" disabled>Nothing to create</button>
+          {/if}
+          <button onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </div>
     {:else if panel.kind === "entry"}
       {@const p = panel}
       <h2>{p.entry ? "Edit entry" : "Log time"}</h2>
@@ -798,6 +970,19 @@
   .dnum { font-size: 1.1rem; }
   .day.past .dname { color: var(--ink-soft); }
 
+  .below-days { display: flex; gap: 0.5rem; margin-top: 0.6rem; font-family: var(--font-ui); }
+  .below-days button { font-size: 0.82rem; }
+  .pick { display: grid; gap: 0.8rem; font-family: var(--font-ui); }
+  .pick-days { display: flex; flex-wrap: wrap; gap: 0.4rem; }
+  .pick-days label {
+    display: inline-flex; align-items: center; gap: 0.35rem;
+    border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.35rem 0.6rem; font-size: 0.88rem; cursor: pointer;
+  }
+  .pick-days label.locked { opacity: 0.6; cursor: default; }
+  .pick-days input { width: auto; }
+  .pick-row { display: flex; flex-wrap: wrap; gap: 1rem; }
+  .pick-hours { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); max-width: 16rem; }
+  .pick-actions { display: flex; gap: 0.5rem; }
   .card-body {
     display: grid;
     gap: 0.1rem;

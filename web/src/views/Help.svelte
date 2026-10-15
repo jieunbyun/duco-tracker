@@ -36,6 +36,11 @@
       Click or right-click a meeting or duty on the calendar for its actions: log time, move it a day, cancel it
       (it stays on its day, struck through and restorable, as a record of what was planned), edit it, or take it off
       the calendar (for a meeting, delete it). For a duty, the menu also marks the to-do done or reopens it.
+      <em>Plan across days…</em> (on a duty's menu, or in the to-do list) lets you tick several days and give the
+      total hours, which are split evenly over them; each card then shows its share.
+      <em>✉ Create email checks</em>, under the calendar, adds a 1.5-hour “Email check” to-do on each weekday;
+      each day is its own to-do, so any one can be edited, moved or cancelled. Every change on this page can be
+      undone: use the bar that appears at the bottom, <em>↶ Undo</em>, or Ctrl+Z.
     </dd>
 
     <dt>Planning</dt>
