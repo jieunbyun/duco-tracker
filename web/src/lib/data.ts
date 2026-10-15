@@ -3,7 +3,13 @@ import { supabase } from "./supabase";
 export type Category = { id: string; area_id: string; code: string; label: string; kind: string; sort_order: number };
 export type Target = { area_id: string; effective_from: string; weekly_hours: number; email_weekly_hours: number };
 export type Area = { id: string; code: string; label: string; sort_order: number };
-export type Taxonomy = { areas: Area[]; categories: Category[]; targets: Target[]; weeksPerYear: number };
+export type Taxonomy = {
+  areas: Area[];
+  categories: Category[];
+  targets: Target[];
+  weeksPerYear: number;
+  horizonMonths: number;
+};
 
 export type EntryHours = {
   id: string;
@@ -37,7 +43,7 @@ export async function loadTaxonomy(): Promise<Taxonomy> {
     supabase.from("area").select("id,code,label,sort_order").eq("is_active", true).order("sort_order"),
     supabase.from("category").select("id,area_id,code,label,kind,sort_order").eq("is_active", true).order("sort_order"),
     supabase.from("area_target").select("area_id,effective_from,weekly_hours,email_weekly_hours"),
-    supabase.from("user_setting").select("weeks_per_year").maybeSingle(),
+    supabase.from("user_setting").select("weeks_per_year,horizon_months").maybeSingle(),
   ]);
   for (const r of [a, c, t, s]) if (r.error) throw new Error(r.error.message);
   return {
@@ -47,6 +53,7 @@ export async function loadTaxonomy(): Promise<Taxonomy> {
       ...x, weekly_hours: Number(x.weekly_hours), email_weekly_hours: Number(x.email_weekly_hours),
     })),
     weeksPerYear: Number(s.data?.weeks_per_year ?? 52),
+    horizonMonths: Number(s.data?.horizon_months ?? 12),
   };
 }
 
@@ -57,6 +64,92 @@ export async function loadEntryHours(from: string, to: string): Promise<EntryHou
       .select("id,entry_date,hours,is_core,area_id,category_id,category_kind,project_id,project_name,milestone_id,milestone_title")
       .gte("entry_date", from)
       .lte("entry_date", to)
+      .order("started_at")
+      .order("id")
+      .range(a, b),
+  );
+  return rows.map((r) => ({ ...r, hours: Number(r.hours) }));
+}
+
+// ---- projects and milestones ---------------------------------------------
+export const PROJECT_STATUSES = ["planned", "active", "paused", "done", "dropped"] as const;
+export const MILESTONE_STATUSES = ["planned", "active", "done", "dropped"] as const;
+
+export type Milestone = {
+  id: string;
+  project_id: string;
+  title: string;
+  status: string;
+  start_on: string | null;
+  due_on: string | null;
+  planned_hours: number | null;
+  hard_deadline: boolean;
+  sort_order: number;
+  notes: string | null;
+};
+
+export type Project = {
+  id: string;
+  category_id: string;
+  name: string;
+  status: string;
+  start_on: string | null;
+  end_on: string | null;
+  planned_hours: number | null;
+  is_important: boolean;
+  notes: string | null;
+  milestone: Milestone[];
+};
+
+const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
+
+export async function loadProjects(): Promise<Project[]> {
+  const { data, error } = await supabase
+    .from("project")
+    .select("id,category_id,name,status,start_on,end_on,planned_hours,is_important,notes," +
+            "milestone(id,project_id,title,status,start_on,due_on,planned_hours,hard_deadline,sort_order,notes)")
+    .order("name");
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as unknown as Project[]).map((p) => ({
+    ...p,
+    planned_hours: num(p.planned_hours),
+    milestone: p.milestone
+      .map((m) => ({ ...m, planned_hours: num(m.planned_hours) }))
+      .sort((a, b) => a.sort_order - b.sort_order || (a.due_on ?? "9").localeCompare(b.due_on ?? "9")),
+  }));
+}
+
+export type ProjectFields = Omit<Project, "id" | "milestone">;
+export type MilestoneFields = Omit<Milestone, "id">;
+
+async function check<T>(q: PromiseLike<{ error: { message: string } | null; data?: T }>): Promise<T | undefined> {
+  const { error, data } = await q;
+  if (error) throw new Error(error.message);
+  return data;
+}
+
+export async function saveProject(id: string | null, fields: ProjectFields): Promise<void> {
+  await check(id ? supabase.from("project").update(fields).eq("id", id)
+                 : supabase.from("project").insert(fields));
+}
+export async function deleteProject(id: string): Promise<void> {
+  await check(supabase.from("project").delete().eq("id", id));
+}
+export async function saveMilestone(id: string | null, fields: MilestoneFields): Promise<void> {
+  await check(id ? supabase.from("milestone").update(fields).eq("id", id)
+                 : supabase.from("milestone").insert(fields));
+}
+export async function deleteMilestone(id: string): Promise<void> {
+  await check(supabase.from("milestone").delete().eq("id", id));
+}
+
+/** Every logged hour, thinly: enough for all-time project totals and recent pace. */
+export type HourRow = Pick<EntryHours, "entry_date" | "hours" | "area_id" | "category_kind" | "project_id" | "milestone_id">;
+export async function loadAllHours(): Promise<HourRow[]> {
+  const rows = await fetchAll<HourRow>((a, b) =>
+    supabase
+      .from("entry_hours")
+      .select("entry_date,hours,area_id,category_kind,project_id,milestone_id")
       .order("started_at")
       .order("id")
       .range(a, b),

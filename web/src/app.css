@@ -101,3 +101,21 @@ button:disabled { opacity: 0.55; cursor: default; }
 
 .muted { color: var(--ink-soft); }
 .error { color: var(--danger); }
+
+/* Status chips: text first, never colour alone; kept clear of chart hues. */
+.chip {
+  display: inline-block;
+  margin-left: 0.45rem;
+  padding: 0 0.45rem;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--ink-soft);
+  vertical-align: 0.1em;
+}
+.chip.status-active { border-color: var(--accent); color: var(--accent); }
+.chip.status-planned { border-style: dashed; }
+.chip.status-done { background: var(--panel); }
+.chip.status-dropped { text-decoration: line-through; }

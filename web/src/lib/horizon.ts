@@ -1,0 +1,99 @@
+// The planning horizon: how much of the next N months is already spoken for.
+//
+//   capacity   area target (time + email) × weeks_per_year, pro rata to the horizon
+//   routine    time in non-project categories (meetings, supervision, email, misc),
+//              projected at the pace of the last PACE_DAYS days
+//   committed  for each live project in a project-kind category, its remaining
+//              planned hours (planned − logged), spread evenly from today (or its
+//              start) to its end date; only the share inside the horizon counts
+//   free       capacity − routine − committed (negative means over-committed)
+import type { Area, HourRow, Project, Taxonomy } from "./data";
+import { targetOn } from "./data";
+import { addDays, daysIn, today } from "./dates";
+import type { Range } from "./dates";
+
+export const PLANNABLE_KINDS = new Set(["project", "mixed"]);
+export const LIVE_STATUSES = new Set(["planned", "active", "paused"]);
+export const PACE_DAYS = 56;
+
+export function horizonRange(months: number, from = today()): Range {
+  const [y, m, d] = from.split("-").map(Number);
+  const end = new Date(y, m - 1 + months, d);
+  const iso = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
+  return { from, to: addDays(iso, -1) };
+}
+
+export type ProjectLoad = {
+  actual: number;
+  remaining: number;     // planned − actual, never below 0
+  inHorizon: number;     // the part of `remaining` that falls inside the horizon
+  perWeek: number | null; // pace needed to finish by the end date
+  flag: "no-plan" | "no-end" | "overdue" | "over-budget" | null;
+};
+
+export function projectLoad(p: Project, actual: number, horizon: Range): ProjectLoad {
+  const base = { actual, remaining: 0, inHorizon: 0, perWeek: null };
+  if (!LIVE_STATUSES.has(p.status)) return { ...base, flag: null };
+  if (p.planned_hours === null) return { ...base, flag: "no-plan" };
+
+  const remaining = Math.max(0, p.planned_hours - actual);
+  const over = actual > p.planned_hours ? "over-budget" : null;
+  const t = horizon.from;
+  const from = p.start_on && p.start_on > t ? p.start_on : t;
+
+  if (!p.end_on) return { ...base, remaining, inHorizon: remaining, flag: over ?? "no-end" };
+  if (p.end_on < t) return { ...base, remaining, inHorizon: remaining, flag: remaining > 0 ? "overdue" : over };
+
+  const windowDays = daysIn({ from, to: p.end_on });
+  const overlapTo = p.end_on < horizon.to ? p.end_on : horizon.to;
+  const overlapDays = overlapTo >= from ? daysIn({ from, to: overlapTo }) : 0;
+  return {
+    actual,
+    remaining,
+    inHorizon: (remaining * overlapDays) / windowDays,
+    perWeek: remaining > 0 ? remaining / (windowDays / 7) : null,
+    flag: over,
+  };
+}
+
+export type AreaHorizon = {
+  area: Area;
+  capacity: number;
+  routine: number;
+  committed: number;
+  free: number;
+  freePerWeek: number; // free hours per working week left in the horizon
+};
+
+export function areaHorizons(
+  tax: Taxonomy,
+  hours: HourRow[],
+  projects: Project[],
+  loads: Map<string, ProjectLoad>,
+  horizon: Range,
+): AreaHorizon[] {
+  const days = daysIn(horizon);
+  const workingWeeks = (days / 365) * tax.weeksPerYear;
+  const paceFrom = addDays(horizon.from, -PACE_DAYS);
+  const cats = new Map(tax.categories.map((c) => [c.id, c]));
+
+  return tax.areas.map((area) => {
+    const t = targetOn(tax.targets, area.id, horizon.from);
+    const capacity = t ? (t.weekly_hours + t.email_weekly_hours) * workingWeeks : 0;
+
+    const recent = hours.filter((h) =>
+      h.area_id === area.id && !PLANNABLE_KINDS.has(h.category_kind) &&
+      h.entry_date >= paceFrom && h.entry_date < horizon.from);
+    const routine = (recent.reduce((s, h) => s + h.hours, 0) / PACE_DAYS) * days;
+
+    const committed = projects
+      .filter((p) => {
+        const c = cats.get(p.category_id);
+        return c?.area_id === area.id && PLANNABLE_KINDS.has(c.kind);
+      })
+      .reduce((s, p) => s + (loads.get(p.id)?.inHorizon ?? 0), 0);
+
+    const free = capacity - routine - committed;
+    return { area, capacity, routine, committed, free, freePerWeek: workingWeeks ? free / workingWeeks : 0 };
+  });
+}
