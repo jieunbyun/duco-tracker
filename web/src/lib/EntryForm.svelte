@@ -20,7 +20,8 @@
     tax: Taxonomy;
     projects: Project[];
     defaults: Defaults;
-    onsaved: (fields: TimeEntryFields, id: string) => void;
+    /** what happened: a new entry, a change, a copy to another date, or a deletion */
+    onsaved: (fields: TimeEntryFields, id: string, action: "created" | "updated" | "copied" | "deleted") => void;
     submitLabel?: string;
     oncancel?: () => void;
   };
@@ -148,7 +149,7 @@
       const f = await fields(date);
       if (typeof f === "string") return void (error = f);
       const id = await saveEntry(e0?.id ?? null, f);
-      onsaved(f, id);
+      onsaved(f, id, e0 ? "updated" : "created");
     });
   }
 
@@ -158,7 +159,7 @@
       const f = await fields(copyTo);
       if (typeof f === "string") return void (error = f);
       const id = await saveEntry(null, f);
-      onsaved(f, id);
+      onsaved(f, id, "copied");
     });
   }
 
@@ -166,7 +167,7 @@
     if (!e0 || !confirm("Delete this entry?")) return;
     run(async () => {
       await deleteEntry(e0.id);
-      onsaved({ ...e0 }, e0.id);
+      onsaved({ ...e0 }, e0.id, "deleted");
     });
   }
 </script>

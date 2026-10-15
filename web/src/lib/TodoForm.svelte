@@ -14,7 +14,8 @@
     day?: string; // preset day for a new item
     placeOnDay?: boolean; // a new task is also planned onto `day`
     kind?: "task" | "meeting";
-    onsaved: () => void;
+    /** what happened, and the ids of any to-dos created (for undo) */
+    onsaved: (info: { action: "created" | "updated" | "deleted" | "cancelled" | "restored"; ids?: string[] }) => void;
     oncancel: () => void;
   };
   let { todo, slots, tax, projects, weekStart, day, placeOnDay, kind: kind0, onsaved, oncancel }: Props = $props();
@@ -73,6 +74,7 @@
     if (kind === "meeting" && !(start && end && end > start)) return (error = "The meeting must end after it starts.");
     busy = true;
     error = "";
+    const created: string[] = [];
     try {
       const base: Partial<TodoFields> = {
         kind,
@@ -85,6 +87,7 @@
       };
       if (kind === "task") {
         const id = await saveTodo(t0?.id ?? null, { ...base, due_on, est_hours: est ?? null, must_this_week: must });
+        created.push(id);
         if (!t0 && init.placeOnDay && init.day) {
           await saveSlot(null, { todo_id: id, planned_on: init.day, planned_hours: null });
         }
@@ -99,11 +102,12 @@
           for (let i = 0; i < Math.max(1, repeat); i++) {
             const d = addDays(date, 7 * i);
             const id = await saveTodo(null, { ...base, due_on: d, est_hours: len, must_this_week: true });
+            created.push(id);
             await saveSlot(null, { todo_id: id, planned_on: d, ...times });
           }
         }
       }
-      onsaved();
+      onsaved(t0 ? { action: "updated" } : { action: "created", ids: created });
     } catch (err) {
       error = (err as Error).message;
     } finally {
@@ -116,7 +120,7 @@
     busy = true;
     try {
       await deleteTodo(t0.id);
-      onsaved();
+      onsaved({ action: "deleted" });
     } catch (err) {
       error = (err as Error).message;
       busy = false;
@@ -128,7 +132,7 @@
     busy = true;
     try {
       await saveTodo(t0.id, { is_cancelled: !t0.is_cancelled });
-      onsaved();
+      onsaved({ action: t0.is_cancelled ? "restored" : "cancelled" });
     } catch (err) {
       error = (err as Error).message;
       busy = false;

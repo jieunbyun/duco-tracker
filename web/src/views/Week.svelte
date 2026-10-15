@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
+    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry,
   } from "../lib/data";
   import type { Taxonomy, Project, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
   import { addDays, today, weekStart, parse, fmtDay } from "../lib/dates";
@@ -68,6 +69,49 @@
     }
   }
 
+  // ---- undo ----------------------------------------------------------------------
+  // Each change made here records how to reverse it. Undo walks back through
+  // them, most recent first; the bar at the bottom offers the latest one.
+  type Step = { label: string; undo: () => Promise<unknown> };
+  let history = $state<Step[]>([]);
+  let toast = $state<{ text: string; canUndo: boolean } | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+
+  function showToast(text: string, canUndo: boolean) {
+    toast = { text, canUndo };
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toast = null), 8000);
+  }
+  function remember(label: string, undo: () => Promise<unknown>) {
+    history = [...history.slice(-29), { label, undo }];
+    showToast(label, true);
+  }
+  async function undoLast() {
+    const step = history[history.length - 1];
+    if (!step) return;
+    history = history.slice(0, -1);
+    try {
+      await step.undo();
+      showToast(`Undone: ${step.label}`, false);
+    } catch (e) {
+      error = `Could not undo “${step.label}”: ${(e as Error).message}`;
+    }
+    await load();
+  }
+  /** Run a change; on success, remember how to undo it. */
+  async function change(label: string, run: () => Promise<unknown>, undo: () => Promise<unknown>) {
+    try {
+      await run();
+      remember(label, undo);
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    await load();
+  }
+  const q = (t: { title: string }) => `“${t.title}”`;
+  const snapTodo = (t: Todo): Todo => ({ ...$state.snapshot(t) }) as Todo;
+  const snapSlot = (s: Slot): Slot => ({ ...$state.snapshot(s) }) as Slot;
+
   // ---- lookups -------------------------------------------------------------------
   const todoById = $derived(new Map(todos.map((t) => [t.id, t])));
   const catById = $derived(new Map((tax?.categories ?? []).map((c) => [c.id, c])));
@@ -128,23 +172,58 @@
   });
 
   // ---- actions ------------------------------------------------------------------------
-  const placeOn = (t: Todo, day: string) => act(() => saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null }));
-  const move = (s: Slot, by: number) => act(() => saveSlot(s.id, { planned_on: addDays(s.planned_on, by) }));
+  function placeOn(t: Todo, day: string) {
+    let id = "";
+    return change(`Planned ${q(t)} on ${dayName(day)} ${dayNum(day)}`,
+      async () => (id = await saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null })),
+      () => deleteSlot(id));
+  }
+  function move(s: Slot, by: number) {
+    const t = todoById.get(s.todo_id)!;
+    const to = addDays(s.planned_on, by);
+    return change(`Moved ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
+      () => saveSlot(s.id, { planned_on: to }),
+      () => saveSlot(s.id, { planned_on: s.planned_on }));
+  }
   function unplan(s: Slot) {
     const t = todoById.get(s.todo_id);
-    if (t?.kind === "meeting") {
+    if (!t) return;
+    if (t.kind === "meeting") {
       if (!confirm(`Delete the meeting “${t.title}”?${s.entry_id ? " Its logged time stays." : ""} (Use Edit to change its time.)`)) return;
-      return act(() => deleteTodo(t.id));
+      const todo = snapTodo(t);
+      const own = slotsOf(t).map(snapSlot);
+      return change(`Deleted the meeting ${q(t)}`, () => deleteTodo(t.id), () => reinsertTodo(todo, own));
     }
     if (s.entry_id && !confirm("This day was logged. Remove it from the plan? The logged time stays.")) return;
-    return act(() => deleteSlot(s.id));
+    const slot = snapSlot(s);
+    return change(`Took ${q(t)} off ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`,
+      () => deleteSlot(s.id), () => reinsertSlot(slot));
   }
   // Cancelling keeps the card on its day, struck through, so the week still
   // shows what was planned; it can be restored. ✕ takes it off altogether.
-  const setCancelled = (s: Slot, cancelled: boolean) => act(() => saveSlot(s.id, { is_cancelled: cancelled }));
-  const setDone = (t: Todo, done: boolean) => act(() => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null } as Partial<Todo>));
-  const setMust = (t: Todo) => act(() => saveTodo(t.id, { must_this_week: !t.must_this_week }));
-  const restore = (t: Todo) => act(() => saveTodo(t.id, { is_cancelled: false }));
+  function setCancelled(s: Slot, cancelled: boolean) {
+    const t = todoById.get(s.todo_id)!;
+    return change(`${cancelled ? "Cancelled" : "Restored"} ${q(t)} on ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`,
+      () => saveSlot(s.id, { is_cancelled: cancelled }),
+      () => saveSlot(s.id, { is_cancelled: !cancelled }));
+  }
+  function setDone(t: Todo, done: boolean) {
+    const before = { is_done: t.is_done, done_at: t.done_at };
+    return change(done ? `Marked ${q(t)} done` : `Reopened ${q(t)}`,
+      () => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null }),
+      () => saveTodo(t.id, before));
+  }
+  function setMust(t: Todo) {
+    const was = t.must_this_week;
+    return change(`Made ${q(t)} ${was ? "flexible" : "a must-do"}`,
+      () => saveTodo(t.id, { must_this_week: !was }),
+      () => saveTodo(t.id, { must_this_week: was }));
+  }
+  function restore(t: Todo) {
+    return change(`Restored ${q(t)}`,
+      () => saveTodo(t.id, { is_cancelled: false }),
+      () => saveTodo(t.id, { is_cancelled: true }));
+  }
 
   // ---- card menu: click or right-click a card ------------------------------------------
   // The cards stay quiet (title, tick, status); their actions live in one menu.
@@ -209,6 +288,16 @@
       edit,
       remove,
     ];
+  }
+
+  // Ctrl/Cmd+Z undoes, unless you are typing or a form is open.
+  function keys(ev: KeyboardEvent) {
+    if (menu) return menuKeys(ev);
+    if (!(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.key.toLowerCase() !== "z" || panel) return;
+    const el = document.activeElement as HTMLElement | null;
+    if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+    ev.preventDefault();
+    undoLast();
   }
 
   function focusFirst(node: HTMLElement) {
@@ -293,19 +382,39 @@
     return { date: day, start: s, end: e, categoryId };
   }
 
-  async function entrySaved(f: TimeEntryFields) {
+  async function entrySaved(p: Extract<Panel, { kind: "entry" }>, f: TimeEntryFields, id: string,
+                            action: "created" | "updated" | "copied" | "deleted") {
     try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
+    const old = p.entry ? ({ ...$state.snapshot(p.entry) } as TimeEntry) : null;
+    const when = `${dayName(f.started_at.slice(0, 10))} ${dayNum(f.started_at.slice(0, 10))}`;
+    if (action === "created") remember(`Logged ${label(f) || "time"} on ${when}`, () => deleteEntry(id));
+    else if (action === "copied") remember(`Copied the entry to ${when}`, () => deleteEntry(id));
+    else if (action === "deleted" && old) remember(`Deleted the entry on ${when}`, () => reinsertEntry(old));
+    else if (action === "updated" && old) {
+      const { id: _id, minutes: _m, ...fields } = old;
+      remember(`Changed the entry on ${when}`, () => saveEntry(old.id, fields));
+    }
     panel = null;
     await load();
   }
 
   async function logged(p: Extract<Panel, { kind: "log" }>, f: TimeEntryFields, entryId: string) {
+    const slotBefore = p.slot ? snapSlot(p.slot) : null;
+    const doneBefore = { is_done: p.todo.is_done, done_at: p.todo.done_at };
+    const markedDone = markDone && !p.todo.is_done;
+    let newSlot = "";
     try {
       const day = f.started_at.slice(0, 10);
       if (p.slot) await saveSlot(p.slot.id, { entry_id: entryId, planned_on: day });
-      else await saveSlot(null, { todo_id: p.todo.id, planned_on: day, entry_id: entryId });
-      if (markDone) await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() } as Partial<Todo>);
+      else newSlot = await saveSlot(null, { todo_id: p.todo.id, planned_on: day, entry_id: entryId });
+      if (markedDone) await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() });
       try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
+      remember(`Logged ${q(p.todo)}`, async () => {
+        if (slotBefore) await saveSlot(slotBefore.id, { entry_id: null, planned_on: slotBefore.planned_on });
+        else if (newSlot) await deleteSlot(newSlot);
+        await deleteEntry(entryId);
+        if (markedDone) await saveTodo(p.todo.id, doneBefore);
+      });
     } catch (e) {
       error = (e as Error).message;
     }
@@ -313,7 +422,28 @@
     await load();
   }
 
-  async function closed() {
+  async function closed(info: { action: "created" | "updated" | "deleted" | "cancelled" | "restored"; ids?: string[] }) {
+    const p = panel;
+    const t = p && p.kind === "todo" && p.todo ? snapTodo(p.todo) : null;
+    const own = t ? slots.filter((s) => s.todo_id === t.id).map(snapSlot) : [];
+    if (info.action === "created" && info.ids?.length) {
+      const ids = info.ids;
+      remember(ids.length > 1 ? `Added ${ids.length} meetings` : "Added a to-do",
+        async () => { for (const id of ids) await deleteTodo(id); });
+    } else if (t && info.action === "deleted") {
+      remember(`Deleted ${q(t)}`, () => reinsertTodo(t, own));
+    } else if (t && (info.action === "cancelled" || info.action === "restored")) {
+      remember(`${info.action === "cancelled" ? "Cancelled" : "Restored"} ${q(t)}`,
+        () => saveTodo(t.id, { is_cancelled: t.is_cancelled }));
+    } else if (t && info.action === "updated") {
+      const { id: _id, ...fields } = t;
+      remember(`Edited ${q(t)}`, async () => {
+        await saveTodo(t.id, fields);
+        for (const s of own) {
+          await saveSlot(s.id, { planned_on: s.planned_on, start_time: s.start_time, end_time: s.end_time, planned_hours: s.planned_hours });
+        }
+      });
+    }
     panel = null;
     await load();
   }
@@ -363,6 +493,7 @@
     const picked = candidates.filter((c) => c.pick);
     if (!picked.length) return;
     importing = true;
+    const added: string[] = [];
     try {
       for (const m of picked) {
         const [sh, sm] = m.start.split(":").map(Number);
@@ -372,9 +503,12 @@
           kind: "meeting", title: m.title, due_on: m.date, category_id: importCategory || null,
           est_hours: len, must_this_week: true, note: m.location || null,
         });
+        added.push(id);
         await saveSlot(null, { todo_id: id, planned_on: m.date, start_time: m.start, end_time: m.end, planned_hours: len });
       }
       importNote = `Added ${picked.length} ${picked.length === 1 ? "meeting" : "meetings"}.`;
+      remember(`Imported ${added.length} ${added.length === 1 ? "meeting" : "meetings"}`,
+        async () => { for (const id of added) await deleteTodo(id); });
       candidates = [];
       await load();
     } catch (e) {
@@ -414,6 +548,8 @@
     <button class="primary" onclick={() => openEntry(null, isCurrent ? today() : start)}>+ Log</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "task" })}>+ To-do</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: isCurrent ? today() : start })}>+ Meeting</button>
+    <button onclick={undoLast} disabled={!history.length}
+            title={history.length ? `Undo: ${history[history.length - 1].label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
     <label class="toggle"><input type="checkbox" bind:checked={showLogged} /> Show logged time</label>
   </div>
 
@@ -583,7 +719,15 @@
   </details>
 </section>
 
-<svelte:window onkeydown={menuKeys} onresize={closeMenu} onscroll={closeMenu} />
+<svelte:window onkeydown={keys} onresize={closeMenu} onscroll={closeMenu} />
+
+{#if toast}
+  <div class="toast" role="status">
+    <span>{toast.text}</span>
+    {#if toast.canUndo}<button onclick={undoLast}>Undo</button>{/if}
+    <button class="x" aria-label="Dismiss" onclick={() => (toast = null)}>✕</button>
+  </div>
+{/if}
 
 {#if menu}
   {@const m = menu}
@@ -608,7 +752,7 @@
       <h2>{p.entry ? "Edit entry" : "Log time"}</h2>
       {#key p}
         <EntryForm entry={p.entry} {tax} {projects} defaults={entryDefaults(p.day)}
-                   onsaved={(f) => entrySaved(f)} oncancel={() => (panel = null)} />
+                   onsaved={(f, id, action) => entrySaved(p, f, id, action)} oncancel={() => (panel = null)} />
       {/key}
       {#if p.entry}
         {@const e = p.entry}
@@ -669,6 +813,27 @@
   }
   .card:hover { box-shadow: 0 0 0 1px var(--rule); }
   .menu-backdrop { position: fixed; inset: 0; z-index: 50; }
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 1.2rem;
+    transform: translateX(-50%);
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    max-width: calc(100vw - 32px);
+    padding: 0.55rem 0.6rem 0.55rem 1rem;
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+    font-family: var(--font-ui);
+    font-size: 0.88rem;
+  }
+  .toast span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toast button { background: none; border: 1px solid var(--paper); color: var(--paper); padding: 0.2rem 0.7rem; font-size: 0.82rem; }
+  .toast button.x { border: none; padding: 0.2rem 0.4rem; opacity: 0.8; }
   .menu {
     position: fixed;
     z-index: 51;

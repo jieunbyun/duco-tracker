@@ -236,6 +236,7 @@ export type Todo = {
   is_core: boolean;
   must_this_week: boolean;
   is_done: boolean;
+  done_at: string | null;
   is_cancelled: boolean;
   sort_order: number;
   note: string | null;
@@ -255,7 +256,7 @@ export type Slot = {
 };
 export type SlotFields = Omit<Slot, "id">;
 
-const TODO_COLS = "id,kind,title,due_on,category_id,project_id,milestone_id,est_hours,is_core,must_this_week,is_done,is_cancelled,sort_order,note";
+const TODO_COLS = "id,kind,title,due_on,category_id,project_id,milestone_id,est_hours,is_core,must_this_week,is_done,done_at,is_cancelled,sort_order,note";
 const SLOT_COLS = "id,todo_id,planned_on,start_time,end_time,planned_hours,entry_id,is_cancelled,sort_order";
 
 const asTodo = (t: Todo): Todo => ({ ...t, est_hours: num(t.est_hours) });
@@ -317,6 +318,22 @@ export async function saveSlot(id: string | null, fields: Partial<SlotFields>): 
 }
 export async function deleteSlot(id: string): Promise<void> {
   await check(supabase.from("todo_slot").delete().eq("id", id));
+}
+
+/**
+ * Put deleted rows back with their original ids (for undo), so anything that
+ * pointed at them still does. Time entries drop their computed minutes.
+ */
+export async function reinsertTodo(todo: Todo, slots: Slot[]): Promise<void> {
+  await check(supabase.from("todo").insert(todo));
+  if (slots.length) await check(supabase.from("todo_slot").insert(slots));
+}
+export async function reinsertSlot(slot: Slot): Promise<void> {
+  await check(supabase.from("todo_slot").insert(slot));
+}
+export async function reinsertEntry(entry: TimeEntry): Promise<void> {
+  const { minutes: _computed, ...row } = entry;
+  await check(supabase.from("time_entry").insert(row));
 }
 
 /** Time entries that started within [from, to] (whole days). */
