@@ -12,13 +12,14 @@
     projects: Project[];
     weekStart: string;
     day?: string; // preset day for a new item
+    placeOnDay?: boolean; // a new task is also planned onto `day`
     kind?: "task" | "meeting";
     onsaved: () => void;
     oncancel: () => void;
   };
-  let { todo, slots, tax, projects, weekStart, day, kind: kind0, onsaved, oncancel }: Props = $props();
+  let { todo, slots, tax, projects, weekStart, day, placeOnDay, kind: kind0, onsaved, oncancel }: Props = $props();
 
-  const init = untrack(() => ({ todo, slots, weekStart, day, kind0 }));
+  const init = untrack(() => ({ todo, slots, weekStart, day, kind0, placeOnDay }));
   const t0 = init.todo;
   const meetingSlot = t0?.kind === "meeting" ? init.slots[0] ?? null : null;
 
@@ -83,7 +84,10 @@
         note: note.trim() || null,
       };
       if (kind === "task") {
-        await saveTodo(t0?.id ?? null, { ...base, due_on, est_hours: est ?? null, must_this_week: must });
+        const id = await saveTodo(t0?.id ?? null, { ...base, due_on, est_hours: est ?? null, must_this_week: must });
+        if (!t0 && init.placeOnDay && init.day) {
+          await saveSlot(null, { todo_id: id, planned_on: init.day, planned_hours: null });
+        }
       } else {
         const len = hours(start, end);
         const times = { start_time: start, end_time: end, planned_hours: len };

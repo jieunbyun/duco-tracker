@@ -138,7 +138,7 @@
 
   // ---- dialogs: edit/add a to-do, log a sitting ----------------------------------------
   type Panel =
-    | { kind: "todo"; todo: Todo | null; day?: string; as?: "task" | "meeting" }
+    | { kind: "todo"; todo: Todo | null; day?: string; as?: "task" | "meeting"; place?: boolean }
     | { kind: "log"; todo: Todo; slot: Slot | null; day: string };
   let panel = $state<Panel | null>(null);
   let markDone = $state(false);
@@ -356,7 +356,10 @@
           {/each}
         {/if}
 
-        <button class="add-day" onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: d })}>+ meeting</button>
+        <div class="add-day">
+          <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: d })}>+ meeting</button>
+          <button onclick={() => (panel = { kind: "todo", todo: null, as: "task", day: d, place: true })}>+ to-do</button>
+        </div>
       </div>
     {/each}
   </div>
@@ -471,7 +474,8 @@
     {#if panel.kind === "todo"}
       <h2>{panel.todo ? `Edit ${panel.todo.kind === "meeting" ? "meeting" : "to-do"}` : panel.as === "meeting" ? "New meeting" : "New to-do"}</h2>
       <TodoForm todo={panel.todo} slots={panel.todo ? slotsOf(panel.todo) : []} {tax} {projects}
-                weekStart={start} day={panel.day} kind={panel.as} onsaved={closed} oncancel={() => (panel = null)} />
+                weekStart={start} day={panel.day} placeOnDay={panel.place} kind={panel.as}
+                onsaved={closed} oncancel={() => (panel = null)} />
     {:else}
       {@const p = panel}
       <h2>Log “{p.todo.title}”</h2>
@@ -513,7 +517,8 @@
   .mini { font-size: 0.72rem; padding: 0.1rem 0.4rem; }
   .ok { font-size: 0.72rem; color: var(--accent); margin-right: auto; }
   .entry { font-size: 0.72rem; color: var(--ink-soft); padding-left: 0.2rem; }
-  .add-day { margin-top: auto; font-size: 0.72rem; padding: 0.15rem; background: none; border: 1px dashed var(--rule); color: var(--ink-soft); }
+  .add-day { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; }
+  .add-day button { font-size: 0.72rem; padding: 0.15rem; background: none; border: 1px dashed var(--rule); color: var(--ink-soft); }
 
   .week h2 { margin-top: 2rem; }
   .group { margin-top: 1rem; font-family: var(--font-ui); }
