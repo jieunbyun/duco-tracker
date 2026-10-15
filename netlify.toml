@@ -1,0 +1,10 @@
+# Netlify builds the browser app in web/ and serves the static output.
+# Set VITE_SUPABASE_URL and VITE_SUPABASE_KEY under Site configuration >
+# Environment variables (the same values as web/.env.local).
+[build]
+  base    = "web"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "24"

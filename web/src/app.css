@@ -1,0 +1,103 @@
+/* Ink on paper with one blueprint-slate accent — carried over from the
+   Streamlit theme. Colours are tokens so dark mode only redefines them. */
+:root {
+  --paper: #fbfaf7;
+  --panel: #f0eee8;
+  --rule: #dcd8ce;
+  --ink: #1f2933;
+  --ink-soft: #5b6672;
+  --accent: #3a5a78;
+  --accent-ink: #ffffff;
+  --danger: #a33a2c;
+  --radius: 6px;
+  /* Area colours, in area sort order (validated: categorical, adjacent pairs).
+     Slots 3-4 are under 3:1 on paper, so every mark carries a text label. */
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --track: #ebe8e0;
+  --font: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+  --font-ui: system-ui, -apple-system, "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #15191e;
+    --panel: #1e242b;
+    --rule: #323a44;
+    --ink: #e6e2d9;
+    --ink-soft: #9aa3ad;
+    --accent: #8fb0cf;
+    --accent-ink: #10151a;
+    --danger: #e08a7c;
+    --series-1: #3987e5;
+    --series-2: #d95926;
+    --series-3: #199e70;
+    --series-4: #c98500;
+    --track: #262d35;
+    color-scheme: dark;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+h1, h2, h3 { font-weight: 600; line-height: 1.25; margin: 0 0 0.5rem; }
+h1 { font-size: 1.6rem; }
+h2 { font-size: 1.25rem; }
+
+a { color: var(--accent); }
+
+button, input, select, textarea {
+  font: inherit;
+  font-family: var(--font-ui);
+  font-size: 0.95rem;
+  color: var(--ink);
+}
+
+input, select, textarea {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.6rem;
+  width: 100%;
+}
+input:focus, select:focus, textarea:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+button {
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  border-radius: var(--radius);
+  padding: 0.45rem 0.9rem;
+  cursor: pointer;
+}
+button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
+}
+button:disabled { opacity: 0.55; cursor: default; }
+
+.eyebrow {
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.muted { color: var(--ink-soft); }
+.error { color: var(--danger); }
