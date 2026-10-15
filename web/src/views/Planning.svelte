@@ -6,6 +6,7 @@
   import { fmtDay, today } from "../lib/dates";
   import ProjectEditor from "../lib/ProjectEditor.svelte";
   import Milestones from "../lib/Milestones.svelte";
+  import Settings from "../lib/Settings.svelte";
 
   let tax = $state<Taxonomy | null>(null);
   let projects = $state<Project[]>([]);
@@ -62,6 +63,11 @@
 
   // ---- project list ---------------------------------------------------------
   let showFinished = $state(false);
+  let editingSettings = $state(false);
+  async function settingsSaved() {
+    editingSettings = false;
+    await load();
+  }
   let expanded = $state<string | null>(null);
   let addingTo = $state<string | null>(null); // category id
 
@@ -242,7 +248,13 @@
     {/each}
 
     <!-- ================= allocation ================= -->
-    <h2>Allocation</h2>
+    <div class="projects-head">
+      <h2>Allocation</h2>
+      {#if !editingSettings}<button class="add" onclick={() => (editingSettings = true)}>Edit targets and settings</button>{/if}
+    </div>
+    {#if editingSettings}
+      <div class="p-body new"><Settings {tax} onsaved={settingsSaved} oncancel={() => (editingSettings = false)} /></div>
+    {/if}
     <div class="table-wrap">
       <table>
         <thead>

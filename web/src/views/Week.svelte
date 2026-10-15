@@ -1,5 +1,569 @@
-<section>
+<script lang="ts">
+  import {
+    loadTaxonomy, loadProjects, loadWeekPlan, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
+  } from "../lib/data";
+  import type { Taxonomy, Project, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
+  import { addDays, today, weekStart, parse, fmtDay } from "../lib/dates";
+  import { meetingsInRange } from "../lib/ics";
+  import type { Meeting } from "../lib/ics";
+  import EntryForm from "../lib/EntryForm.svelte";
+  import TodoForm from "../lib/TodoForm.svelte";
+
+  const SHOW_LOGGED = "week.showLogged";
+  const LAST_CATEGORY = "log.category";
+
+  // ---- week ------------------------------------------------------------------
+  let offset = $state(0);
+  const start = $derived(addDays(weekStart(today()), 7 * offset));
+  const end = $derived(addDays(start, 6));
+  const days = $derived(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
+  const isCurrent = $derived(offset === 0);
+
+  // ---- data --------------------------------------------------------------------
+  let tax = $state<Taxonomy | null>(null);
+  let projects = $state<Project[]>([]);
+  let todos = $state<Todo[]>([]);
+  let slots = $state<Slot[]>([]);
+  let carried = $state<Set<string>>(new Set());
+  let entries = $state<TimeEntry[]>([]);
+  let loading = $state(true);
+  let error = $state("");
+  let request = 0;
+
+  loadTaxonomy().then((t) => (tax = t)).catch((e) => (error = e.message));
+  loadProjects().then((p) => (projects = p)).catch((e) => (error = e.message));
+
+  async function load() {
+    const id = ++request;
+    const [from, to, carry] = [start, end, isCurrent];
+    loading = true;
+    try {
+      const [plan, logged] = await Promise.all([loadWeekPlan(from, to, carry), loadEntriesBetween(from, to)]);
+      if (id !== request) return;
+      todos = plan.todos;
+      slots = plan.slots;
+      carried = plan.carried;
+      entries = logged;
+      error = "";
+    } catch (e) {
+      if (id === request) error = (e as Error).message;
+    } finally {
+      if (id === request) loading = false;
+    }
+  }
+  $effect(() => {
+    void start;
+    load();
+  });
+
+  async function act(fn: () => Promise<unknown>) {
+    try {
+      await fn();
+      await load();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+
+  // ---- lookups -------------------------------------------------------------------
+  const todoById = $derived(new Map(todos.map((t) => [t.id, t])));
+  const catById = $derived(new Map((tax?.categories ?? []).map((c) => [c.id, c])));
+  const projById = $derived(new Map(projects.map((p) => [p.id, p])));
+  const entryById = $derived(new Map(entries.map((e) => [e.id, e])));
+
+  function label(x: { category_id: string | null; project_id: string | null }): string {
+    if (x.project_id) return projById.get(x.project_id)?.name ?? "";
+    return x.category_id ? catById.get(x.category_id)?.label ?? "" : "";
+  }
+
+  const weekSlots = $derived(
+    slots.filter((s) => s.planned_on >= start && s.planned_on <= end && !todoById.get(s.todo_id)?.is_cancelled),
+  );
+  function slotsOn(day: string, kind: "task" | "meeting"): Slot[] {
+    return weekSlots
+      .filter((s) => s.planned_on === day && todoById.get(s.todo_id)?.kind === kind)
+      .sort((a, b) =>
+        (a.start_time ?? "").localeCompare(b.start_time ?? "") || (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id.localeCompare(b.id));
+  }
+  function entriesOn(day: string): TimeEntry[] {
+    return entries.filter((e) => e.started_at.slice(0, 10) === day);
+  }
+  const loggedOn = (day: string) => entriesOn(day).reduce((s, e) => s + e.minutes / 60, 0);
+
+  // ---- the week's to-do list ------------------------------------------------------
+  const tasks = $derived(todos.filter((t) => t.kind === "task"));
+  const live = $derived(tasks.filter((t) => !t.is_cancelled));
+  const groups = $derived([
+    { key: "must", title: "Must do this week", rows: live.filter((t) => !t.is_done && t.must_this_week && !carried.has(t.id)) },
+    { key: "flex", title: "Flexible", rows: live.filter((t) => !t.is_done && !t.must_this_week && !carried.has(t.id)) },
+    { key: "carried", title: "Carried over from earlier weeks", rows: live.filter((t) => !t.is_done && carried.has(t.id)) },
+    { key: "done", title: "Done", rows: live.filter((t) => t.is_done) },
+  ].map((g) => ({ ...g, rows: [...g.rows].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)) })));
+  const cancelled = $derived(tasks.filter((t) => t.is_cancelled));
+
+  function slotsOf(t: Todo): Slot[] {
+    return slots.filter((s) => s.todo_id === t.id).sort((a, b) => a.planned_on.localeCompare(b.planned_on));
+  }
+  function loggedFor(t: Todo): number {
+    return slotsOf(t).reduce((s, x) => s + ((x.entry_id && entryById.get(x.entry_id)?.minutes) || 0) / 60, 0);
+  }
+
+  // ---- summary ----------------------------------------------------------------------
+  const summary = $derived.by(() => {
+    const meetingH = weekSlots
+      .filter((s) => todoById.get(s.todo_id)?.kind === "meeting")
+      .reduce((s, x) => s + (x.planned_hours ?? 0), 0);
+    const open = live.filter((t) => !t.is_done);
+    const dutyH = open.reduce((s, t) => s + (t.est_hours ?? 0), 0);
+    const must = live.filter((t) => t.must_this_week && !carried.has(t.id));
+    const logged = entries.reduce((s, e) => s + e.minutes / 60, 0);
+    return { meetingH, dutyH, logged, mustDone: must.filter((t) => t.is_done).length, mustAll: must.length };
+  });
+
+  // ---- actions ------------------------------------------------------------------------
+  const placeOn = (t: Todo, day: string) => act(() => saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null }));
+  const move = (s: Slot, by: number) => act(() => saveSlot(s.id, { planned_on: addDays(s.planned_on, by) }));
+  function unplan(s: Slot) {
+    const t = todoById.get(s.todo_id);
+    if (t?.kind === "meeting") {
+      if (!confirm(`Delete the meeting “${t.title}”?${s.entry_id ? " Its logged time stays." : ""} (Use Edit to change its time.)`)) return;
+      return act(() => deleteTodo(t.id));
+    }
+    if (s.entry_id && !confirm("This day was logged. Remove it from the plan? The logged time stays.")) return;
+    return act(() => deleteSlot(s.id));
+  }
+  const setDone = (t: Todo, done: boolean) => act(() => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null } as Partial<Todo>));
+  const setMust = (t: Todo) => act(() => saveTodo(t.id, { must_this_week: !t.must_this_week }));
+  const restore = (t: Todo) => act(() => saveTodo(t.id, { is_cancelled: false }));
+
+  // ---- dialogs: edit/add a to-do, log a sitting ----------------------------------------
+  type Panel =
+    | { kind: "todo"; todo: Todo | null; day?: string; as?: "task" | "meeting" }
+    | { kind: "log"; todo: Todo; slot: Slot | null; day: string };
+  let panel = $state<Panel | null>(null);
+  let markDone = $state(false);
+  let dialog = $state<HTMLDialogElement | null>(null);
+
+  $effect(() => {
+    if (!dialog) return;
+    if (panel && !dialog.open) dialog.showModal();
+    if (!panel && dialog.open) dialog.close();
+  });
+
+  function openLog(t: Todo, slot: Slot | null, day: string) {
+    markDone = t.kind === "meeting" || slotsOf(t).filter((s) => !s.entry_id).length <= 1;
+    panel = { kind: "log", todo: t, slot, day };
+  }
+
+  function lastCategory(): string {
+    try { return localStorage.getItem(LAST_CATEGORY) ?? ""; } catch { return ""; }
+  }
+  const pad = (n: number) => String(n).padStart(2, "0");
+  function plusHours(hhmm: string, h: number): string {
+    const [a, b] = hhmm.split(":").map(Number);
+    const m = Math.min(a * 60 + b + Math.round(h * 60), 24 * 60);
+    return m >= 24 * 60 ? "00:00" : `${pad(Math.floor(m / 60))}:${pad(m % 60)}`;
+  }
+  function logDefaults(p: Extract<Panel, { kind: "log" }>) {
+    const t = p.todo;
+    const saved = lastCategory();
+    const categoryId = t.category_id ?? (catById.has(saved) ? saved : tax?.categories[0]?.id ?? "");
+    let s = p.slot?.start_time?.slice(0, 5);
+    let e = p.slot?.end_time?.slice(0, 5);
+    if (!s) {
+      const ends = entriesOn(p.day).map((x) => x.ended_at?.slice(11, 16)).filter((x): x is string => !!x).sort();
+      s = ends.length ? ends[ends.length - 1] : "09:00";
+      e = plusHours(s, p.slot?.planned_hours ?? t.est_hours ?? 1);
+    }
+    return {
+      date: p.day, start: s, end: e!, categoryId, projectId: t.project_id,
+      milestoneId: t.milestone_id, description: t.title, isCore: t.is_core,
+    };
+  }
+
+  async function logged(p: Extract<Panel, { kind: "log" }>, f: TimeEntryFields, entryId: string) {
+    try {
+      const day = f.started_at.slice(0, 10);
+      if (p.slot) await saveSlot(p.slot.id, { entry_id: entryId, planned_on: day });
+      else await saveSlot(null, { todo_id: p.todo.id, planned_on: day, entry_id: entryId });
+      if (markDone) await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() } as Partial<Todo>);
+      try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    panel = null;
+    await load();
+  }
+
+  async function closed() {
+    panel = null;
+    await load();
+  }
+
+  // ---- show logged entries on the days ------------------------------------------------
+  function savedShowLogged(): boolean {
+    try { return localStorage.getItem(SHOW_LOGGED) !== "0"; } catch { return true; }
+  }
+  let showLogged = $state(savedShowLogged());
+  $effect(() => {
+    try { localStorage.setItem(SHOW_LOGGED, showLogged ? "1" : "0"); } catch {}
+  });
+
+  // ---- import meeting invites (.ics) --------------------------------------------------
+  type Candidate = Meeting & { pick: boolean; dupe: boolean };
+  let candidates = $state<Candidate[]>([]);
+  let importCategory = $state("");
+  let importNote = $state("");
+  let importing = $state(false);
+
+  async function readFiles(event: Event) {
+    const files = [...((event.target as HTMLInputElement).files ?? [])];
+    const found: Meeting[] = [];
+    for (const f of files) found.push(...meetingsInRange(await f.text(), start, end));
+    // the same occurrence from two files counts once
+    const seen = new Set<string>();
+    const unique = found.filter((m) => {
+      const k = `${m.uid}|${m.date}|${m.start}`;
+      return seen.has(k) ? false : (seen.add(k), true);
+    });
+    const existing = new Set(
+      weekSlots
+        .filter((s) => todoById.get(s.todo_id)?.kind === "meeting")
+        .map((s) => `${todoById.get(s.todo_id)!.title.toLowerCase()}|${s.planned_on}|${s.start_time?.slice(0, 5)}`),
+    );
+    candidates = unique.map((m) => {
+      const dupe = existing.has(`${m.title.toLowerCase()}|${m.date}|${m.start}`);
+      return { ...m, dupe, pick: !dupe };
+    });
+    importNote = files.length && !unique.length ? "No timed meetings in this week in that file." : "";
+    if (!importCategory) {
+      importCategory = tax?.categories.find((c) => c.code === "RES_MEET")?.id ?? "";
+    }
+  }
+
+  async function importPicked() {
+    const picked = candidates.filter((c) => c.pick);
+    if (!picked.length) return;
+    importing = true;
+    try {
+      for (const m of picked) {
+        const [sh, sm] = m.start.split(":").map(Number);
+        const [eh, em] = m.end.split(":").map(Number);
+        const len = Math.round(((eh * 60 + em - sh * 60 - sm) / 60) * 100) / 100;
+        const id = await saveTodo(null, {
+          kind: "meeting", title: m.title, due_on: m.date, category_id: importCategory || null,
+          est_hours: len, must_this_week: true, note: m.location || null,
+        });
+        await saveSlot(null, { todo_id: id, planned_on: m.date, start_time: m.start, end_time: m.end, planned_hours: len });
+      }
+      importNote = `Added ${picked.length} ${picked.length === 1 ? "meeting" : "meetings"}.`;
+      candidates = [];
+      await load();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      importing = false;
+    }
+  }
+
+  const dayName = (d: string) => parse(d).toLocaleDateString("en-GB", { weekday: "short" });
+  const dayNum = (d: string) => parse(d).getDate();
+  const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");
+</script>
+
+<section class="week">
   <span class="eyebrow">Week</span>
-  <h1>Week</h1>
-  <p class="muted">Plan a chosen week: duties, meetings and to-dos on days. Coming next.</p>
+  <h1>Plan the week</h1>
+
+  <div class="nav">
+    <button onclick={() => (offset -= 1)} aria-label="Previous week">‹</button>
+    <strong>{fmtDay(start)} – {fmtDay(end)}</strong>
+    <button onclick={() => (offset += 1)} aria-label="Next week">›</button>
+    {#if !isCurrent}<button class="link" onclick={() => (offset = 0)}>This week</button>{/if}
+    {#if loading}<span class="muted small">loading…</span>{/if}
+  </div>
+
+  {#if error}<p class="error">{error}</p>{/if}
+
+  <p class="summary">
+    Meetings <strong>{fmtHours(summary.meetingH)}</strong> ·
+    open duties <strong>{fmtHours(summary.dutyH)}</strong> ·
+    logged <strong>{fmtHours(summary.logged)}</strong>
+    {#if summary.mustAll} · must-dos <strong>{summary.mustDone}/{summary.mustAll}</strong> done{/if}
+  </p>
+
+  <div class="toolbar">
+    <button class="primary" onclick={() => (panel = { kind: "todo", todo: null, as: "task" })}>+ To-do</button>
+    <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: isCurrent ? today() : start })}>+ Meeting</button>
+    <label class="toggle"><input type="checkbox" bind:checked={showLogged} /> Show logged time</label>
+  </div>
+
+  <!-- ================= days ================= -->
+  <div class="days">
+    {#each days as d (d)}
+      {@const meetings = slotsOn(d, "meeting")}
+      {@const duties = slotsOn(d, "task")}
+      <div class="day" class:today={d === today()} class:past={d < today()}>
+        <div class="day-head">
+          <span class="dname">{dayName(d)} <span class="dnum">{dayNum(d)}</span></span>
+          {#if loggedOn(d)}<span class="muted small">{fmtHours(loggedOn(d))} logged</span>{/if}
+        </div>
+
+        {#each meetings as s (s.id)}
+          {@const t = todoById.get(s.todo_id)!}
+          <div class="card meeting" class:logged={!!s.entry_id}>
+            <span class="time">{hhmm(s.start_time)}–{hhmm(s.end_time)}</span>
+            <span class="title">{t.is_core ? "🎯 " : ""}{t.title}</span>
+            {#if label(t)}<span class="sub">{label(t)}</span>{/if}
+            <span class="acts">
+              {#if s.entry_id}
+                <span class="ok">✓ logged</span>
+              {:else}
+                <button class="mini" title="Log this meeting" onclick={() => openLog(t, s, d)}>✓ Log</button>
+              {/if}
+              <button class="mini" title="Edit" onclick={() => (panel = { kind: "todo", todo: t })}>Edit</button>
+              <button class="mini" title="Remove" aria-label="Remove meeting" onclick={() => unplan(s)}>✕</button>
+            </span>
+          </div>
+        {/each}
+
+        {#each duties as s (s.id)}
+          {@const t = todoById.get(s.todo_id)!}
+          {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
+          <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done && !s.entry_id}
+               class:stale={!s.entry_id && !t.is_done && d < today()}>
+            <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
+            {#if label(t)}<span class="sub">{label(t)}</span>{/if}
+            <span class="acts">
+              {#if s.entry_id}
+                <span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>
+              {:else}
+                <button class="mini" title="Log time for this" onclick={() => openLog(t, s, d)}>✓ Log</button>
+                <button class="mini" title="Day before" aria-label="Move to the day before" onclick={() => move(s, -1)}>‹</button>
+                <button class="mini" title="Day after" aria-label="Move to the day after" onclick={() => move(s, 1)}>›</button>
+              {/if}
+              <button class="mini" title="Take off this day" aria-label="Remove from this day" onclick={() => unplan(s)}>✕</button>
+            </span>
+          </div>
+        {/each}
+
+        {#if showLogged}
+          {#each entriesOn(d) as e (e.id)}
+            <div class="entry">
+              <span class="time">{e.ended_at ? `${e.started_at.slice(11, 16)}–${e.ended_at.slice(11, 16)}` : `${e.manual_minutes} min`}</span>
+              {e.is_core ? "🎯 " : ""}{label(e)}
+            </div>
+          {/each}
+        {/if}
+
+        <button class="add-day" onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: d })}>+ meeting</button>
+      </div>
+    {/each}
+  </div>
+
+  <!-- ================= to-do list ================= -->
+  <h2>To-dos</h2>
+  {#if !tasks.length}
+    <p class="muted">No to-dos for this week yet.</p>
+  {/if}
+  {#each groups as g (g.key)}
+    {#if g.rows.length}
+      <div class="group" class:muted-group={g.key === "done"}>
+        <h3>{g.title} <span class="muted small">{g.rows.length}</span></h3>
+        <ul class="todos">
+          {#each g.rows as t (t.id)}
+            {@const ts = slotsOf(t)}
+            {@const lh = loggedFor(t)}
+            <li class="todo">
+              <input type="checkbox" checked={t.is_done} aria-label="Done" onchange={(ev) => setDone(t, (ev.target as HTMLInputElement).checked)} />
+              <div class="t-main">
+                <button class="t-title" onclick={() => (panel = { kind: "todo", todo: t })}>
+                  {t.is_core ? "🎯 " : ""}{t.title}
+                </button>
+                <span class="t-meta muted">
+                  {label(t)}{label(t) && (t.est_hours || lh) ? " · " : ""}
+                  {#if lh}{fmtHours(lh)}{t.est_hours ? ` of ${fmtHours(t.est_hours)}` : ""} logged{:else if t.est_hours}est. {fmtHours(t.est_hours)}{/if}
+                  {#if g.key === "carried"} · from week of {fmtDay(weekStart(t.due_on))}{/if}
+                </span>
+                {#if ts.length}
+                  <span class="t-days">
+                    {#each ts as s (s.id)}
+                      <span class="daychip" class:logged={!!s.entry_id}>{dayName(s.planned_on)} {dayNum(s.planned_on)}{s.entry_id ? " ✓" : ""}</span>
+                    {/each}
+                  </span>
+                {/if}
+              </div>
+              <div class="t-acts">
+                {#if !t.is_done}
+                  <select aria-label="Plan on a day" onchange={(ev) => { const el = ev.target as HTMLSelectElement; if (el.value) placeOn(t, el.value); el.value = ""; }}>
+                    <option value="">Plan on…</option>
+                    {#each days as d (d)}<option value={d}>{dayName(d)} {dayNum(d)}</option>{/each}
+                  </select>
+                  <button class="mini" onclick={() => openLog(t, null, isCurrent ? today() : start)}>✓ Log</button>
+                  <button class="mini" title={t.must_this_week ? "Make flexible" : "Make a must-do"} onclick={() => setMust(t)}>{t.must_this_week ? "→ flexible" : "→ must"}</button>
+                {/if}
+              </div>
+            </li>
+          {/each}
+        </ul>
+      </div>
+    {/if}
+  {/each}
+  {#if cancelled.length}
+    <details class="group">
+      <summary class="muted small">Cancelled ({cancelled.length})</summary>
+      <ul class="todos">
+        {#each cancelled as t (t.id)}
+          <li class="todo cancelled">
+            <span class="t-title-static">{t.title}</span>
+            <button class="mini" onclick={() => restore(t)}>Restore</button>
+          </li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
+
+  <!-- ================= invites ================= -->
+  <details class="import">
+    <summary><h2>Import meeting invites</h2></summary>
+    <p class="muted small">
+      Choose one or more <code>.ics</code> files — an invite attachment, or your calendar exported from Outlook.
+      Timed meetings in {fmtDay(start)} – {fmtDay(end)} are listed for you to pick; ones already on the plan are unticked.
+    </p>
+    <div class="import-row">
+      <input type="file" accept=".ics,text/calendar" multiple onchange={readFiles} />
+      {#if tax}
+        <label>Category
+          <select bind:value={importCategory}>
+            <option value="">— none —</option>
+            {#each tax.areas as a (a.id)}
+              <optgroup label={a.label}>
+                {#each tax.categories.filter((c) => c.area_id === a.id) as c (c.id)}<option value={c.id}>{c.label}</option>{/each}
+              </optgroup>
+            {/each}
+          </select>
+        </label>
+      {/if}
+    </div>
+    {#if candidates.length}
+      <ul class="candidates">
+        {#each candidates as c, i (c.uid + c.date + c.start + i)}
+          <li>
+            <label>
+              <input type="checkbox" bind:checked={c.pick} />
+              <span class="time">{dayName(c.date)} {dayNum(c.date)} · {c.start}–{c.end}</span>
+              {c.title}
+              {#if c.dupe}<span class="muted small">(already on the plan)</span>{/if}
+            </label>
+          </li>
+        {/each}
+      </ul>
+      <button class="primary" onclick={importPicked} disabled={importing || !candidates.some((c) => c.pick)}>
+        Add {candidates.filter((c) => c.pick).length} to the plan
+      </button>
+    {/if}
+    {#if importNote}<p class="muted small">{importNote}</p>{/if}
+  </details>
 </section>
+
+<dialog bind:this={dialog} onclose={() => (panel = null)}>
+  {#if panel && tax}
+    {#if panel.kind === "todo"}
+      <h2>{panel.todo ? `Edit ${panel.todo.kind === "meeting" ? "meeting" : "to-do"}` : panel.as === "meeting" ? "New meeting" : "New to-do"}</h2>
+      <TodoForm todo={panel.todo} slots={panel.todo ? slotsOf(panel.todo) : []} {tax} {projects}
+                weekStart={start} day={panel.day} kind={panel.as} onsaved={closed} oncancel={() => (panel = null)} />
+    {:else}
+      {@const p = panel}
+      <h2>Log “{p.todo.title}”</h2>
+      <EntryForm entry={null} {tax} {projects} defaults={logDefaults(p)} submitLabel="Log it"
+                 onsaved={(f, id) => logged(p, f, id)} oncancel={() => (panel = null)} />
+      <label class="mark-done"><input type="checkbox" bind:checked={markDone} /> Mark the {p.todo.kind === "meeting" ? "meeting" : "to-do"} done</label>
+    {/if}
+  {/if}
+</dialog>
+
+<style>
+  .small { font-size: 0.8rem; }
+  .nav { display: flex; align-items: center; gap: 0.6rem; font-family: var(--font-ui); margin: 0.6rem 0; flex-wrap: wrap; }
+  .nav button { padding: 0.3rem 0.7rem; }
+  .nav .link { background: none; border: none; color: var(--accent); text-decoration: underline; }
+  .summary { font-family: var(--font-ui); font-size: 0.9rem; color: var(--ink-soft); margin: 0 0 0.8rem; }
+  .summary strong { color: var(--ink); }
+  .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-family: var(--font-ui); }
+  .toggle { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: auto; font-size: 0.85rem; color: var(--ink-soft); }
+  .toggle input { width: auto; }
+
+  .days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.5rem; font-family: var(--font-ui); }
+  .day { background: var(--panel); border-radius: var(--radius); padding: 0.45rem; min-height: 9rem; display: flex; flex-direction: column; gap: 0.35rem; }
+  .day.today { outline: 2px solid var(--accent); }
+  .day-head { display: flex; justify-content: space-between; align-items: baseline; gap: 0.3rem; flex-wrap: wrap; }
+  .dname { font-weight: 600; font-size: 0.85rem; }
+  .dnum { font-size: 1.1rem; }
+  .day.past .dname { color: var(--ink-soft); }
+
+  .card { background: var(--paper); border-radius: 4px; padding: 0.35rem 0.45rem; font-size: 0.78rem; display: grid; gap: 0.1rem; border-left: 3px solid var(--accent); }
+  .card.duty { border-left-color: var(--ink-soft); }
+  .card.logged { opacity: 0.7; }
+  .card.done .title { text-decoration: line-through; }
+  .card.stale { border-left-color: var(--danger); }
+  .card .time, .entry .time { font-variant-numeric: tabular-nums; font-weight: 600; }
+  .card .title { font-weight: 500; overflow-wrap: anywhere; }
+  .card .sub { color: var(--ink-soft); font-size: 0.72rem; }
+  .acts { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.15rem; align-items: center; }
+  .mini { font-size: 0.72rem; padding: 0.1rem 0.4rem; }
+  .ok { font-size: 0.72rem; color: var(--accent); margin-right: auto; }
+  .entry { font-size: 0.72rem; color: var(--ink-soft); padding-left: 0.2rem; }
+  .add-day { margin-top: auto; font-size: 0.72rem; padding: 0.15rem; background: none; border: 1px dashed var(--rule); color: var(--ink-soft); }
+
+  .week h2 { margin-top: 2rem; }
+  .group { margin-top: 1rem; font-family: var(--font-ui); }
+  .group h3 { font-size: 0.9rem; margin-bottom: 0.3rem; }
+  .muted-group { opacity: 0.75; }
+  .todos { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .todo { display: grid; grid-template-columns: auto 1fr auto; gap: 0.7rem; align-items: start; padding: 0.45rem 0.3rem; border-radius: var(--radius); }
+  .todo:hover { background: var(--panel); }
+  .todo > input { width: auto; margin-top: 0.25rem; }
+  .t-main { display: grid; gap: 0.15rem; min-width: 0; }
+  .t-title { background: none; border: none; padding: 0; text-align: left; font-size: 0.92rem; color: var(--ink); }
+  .t-title:hover { text-decoration: underline; }
+  .t-meta { font-size: 0.78rem; }
+  .t-days { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+  .daychip { font-size: 0.7rem; border: 1px solid var(--rule); border-radius: 999px; padding: 0 0.4rem; }
+  .daychip.logged { border-color: var(--accent); color: var(--accent); }
+  .t-acts { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+  .t-acts select { width: auto; font-size: 0.78rem; padding: 0.15rem 0.3rem; }
+  .cancelled .t-title-static { text-decoration: line-through; color: var(--ink-soft); font-size: 0.88rem; }
+  .todo.cancelled { grid-template-columns: 1fr auto; }
+
+  .import { margin-top: 2rem; font-family: var(--font-ui); }
+  .import summary { cursor: pointer; }
+  .import summary h2 { display: inline; font-size: 1.1rem; }
+  .import-row { display: flex; flex-wrap: wrap; gap: 1rem; align-items: end; margin: 0.5rem 0; }
+  .import-row input[type="file"] { width: auto; border: none; padding: 0; }
+  .import-row label { display: grid; gap: 0.2rem; font-size: 0.8rem; color: var(--ink-soft); min-width: 14rem; }
+  .candidates { list-style: none; padding: 0; margin: 0.5rem 0; display: grid; gap: 0.2rem; font-size: 0.88rem; }
+  .candidates label { display: flex; gap: 0.5rem; align-items: baseline; }
+  .candidates input { width: auto; }
+  .candidates .time { font-variant-numeric: tabular-nums; color: var(--ink-soft); min-width: 9rem; }
+
+  dialog {
+    width: min(46rem, calc(100vw - 32px));
+    max-height: calc(100vh - 32px);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--paper);
+    color: var(--ink);
+    padding: 1.1rem 1.2rem;
+  }
+  dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+  dialog h2 { margin: 0 0 0.8rem; font-size: 1.1rem; }
+  .mark-done { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.8rem; font-family: var(--font-ui); font-size: 0.9rem; }
+  .mark-done input { width: auto; }
+
+  @media (max-width: 60rem) {
+    .days { grid-template-columns: 1fr; }
+    .day { min-height: 0; }
+    .todo { grid-template-columns: auto 1fr; }
+    .t-acts { grid-column: 2; justify-content: flex-start; }
+  }
+</style>

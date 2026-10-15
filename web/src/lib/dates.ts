@@ -25,10 +25,20 @@ export function today(): string {
   return iso(new Date());
 }
 
-/** Monday of the week containing s. */
+// First day of the week (0 = Sunday … 6 = Saturday), from user_setting.
+// Set once the settings load; Monday until then.
+let weekStartDay = 1;
+export function setWeekStartDay(day: number) {
+  if (Number.isInteger(day) && day >= 0 && day <= 6) weekStartDay = day;
+}
+export function getWeekStartDay(): number {
+  return weekStartDay;
+}
+
+/** First day of the week containing s. */
 export function weekStart(s: string): string {
   const d = parse(s);
-  return addDays(s, -((d.getDay() + 6) % 7));
+  return addDays(s, -((d.getDay() - weekStartDay + 7) % 7));
 }
 
 /** Inclusive day count. */

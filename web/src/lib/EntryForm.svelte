@@ -5,16 +5,26 @@
   import { addDays } from "./dates";
   import { LIVE_STATUSES } from "./horizon";
 
-  type Defaults = { date: string; start: string; end: string; categoryId: string; projectId?: string | null };
+  type Defaults = {
+    date: string;
+    start: string;
+    end: string;
+    categoryId: string;
+    projectId?: string | null;
+    milestoneId?: string | null;
+    description?: string;
+    isCore?: boolean;
+  };
   type Props = {
     entry: TimeEntry | null; // null = a new entry
     tax: Taxonomy;
     projects: Project[];
     defaults: Defaults;
-    onsaved: (fields: TimeEntryFields) => void;
+    onsaved: (fields: TimeEntryFields, id: string) => void;
+    submitLabel?: string;
     oncancel?: () => void;
   };
-  let { entry, tax, projects, defaults, onsaved, oncancel }: Props = $props();
+  let { entry, tax, projects, defaults, onsaved, oncancel, submitLabel }: Props = $props();
 
   const NEW = "__new__";
 
@@ -28,7 +38,7 @@
 
   let category_id = $state(e0?.category_id ?? init.defaults.categoryId);
   let projectPick = $state<string>(e0 ? e0.project_id ?? "" : init.defaults.projectId ?? "");
-  let milestonePick = $state<string>(e0?.milestone_id ?? "");
+  let milestonePick = $state<string>(e0 ? e0.milestone_id ?? "" : init.defaults.milestoneId ?? "");
   let newProject = $state("");
   let newMilestone = $state("");
   let date = $state(e0 ? e0.started_at.slice(0, 10) : init.defaults.date);
@@ -36,8 +46,8 @@
   let start = $state(e0 ? e0.started_at.slice(11, 16) : init.defaults.start);
   let end = $state(e0?.ended_at ? (endIsMidnight ? "00:00" : e0.ended_at.slice(11, 16)) : init.defaults.end);
   let minutes = $state<number | null>(e0?.manual_minutes ?? 30);
-  let description = $state(e0?.description ?? "");
-  let is_core = $state(e0?.is_core ?? false);
+  let description = $state(e0 ? e0.description ?? "" : init.defaults.description ?? "");
+  let is_core = $state(e0 ? e0.is_core : init.defaults.isCore ?? false);
   let busy = $state(false);
   let error = $state("");
   let copyTo = $state(e0 ? e0.started_at.slice(0, 10) : "");
@@ -137,8 +147,8 @@
     run(async () => {
       const f = await fields(date);
       if (typeof f === "string") return void (error = f);
-      await saveEntry(e0?.id ?? null, f);
-      onsaved(f);
+      const id = await saveEntry(e0?.id ?? null, f);
+      onsaved(f, id);
     });
   }
 
@@ -147,8 +157,8 @@
       if (!copyTo) return void (error = "Pick a date to copy to.");
       const f = await fields(copyTo);
       if (typeof f === "string") return void (error = f);
-      await saveEntry(null, f);
-      onsaved(f);
+      const id = await saveEntry(null, f);
+      onsaved(f, id);
     });
   }
 
@@ -156,7 +166,7 @@
     if (!e0 || !confirm("Delete this entry?")) return;
     run(async () => {
       await deleteEntry(e0.id);
-      onsaved({ ...e0 });
+      onsaved({ ...e0 }, e0.id);
     });
   }
 </script>
@@ -219,7 +229,7 @@
 
   {#if error}<p class="error wide">{error}</p>{/if}
   <div class="actions wide">
-    <button class="primary" type="submit" disabled={busy}>{e0 ? "Save changes" : "Log session"}</button>
+    <button class="primary" type="submit" disabled={busy}>{submitLabel ?? (e0 ? "Save changes" : "Log session")}</button>
     {#if oncancel}<button type="button" onclick={oncancel} disabled={busy}>Cancel</button>{/if}
     {#if e0}
       <span class="copy">

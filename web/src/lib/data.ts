@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { setWeekStartDay, addDays } from "./dates";
 
 export type Category = { id: string; area_id: string; code: string; label: string; kind: string; sort_order: number };
 export type Target = { area_id: string; effective_from: string; weekly_hours: number; email_weekly_hours: number };
@@ -9,6 +10,7 @@ export type Taxonomy = {
   targets: Target[];
   weeksPerYear: number;
   horizonMonths: number;
+  weekStartsOn: number;
 };
 
 export type EntryHours = {
@@ -38,14 +40,26 @@ async function fetchAll<T>(page: (from: number, to: number) => PromiseLike<{ dat
   }
 }
 
-export async function loadTaxonomy(): Promise<Taxonomy> {
+// Areas, categories, targets and settings change rarely: load them once and
+// share the result; pass refresh after changing any of them.
+let taxonomy: Promise<Taxonomy> | null = null;
+export function loadTaxonomy(refresh = false): Promise<Taxonomy> {
+  if (!taxonomy || refresh) {
+    taxonomy = fetchTaxonomy();
+    taxonomy.catch(() => (taxonomy = null));
+  }
+  return taxonomy;
+}
+
+async function fetchTaxonomy(): Promise<Taxonomy> {
   const [a, c, t, s] = await Promise.all([
     supabase.from("area").select("id,code,label,sort_order").eq("is_active", true).order("sort_order"),
     supabase.from("category").select("id,area_id,code,label,kind,sort_order").eq("is_active", true).order("sort_order"),
     supabase.from("area_target").select("area_id,effective_from,weekly_hours,email_weekly_hours"),
-    supabase.from("user_setting").select("weeks_per_year,horizon_months").maybeSingle(),
+    supabase.from("user_setting").select("weeks_per_year,horizon_months,week_starts_on").maybeSingle(),
   ]);
   for (const r of [a, c, t, s]) if (r.error) throw new Error(r.error.message);
+  setWeekStartDay(Number(s.data?.week_starts_on ?? 1));
   return {
     areas: a.data ?? [],
     categories: c.data ?? [],
@@ -54,6 +68,7 @@ export async function loadTaxonomy(): Promise<Taxonomy> {
     })),
     weeksPerYear: Number(s.data?.weeks_per_year ?? 52),
     horizonMonths: Number(s.data?.horizon_months ?? 12),
+    weekStartsOn: Number(s.data?.week_starts_on ?? 1),
   };
 }
 
@@ -203,6 +218,177 @@ export async function saveEntry(id: string | null, fields: TimeEntryFields): Pro
 }
 export async function deleteEntry(id: string): Promise<void> {
   await check(supabase.from("time_entry").delete().eq("id", id));
+}
+
+// ---- week planning: to-dos and their sittings ------------------------------
+// A to-do (task or meeting) belongs to a week by due_on; a sitting (todo_slot)
+// places it on a day, with clock times for a meeting and optional hours for a
+// task. A sitting that has been logged points at its time entry.
+export type Todo = {
+  id: string;
+  kind: "task" | "meeting";
+  title: string;
+  due_on: string;
+  category_id: string | null;
+  project_id: string | null;
+  milestone_id: string | null;
+  est_hours: number | null;
+  is_core: boolean;
+  must_this_week: boolean;
+  is_done: boolean;
+  is_cancelled: boolean;
+  sort_order: number;
+  note: string | null;
+};
+export type TodoFields = Omit<Todo, "id">;
+
+export type Slot = {
+  id: string;
+  todo_id: string;
+  planned_on: string;
+  start_time: string | null; // "HH:MM:SS"
+  end_time: string | null;
+  planned_hours: number | null;
+  entry_id: string | null;
+  is_cancelled: boolean;
+  sort_order: number | null;
+};
+export type SlotFields = Omit<Slot, "id">;
+
+const TODO_COLS = "id,kind,title,due_on,category_id,project_id,milestone_id,est_hours,is_core,must_this_week,is_done,is_cancelled,sort_order,note";
+const SLOT_COLS = "id,todo_id,planned_on,start_time,end_time,planned_hours,entry_id,is_cancelled,sort_order";
+
+const asTodo = (t: Todo): Todo => ({ ...t, est_hours: num(t.est_hours) });
+const asSlot = (x: Slot): Slot => ({ ...x, planned_hours: num(x.planned_hours) });
+
+export type WeekPlan = { todos: Todo[]; slots: Slot[]; carried: Set<string> };
+
+/**
+ * Everything planned for a week: to-dos due in it, to-dos with a sitting in
+ * it, and — for the current week — open tasks left over from earlier weeks.
+ */
+export async function loadWeekPlan(from: string, to: string, carryOver: boolean): Promise<WeekPlan> {
+  const [due, slots, old] = await Promise.all([
+    supabase.from("todo").select(TODO_COLS).gte("due_on", from).lte("due_on", to),
+    supabase.from("todo_slot").select(SLOT_COLS).gte("planned_on", from).lte("planned_on", to),
+    carryOver
+      ? supabase.from("todo").select(TODO_COLS).lt("due_on", from).eq("kind", "task")
+          .eq("is_done", false).eq("is_cancelled", false)
+      : Promise.resolve({ data: [] as Todo[], error: null }),
+  ]);
+  for (const r of [due, slots, old]) if (r.error) throw new Error(r.error.message);
+
+  const todos = new Map<string, Todo>();
+  for (const t of [...(due.data ?? []), ...(old.data ?? [])] as Todo[]) todos.set(t.id, asTodo(t));
+  const missing = [...new Set((slots.data as Slot[]).map((x) => x.todo_id))].filter((id) => !todos.has(id));
+  if (missing.length) {
+    const extra = await check<Todo[]>(supabase.from("todo").select(TODO_COLS).in("id", missing));
+    for (const t of extra ?? []) todos.set(t.id, asTodo(t));
+  }
+  // every sitting of these to-dos, so a card knows its siblings in other weeks
+  const allSlots = todos.size
+    ? (await check<Slot[]>(supabase.from("todo_slot").select(SLOT_COLS).in("todo_id", [...todos.keys()]))) ?? []
+    : [];
+  return {
+    todos: [...todos.values()],
+    slots: allSlots.map(asSlot),
+    carried: new Set((old.data as Todo[]).map((t) => t.id)),
+  };
+}
+
+export async function saveTodo(id: string | null, fields: Partial<TodoFields>): Promise<string> {
+  if (id) {
+    await check(supabase.from("todo").update(fields).eq("id", id));
+    return id;
+  }
+  const row = await check<{ id: string }>(supabase.from("todo").insert(fields).select("id").single());
+  return row!.id;
+}
+export async function deleteTodo(id: string): Promise<void> {
+  await check(supabase.from("todo").delete().eq("id", id));
+}
+export async function saveSlot(id: string | null, fields: Partial<SlotFields>): Promise<string> {
+  if (id) {
+    await check(supabase.from("todo_slot").update(fields).eq("id", id));
+    return id;
+  }
+  const row = await check<{ id: string }>(supabase.from("todo_slot").insert(fields).select("id").single());
+  return row!.id;
+}
+export async function deleteSlot(id: string): Promise<void> {
+  await check(supabase.from("todo_slot").delete().eq("id", id));
+}
+
+/** Time entries that started within [from, to] (whole days). */
+export async function loadEntriesBetween(from: string, to: string): Promise<TimeEntry[]> {
+  const rows = await fetchAll<TimeEntry>((a, b) =>
+    supabase
+      .from("time_entry")
+      .select(ENTRY_COLS)
+      .gte("started_at", `${from}T00:00:00+00:00`)
+      .lt("started_at", `${addDays(to, 1)}T00:00:00+00:00`)
+      .order("started_at")
+      .order("id")
+      .range(a, b),
+  );
+  return rows.map((e) => ({ ...e, minutes: Number(e.minutes) }));
+}
+
+// ---- CV ------------------------------------------------------------------------
+export type CvEntry = {
+  id: string;
+  entry_date: string;
+  cv_year: number | null;
+  cv_section: string;
+  cv_subsection: string | null;
+  title: string;
+  organisation: string | null;
+  location: string | null;
+  role: string | null;
+  description: string | null;
+  outcome: string | null;
+  metrics: string | null;
+  evidence_url: string | null;
+  student_level: string | null;
+  start_on: string | null;
+  end_on: string | null;
+  status: string;
+  source_type: string;
+  entry_id: string | null;
+  milestone_id: string | null;
+  project_id: string | null;
+};
+export type CvFields = Omit<CvEntry, "id">;
+
+export async function loadCv(): Promise<CvEntry[]> {
+  const rows = await check<CvEntry[]>(
+    supabase.from("cv_entry").select("*").order("entry_date", { ascending: false }),
+  );
+  return rows ?? [];
+}
+export async function saveCv(id: string | null, fields: Partial<CvFields>): Promise<string> {
+  const withYear = fields.entry_date ? { ...fields, cv_year: Number(fields.entry_date.slice(0, 4)) } : fields;
+  if (id) {
+    await check(supabase.from("cv_entry").update({ ...withYear, updated_at: new Date().toISOString() }).eq("id", id));
+    return id;
+  }
+  const row = await check<{ id: string }>(supabase.from("cv_entry").insert(withYear).select("id").single());
+  return row!.id;
+}
+export async function deleteCv(id: string): Promise<void> {
+  await check(supabase.from("cv_entry").delete().eq("id", id));
+}
+
+export type Settings = { weeks_per_year: number; horizon_months: number; week_starts_on: number };
+export async function saveSettings(fields: Settings): Promise<void> {
+  await check(supabase.from("user_setting").upsert(fields));
+  await loadTaxonomy(true);
+}
+
+/** New weekly targets from a date on; earlier periods keep their targets. */
+export async function saveTargets(rows: Omit<Target, never>[]): Promise<void> {
+  await check(supabase.from("area_target").upsert(rows, { onConflict: "area_id,effective_from" }));
+  await loadTaxonomy(true);
 }
 
 /** The target an area had on a given day: the latest effective_from not after it. */

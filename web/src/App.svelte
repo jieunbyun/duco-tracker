@@ -1,6 +1,7 @@
 <script lang="ts">
   import type { Session } from "@supabase/supabase-js";
   import { supabase } from "./lib/supabase";
+  import { loadTaxonomy } from "./lib/data";
   import Login from "./lib/Login.svelte";
   import Log from "./views/Log.svelte";
   import Week from "./views/Week.svelte";
@@ -41,6 +42,16 @@
     return () => data.subscription.unsubscribe();
   });
 
+  // Settings (week start, targets) load once after sign-in, before any view.
+  let settingsReady = $state(false);
+  let settingsError = $state("");
+  $effect(() => {
+    if (!session) return;
+    loadTaxonomy()
+      .then(() => (settingsReady = true))
+      .catch((e) => (settingsError = e.message));
+  });
+
   const View = $derived(views[route]);
 </script>
 
@@ -58,7 +69,13 @@
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
   </header>
   <main>
-    <View />
+    {#if settingsError}
+      <p class="error">{settingsError}</p>
+    {:else if !settingsReady}
+      <p class="muted">Loading…</p>
+    {:else}
+      <View />
+    {/if}
   </main>
 {/if}
 

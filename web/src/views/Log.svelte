@@ -3,6 +3,7 @@
   import type { Taxonomy, Project, TimeEntry, TimeEntryFields } from "../lib/data";
   import { today, weekStart, parse } from "../lib/dates";
   import EntryForm from "../lib/EntryForm.svelte";
+  import CvForm from "../lib/CvForm.svelte";
 
   const LAST_CATEGORY = "log.category";
 
@@ -16,6 +17,7 @@
   let editing = $state<string | null>(null);
   let formKey = $state(0); // bump to give the new-entry form fresh defaults
   let flash = $state("");
+  let cvFor = $state<string | null>(null); // entry id whose CV form is open
 
   async function refresh() {
     try {
@@ -125,8 +127,8 @@
       {#key formKey}
         <EntryForm entry={null} {tax} {projects} {defaults} onsaved={logged} />
       {/key}
-      {#if flash}<p class="flash" role="status">{flash}</p>{/if}
     </div>
+    {#if flash}<p class="flash" role="status">{flash}</p>{/if}
 
     <h2>Recent</h2>
     {#if !recent.length}
@@ -139,6 +141,18 @@
           {#if editing === e.id}
             <div class="card editing">
               <EntryForm entry={e} {tax} {projects} {defaults} onsaved={edited} oncancel={() => (editing = null)} />
+              {#if cvFor === e.id}
+                <div class="cv-add">
+                  <h3>CV achievement from this session</h3>
+                  <CvForm entry={null}
+                          preset={{ source_type: "entry", entry_id: e.id, project_id: e.project_id, milestone_id: e.milestone_id,
+                                    entry_date: e.started_at.slice(0, 10), title: e.description ?? placement(e).slice(2).join(" — ") }}
+                          onsaved={() => { cvFor = null; flash = "Added to CV."; setTimeout(() => (flash = ""), 2500); }}
+                          oncancel={() => (cvFor = null)} />
+                </div>
+              {:else}
+                <button class="cv-btn" onclick={() => (cvFor = e.id)}>Add as CV achievement…</button>
+              {/if}
             </div>
           {:else}
             {@const parts = placement(e)}
@@ -162,6 +176,9 @@
   .totals { font-family: var(--font-ui); font-size: 0.9rem; margin: 0 0 1rem; }
   .card { background: var(--panel); border-radius: var(--radius); padding: 1rem; }
   .card.editing { margin: 0.3rem 0 0.6rem; }
+  .cv-btn { margin-top: 0.8rem; font-size: 0.82rem; }
+  .cv-add { margin-top: 1rem; border-top: 1px solid var(--rule); padding-top: 0.8rem; }
+  .cv-add h3 { font-size: 0.92rem; font-family: var(--font-ui); }
   .flash { font-family: var(--font-ui); font-size: 0.85rem; margin: 0.6rem 0 0; color: var(--accent); }
   .log h2 { margin-top: 2rem; }
 
