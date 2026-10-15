@@ -32,8 +32,9 @@
       more days; mark them must-do or flexible. <em>✓ Log</em> on a card opens the log form already filled in and
       ties the logged time back to the plan. Open to-dos from earlier weeks are carried into the current week until
       done or cancelled. A red edge marks a planned day that has passed without being logged.
-      <em>Cancel</em> on a card keeps it on its day, struck through and restorable, as a record of what was
-      planned; <em>✕</em> takes it off the calendar altogether (for a meeting, deletes it).
+      Click or right-click a meeting or duty on the calendar for its actions: log time, move it a day, cancel it
+      (it stays on its day, struck through and restorable, as a record of what was planned), edit it, or take it off
+      the calendar (for a meeting, delete it). The tick box on a duty marks the to-do done.
     </dd>
 
     <dt>Planning</dt>

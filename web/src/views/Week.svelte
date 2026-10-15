@@ -142,6 +142,78 @@
   const setMust = (t: Todo) => act(() => saveTodo(t.id, { must_this_week: !t.must_this_week }));
   const restore = (t: Todo) => act(() => saveTodo(t.id, { is_cancelled: false }));
 
+  // ---- card menu: click or right-click a card ------------------------------------------
+  // The cards stay quiet (title, tick, status); their actions live in one menu.
+  type Menu = { slot: Slot; day: string; x: number; y: number };
+  type Item = { label: string; run: () => unknown; danger?: boolean };
+  let menu = $state<Menu | null>(null);
+  const MENU_W = 220;
+  const MENU_H = 250;
+
+  function openMenu(ev: MouseEvent, slot: Slot, day: string) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    let x: number;
+    let y: number;
+    if (ev.type === "contextmenu") {
+      x = ev.clientX;
+      y = ev.clientY;
+    } else {
+      const r = (ev.currentTarget as HTMLElement).getBoundingClientRect();
+      x = r.left;
+      y = r.bottom + 2;
+    }
+    menu = {
+      slot,
+      day,
+      x: Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8)),
+      y: Math.max(8, Math.min(y, window.innerHeight - MENU_H - 8)),
+    };
+  }
+  const closeMenu = () => (menu = null);
+
+  function menuItems(m: Menu): Item[] {
+    const s = m.slot;
+    const t = todoById.get(s.todo_id);
+    if (!t) return [];
+    const meeting = t.kind === "meeting";
+    const edit: Item = { label: meeting ? "Edit meeting" : "Edit to-do", run: () => (panel = { kind: "todo", todo: t }) };
+    const remove: Item = meeting
+      ? { label: "Delete meeting", run: () => unplan(s), danger: true }
+      : { label: "Take off the calendar", run: () => unplan(s), danger: true };
+    if (s.is_cancelled) return [{ label: "Restore", run: () => setCancelled(s, false) }, edit, remove];
+    if (s.entry_id) {
+      const e = entryById.get(s.entry_id);
+      return [...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
+    }
+    const moves: Item[] = meeting
+      ? []
+      : [
+          { label: "‹ Move to the day before", run: () => move(s, -1) },
+          { label: "Move to the day after ›", run: () => move(s, 1) },
+        ];
+    return [
+      { label: "✓ Log time", run: () => openLog(t, s, m.day) },
+      ...moves,
+      { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
+      edit,
+      remove,
+    ];
+  }
+
+  function focusFirst(node: HTMLElement) {
+    (node.querySelector("button") as HTMLButtonElement | null)?.focus();
+  }
+  function menuKeys(ev: KeyboardEvent) {
+    if (!menu) return;
+    if (ev.key === "Escape") return closeMenu();
+    if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
+    ev.preventDefault();
+    const items = [...document.querySelectorAll<HTMLButtonElement>(".menu button")];
+    const i = items.indexOf(document.activeElement as HTMLButtonElement);
+    items[(i + (ev.key === "ArrowDown" ? 1 : -1) + items.length) % items.length]?.focus();
+  }
+
   // ---- dialogs: edit/add a to-do, log a sitting ----------------------------------------
   type Panel =
     | { kind: "todo"; todo: Todo | null; day?: string; as?: "task" | "meeting"; place?: boolean }
@@ -348,23 +420,15 @@
 
         {#each meetings as s (s.id)}
           {@const t = todoById.get(s.todo_id)!}
-          <div class="card meeting" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled}>
-            <span class="time">{hhmm(s.start_time)}–{hhmm(s.end_time)}</span>
-            <span class="title">{t.is_core ? "🎯 " : ""}{t.title}</span>
-            {#if label(t)}<span class="sub">{label(t)}</span>{/if}
-            <span class="acts">
-              {#if s.is_cancelled}
-                <span class="off">cancelled</span>
-                <button class="mini" title="Restore this meeting" onclick={() => setCancelled(s, false)}>Restore</button>
-              {:else if s.entry_id}
-                <span class="ok">✓ logged</span>
-              {:else}
-                <button class="mini" title="Log this meeting" onclick={() => openLog(t, s, d)}>✓ Log</button>
-                <button class="mini" title="Cancel — stays on the day, struck through" onclick={() => setCancelled(s, true)}>Cancel</button>
-              {/if}
-              {#if !s.is_cancelled}<button class="mini" title="Edit" onclick={() => (panel = { kind: "todo", todo: t })}>Edit</button>{/if}
-              <button class="mini" title="Delete the meeting" aria-label="Delete meeting" onclick={() => unplan(s)}>✕</button>
-            </span>
+          <div class="card meeting" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled}
+               role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
+            <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
+                    onclick={(ev) => openMenu(ev, s, d)}>
+              <span class="time">{hhmm(s.start_time)}–{hhmm(s.end_time)}</span>
+              <span class="title">{t.is_core ? "🎯 " : ""}{t.title}</span>
+              {#if label(t)}<span class="sub">{label(t)}</span>{/if}
+              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ logged</span>{/if}
+            </button>
           </div>
         {/each}
 
@@ -373,27 +437,18 @@
           {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
           <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done}
                class:cancelled={s.is_cancelled}
-               class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}>
-            <label class="title tick">
+               class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}
+               role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
+            <div class="duty-row">
               <input type="checkbox" checked={t.is_done} title={t.is_done ? "Done — untick to reopen" : "Mark the to-do done"}
                      aria-label={`${t.title} done`} onchange={(ev) => setDone(t, (ev.target as HTMLInputElement).checked)} />
-              <span>{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
-            </label>
-            {#if label(t)}<span class="sub">{label(t)}</span>{/if}
-            <span class="acts">
-              {#if s.is_cancelled}
-                <span class="off">cancelled</span>
-                <button class="mini" title="Restore this day" onclick={() => setCancelled(s, false)}>Restore</button>
-              {:else if s.entry_id}
-                <span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>
-              {:else}
-                <button class="mini" title="Log time for this" onclick={() => openLog(t, s, d)}>✓ Log</button>
-                <button class="mini" title="Day before" aria-label="Move to the day before" onclick={() => move(s, -1)}>‹</button>
-                <button class="mini" title="Day after" aria-label="Move to the day after" onclick={() => move(s, 1)}>›</button>
-                <button class="mini" title="Cancel this day — stays on the day, struck through" onclick={() => setCancelled(s, true)}>Cancel</button>
-              {/if}
-              <button class="mini" title="Take off the calendar" aria-label="Take off the calendar" onclick={() => unplan(s)}>✕</button>
-            </span>
+              <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
+                      onclick={(ev) => openMenu(ev, s, d)}>
+                <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
+                {#if label(t)}<span class="sub">{label(t)}</span>{/if}
+                {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{/if}
+              </button>
+            </div>
           </div>
         {/each}
 
@@ -520,6 +575,19 @@
   </details>
 </section>
 
+<svelte:window onkeydown={menuKeys} onresize={closeMenu} onscroll={closeMenu} />
+
+{#if menu}
+  {@const m = menu}
+  <div class="menu-backdrop" role="presentation" onclick={closeMenu}
+       oncontextmenu={(ev) => { ev.preventDefault(); closeMenu(); }}></div>
+  <div class="menu" role="menu" style:left={`${m.x}px`} style:top={`${m.y}px`} use:focusFirst>
+    {#each menuItems(m) as item (item.label)}
+      <button role="menuitem" class:danger={item.danger} onclick={() => { closeMenu(); item.run(); }}>{item.label}</button>
+    {/each}
+  </div>
+{/if}
+
 <dialog bind:this={dialog} onclose={() => (panel = null)}>
   {#if panel && tax}
     {#if panel.kind === "todo"}
@@ -578,12 +646,42 @@
   .dnum { font-size: 1.1rem; }
   .day.past .dname { color: var(--ink-soft); }
 
+  .card-body {
+    display: grid;
+    gap: 0.1rem;
+    width: 100%;
+    min-width: 0;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .card:hover { box-shadow: 0 0 0 1px var(--rule); }
+  .duty-row { display: flex; align-items: flex-start; gap: 0.3rem; }
+  .duty-row input { width: auto; margin: 0.12rem 0 0; flex: none; }
+  .menu-backdrop { position: fixed; inset: 0; z-index: 50; }
+  .menu {
+    position: fixed;
+    z-index: 51;
+    width: 220px;
+    display: grid;
+    padding: 0.25rem;
+    background: var(--paper);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    box-shadow: 0 6px 20px rgb(0 0 0 / 0.18);
+    font-family: var(--font-ui);
+  }
+  .menu button { text-align: left; background: none; border: none; border-radius: 4px; padding: 0.45rem 0.6rem; font-size: 0.85rem; }
+  .menu button:hover, .menu button:focus-visible { background: var(--panel); outline: none; }
+  .menu button.danger { color: var(--danger); }
   .card { background: var(--paper); border-radius: 4px; padding: 0.35rem 0.45rem; font-size: 0.78rem; display: grid; gap: 0.1rem; border-left: 3px solid var(--accent); }
   .card.duty { border-left-color: var(--ink-soft); }
   .card.logged { opacity: 0.7; }
-  .card.done .title span { text-decoration: line-through; color: var(--ink-soft); }
-  .tick { display: flex; align-items: flex-start; gap: 0.3rem; cursor: pointer; }
-  .tick input { width: auto; margin: 0.12rem 0 0; flex: none; }
+  .card.done .title { text-decoration: line-through; color: var(--ink-soft); }
   .card.stale { border-left-color: var(--danger); }
   .card.cancelled { opacity: 0.55; border-left-color: var(--rule); }
   .card.cancelled .title, .card.cancelled .time { text-decoration: line-through; }
@@ -591,7 +689,6 @@
   .card .time, .entry .time { font-variant-numeric: tabular-nums; font-weight: 600; }
   .card .title { font-weight: 500; overflow-wrap: anywhere; }
   .card .sub { color: var(--ink-soft); font-size: 0.72rem; }
-  .acts { display: flex; flex-wrap: wrap; gap: 0.2rem; margin-top: 0.15rem; align-items: center; }
   .mini { font-size: 0.72rem; padding: 0.1rem 0.4rem; }
   .ok { font-size: 0.72rem; color: var(--accent); margin-right: auto; }
   .entry {
