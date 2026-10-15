@@ -371,10 +371,14 @@
         {#each duties as s (s.id)}
           {@const t = todoById.get(s.todo_id)!}
           {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
-          <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done && !s.entry_id}
+          <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done}
                class:cancelled={s.is_cancelled}
                class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}>
-            <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
+            <label class="title tick">
+              <input type="checkbox" checked={t.is_done} title={t.is_done ? "Done — untick to reopen" : "Mark the to-do done"}
+                     aria-label={`${t.title} done`} onchange={(ev) => setDone(t, (ev.target as HTMLInputElement).checked)} />
+              <span>{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
+            </label>
             {#if label(t)}<span class="sub">{label(t)}</span>{/if}
             <span class="acts">
               {#if s.is_cancelled}
@@ -577,7 +581,9 @@
   .card { background: var(--paper); border-radius: 4px; padding: 0.35rem 0.45rem; font-size: 0.78rem; display: grid; gap: 0.1rem; border-left: 3px solid var(--accent); }
   .card.duty { border-left-color: var(--ink-soft); }
   .card.logged { opacity: 0.7; }
-  .card.done .title { text-decoration: line-through; }
+  .card.done .title span { text-decoration: line-through; color: var(--ink-soft); }
+  .tick { display: flex; align-items: flex-start; gap: 0.3rem; cursor: pointer; }
+  .tick input { width: auto; margin: 0.12rem 0 0; flex: none; }
   .card.stale { border-left-color: var(--danger); }
   .card.cancelled { opacity: 0.55; border-left-color: var(--rule); }
   .card.cancelled .title, .card.cancelled .time { text-decoration: line-through; }
