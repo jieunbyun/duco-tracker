@@ -7,6 +7,7 @@
   import ProjectEditor from "../lib/ProjectEditor.svelte";
   import Milestones from "../lib/Milestones.svelte";
   import Settings from "../lib/Settings.svelte";
+  import { shareEmail } from "../lib/email";
 
   let tax = $state<Taxonomy | null>(null);
   let projects = $state<Project[]>([]);
@@ -45,7 +46,8 @@
   const loads = $derived(
     new Map(projects.map((p) => [p.id, projectLoad(p, actualByProject.get(p.id) ?? 0, horizon)] as const)),
   );
-  const areaRows = $derived(tax ? areaHorizons(tax, hours, projects, loads, horizon) : []);
+  // Routine time counts email in equal shares to each area with an Email category.
+  const areaRows = $derived(tax ? areaHorizons(tax, shareEmail(hours, tax), projects, loads, horizon) : []);
   const scale = $derived(Math.max(1, ...areaRows.map((r) => Math.max(r.capacity, r.routine + r.committed))));
   const total = $derived(
     areaRows.reduce(

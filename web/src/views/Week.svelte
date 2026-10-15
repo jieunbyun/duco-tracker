@@ -884,7 +884,10 @@
     {:else if panel.kind === "email"}
       <h2>Create email checks</h2>
       <div class="pick">
-        <p class="muted small">One “{EMAIL_TITLE}” to-do on each ticked day. Edit any day's afterwards from its card.</p>
+        <p class="muted small">
+          One “{EMAIL_TITLE}” to-do on each ticked day; edit any day's afterwards from its card. Email time counts in
+          equal shares to Teaching, Admin and Outreach, whichever Email category it is logged under.
+        </p>
         <div class="pick-days">
           {#each weekdays as d (d)}
             {@const exists = hasEmailCheck(d)}

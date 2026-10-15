@@ -3,6 +3,7 @@
   import type { Taxonomy, EntryHours } from "../lib/data";
   import { PRESETS, presetRange, addDays, today, daysIn, fmtDay } from "../lib/dates";
   import type { Preset, Range } from "../lib/dates";
+  import { shareEmail } from "../lib/email";
 
   // ---- period ------------------------------------------------------------
   const PRESET_KEY = "time.preset";
@@ -42,6 +43,9 @@
       .finally(() => { if (id === request) loading = false; });
   });
 
+  // Email counts in equal shares to every area with an Email category.
+  const shared = $derived(tax ? shareEmail(entries, tax) : entries);
+
   // Colour follows the area (its place in the area order), never its rank.
   const areaIndex = $derived(new Map((tax?.areas ?? []).map((a, i) => [a.id, i])));
   function areaColor(areaId: string): string {
@@ -64,7 +68,7 @@
     const perDay = tax.weeksPerYear / 365;
     return tax.areas.map((a) => {
       const t = targetOn(tax!.targets, a.id, targetEnd);
-      const rows = entries.filter((e) => e.area_id === a.id);
+      const rows = shared.filter((e) => e.area_id === a.id);
       const actual = rows.reduce((s, e) => s + e.hours, 0);
       const email = rows.filter((e) => e.category_kind === "email").reduce((s, e) => s + e.hours, 0);
       const target = t ? (t.weekly_hours + t.email_weekly_hours) * perDay * elapsed : 0;
@@ -103,7 +107,7 @@
     if (!tax) return root;
     const cats = new Map(tax.categories.map((c) => [c.id, c]));
     for (const a of tax.areas) root.children.set(a.id, node(a.id, a.label, "", a.id));
-    for (const e of entries) {
+    for (const e of shared) {
       const area = root.children.get(e.area_id);
       if (!area) continue;
       const c = cats.get(e.category_id);

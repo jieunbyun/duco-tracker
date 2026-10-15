@@ -73,6 +73,13 @@
       from a chosen date, so earlier periods keep the target they had.
     </dd>
 
+    <dt>Email</dt>
+    <dd>
+      Email is one shared pot: time logged under any Email category counts in equal shares to every area that has
+      an Email category (Teaching, Admin and Outreach), in Time and in Planning alike. Log it under whichever Email
+      category you like.
+    </dd>
+
     <dt>Remaining time (Planning)</dt>
     <dd>
       Capacity over the horizon{#if tax} ({tax.horizonMonths} months){/if}, minus
