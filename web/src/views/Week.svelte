@@ -655,6 +655,9 @@
   type MsRow = { p: Project; m: Milestone; info: MilestoneWeek; existing: Todo | null; pick: boolean; hours: number | null; must: boolean };
   let msRows = $state<MsRow[]>([]);
   let msLoading = $state(false);
+  // which sections are open: set once when the window opens (urgent ones),
+  // then only by you — ticking a box must not fold its section
+  let msOpen = $state<Record<string, boolean>>({});
 
   async function openMilestones() {
     panel = { kind: "milestones" };
@@ -679,6 +682,7 @@
       // overdue first, then by due date; undated last
       msRows = rows.sort((a, b) =>
         Number(b.info.overdue) - Number(a.info.overdue) || (a.info.due ?? "9").localeCompare(b.info.due ?? "9"));
+      msOpen = Object.fromEntries(msGroups.map((g) => [g.key, g.urgent]));
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -1174,7 +1178,8 @@
           <div class="ms-groups">
             {#each msGroups as g (g.key)}
               {@const all = g.projects.flatMap((x) => x.rows)}
-              <details class="ms-group" open={g.urgent}>
+              <details class="ms-group" open={msOpen[g.key] ?? false}
+                       ontoggle={(ev) => (msOpen[g.key] = (ev.currentTarget as HTMLDetailsElement).open)}>
                 <summary>
                   <strong>{g.label}</strong>
                   <span class="muted">{all.length} {all.length === 1 ? "milestone" : "milestones"}{pickedIn(all) ? ` · ${pickedIn(all)} ticked` : ""}</span>
