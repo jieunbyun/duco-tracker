@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { saveCategory, addCategory } from "./data";
+  import { saveCategory, addCategory, categoryUsage, deleteCategory, setCategoryActive } from "./data";
   import type { Taxonomy, Category, Area } from "./data";
 
   type Props = { tax: Taxonomy; onsaved: () => void };
@@ -48,6 +48,45 @@
     draftKind = c.kind;
     error = "";
   }
+
+  // Remove: delete when nothing refers to it; otherwise retire it (hidden from
+  // pickers, history kept) — unless live projects still sit in it.
+  async function remove(c: Category) {
+    busy = true;
+    error = "";
+    try {
+      const u = await categoryUsage(c.id);
+      if (u.liveProjects) {
+        error = `“${c.label}” still has ${u.liveProjects} live ${u.liveProjects === 1 ? "project" : "projects"}. Move them to another category, or mark them done or dropped, first.`;
+        return;
+      }
+      if (!u.entries && !u.todos && !u.projects) {
+        if (!confirm(`Delete the category “${c.label}”? Nothing uses it.`)) return;
+        await deleteCategory(c.id);
+      } else {
+        const used = [u.entries && `${u.entries} logged ${u.entries === 1 ? "entry" : "entries"}`,
+                      u.todos && `${u.todos} ${u.todos === 1 ? "to-do" : "to-dos"}`,
+                      u.projects && `${u.projects} finished ${u.projects === 1 ? "project" : "projects"}`].filter(Boolean).join(", ");
+        if (!confirm(`“${c.label}” is used by ${used}. Retire it? It leaves every list, but past hours keep its name, and you can restore it.`)) return;
+        await setCategoryActive(c.id, false);
+      }
+      editing = null;
+      onsaved();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+  async function restore(c: Category) {
+    try {
+      await setCategoryActive(c.id, true);
+      onsaved();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  const retired = $derived(tax.allCategories.filter((c) => !c.is_active));
 
   async function save(c: Category) {
     if (!draftLabel.trim()) return (error = "The category needs a name.");
@@ -126,6 +165,9 @@
               <div class="actions">
                 <button class="primary" disabled={busy} onclick={() => save(c)}>Save</button>
                 <button disabled={busy} onclick={() => (editing = null)}>Cancel</button>
+                {#if c.kind !== "email"}
+                  <button class="danger push" disabled={busy} onclick={() => remove(c)}>Remove…</button>
+                {/if}
               </div>
             {:else if c.description}
               <p class="desc">{c.description}</p>
@@ -135,6 +177,19 @@
       </ul>
     </div>
   {/each}
+  {#if retired.length}
+    <details class="retired">
+      <summary class="muted">Retired categories ({retired.length})</summary>
+      <ul>
+        {#each retired as c (c.id)}
+          <li class="head">
+            <span class="name">{tax.areas.find((a) => a.id === c.area_id)?.label} › {c.label}</span>
+            <button class="edit" onclick={() => restore(c)}>Restore</button>
+          </li>
+        {/each}
+      </ul>
+    </details>
+  {/if}
 </div>
 
 <style>
@@ -157,4 +212,7 @@
   .desc { margin: 0.2rem 0 0; font-size: 0.85rem; white-space: pre-line; color: var(--ink); }
   textarea { margin-top: 0.4rem; font-size: 0.88rem; }
   .actions { display: flex; gap: 0.5rem; margin-top: 0.4rem; }
+  .actions .push { margin-left: auto; }
+  .danger { color: var(--danger); }
+  .retired summary { cursor: pointer; font-size: 0.85rem; }
 </style>

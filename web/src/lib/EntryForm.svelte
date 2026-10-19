@@ -55,7 +55,11 @@
 
   // ---- choices -------------------------------------------------------------
   const groups = $derived(
-    tax.areas.map((a) => ({ area: a, cats: tax.categories.filter((c) => c.area_id === a.id) })),
+    tax.areas.map((a) => ({
+      area: a,
+      // active categories, plus this entry's own if it has since been retired
+      cats: tax.allCategories.filter((c) => c.area_id === a.id && (c.is_active || c.id === e0?.category_id)),
+    })),
   );
   // Projects of the chosen category that are still live, plus the one this
   // entry already points at (so editing never hides the current value).

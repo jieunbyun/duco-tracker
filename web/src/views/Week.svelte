@@ -162,7 +162,8 @@
 
   // ---- lookups -------------------------------------------------------------------
   const todoById = $derived(new Map(todos.map((t) => [t.id, t])));
-  const catById = $derived(new Map((tax?.categories ?? []).map((c) => [c.id, c])));
+  const catById = $derived(new Map((tax?.allCategories ?? []).map((c) => [c.id, c])));
+  const isActiveCategory = (id: string) => !!tax?.categories.some((c) => c.id === id);
   const projById = $derived(new Map(projects.map((p) => [p.id, p])));
   const entryById = $derived(new Map(entries.map((e) => [e.id, e])));
 
@@ -494,7 +495,7 @@
   function logDefaults(p: Extract<Panel, { kind: "log" }>) {
     const t = p.todo;
     const saved = lastCategory();
-    const categoryId = t.category_id ?? (catById.has(saved) ? saved : tax?.categories[0]?.id ?? "");
+    const categoryId = t.category_id ?? (isActiveCategory(saved) ? saved : tax?.categories[0]?.id ?? "");
     let s = p.slot?.start_time?.slice(0, 5);
     let e = p.slot?.end_time?.slice(0, 5);
     if (!s) {
@@ -521,7 +522,7 @@
       if (q > sh * 60 + sm) e = q >= 24 * 60 ? "00:00" : `${pad(Math.floor(q / 60))}:${pad(q % 60)}`;
     }
     const saved = lastCategory();
-    const categoryId = catById.has(saved) ? saved : tax?.categories[0]?.id ?? "";
+    const categoryId = isActiveCategory(saved) ? saved : tax?.categories[0]?.id ?? "";
     return { date: day, start: s, end: e, categoryId };
   }
 

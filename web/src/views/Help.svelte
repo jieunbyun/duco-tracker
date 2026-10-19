@@ -84,7 +84,11 @@
   </dl>
 
   <h2>Categories</h2>
-  <p class="muted small">Your own notes, kept in your database (edit them under Planning › Categories).</p>
+  <p class="muted small">
+    Your own notes, kept in your database. Under Planning › Categories you can add, rename, change the kind of, and
+    remove categories: one nothing uses is deleted; one with history is retired — gone from every list, but past
+    hours keep its name, and it can be restored. A category with live projects must be emptied first.
+  </p>
   {#if tax}
     {#each tax.areas as a (a.id)}
       <h3>{a.label}</h3>

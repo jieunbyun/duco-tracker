@@ -105,7 +105,7 @@
   const tree = $derived.by(() => {
     const root = node("all", "All work", "", "");
     if (!tax) return root;
-    const cats = new Map(tax.categories.map((c) => [c.id, c]));
+    const cats = new Map(tax.allCategories.map((c) => [c.id, c]));
     for (const a of tax.areas) root.children.set(a.id, node(a.id, a.label, "", a.id));
     for (const e of shared) {
       const area = root.children.get(e.area_id);

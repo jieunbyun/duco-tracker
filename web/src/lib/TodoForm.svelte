@@ -41,7 +41,10 @@
   let busy = $state(false);
   let error = $state("");
 
-  const groups = $derived(tax.areas.map((a) => ({ area: a, cats: tax.categories.filter((c) => c.area_id === a.id) })));
+  const groups = $derived(tax.areas.map((a) => ({
+    area: a,
+    cats: tax.allCategories.filter((c) => c.area_id === a.id && (c.is_active || c.id === t0?.category_id)),
+  })));
   const projectOptions = $derived(
     projects
       .filter((p) => (!category_id || p.category_id === category_id) && (LIVE_STATUSES.has(p.status) || p.id === t0?.project_id))

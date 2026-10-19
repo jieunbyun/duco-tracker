@@ -9,12 +9,14 @@ export type Category = {
   kind: string;
   sort_order: number;
   description: string | null; // your own note on what belongs here
+  is_active: boolean; // false once retired: hidden from pickers, kept for history
 };
 export type Target = { area_id: string; effective_from: string; weekly_hours: number; email_weekly_hours: number };
 export type Area = { id: string; code: string; label: string; sort_order: number };
 export type Taxonomy = {
   areas: Area[];
-  categories: Category[];
+  categories: Category[]; // active ones: what every picker offers
+  allCategories: Category[]; // including retired ones, for labelling past hours
   targets: Target[];
   weeksPerYear: number;
   horizonMonths: number;
@@ -62,7 +64,7 @@ export function loadTaxonomy(refresh = false): Promise<Taxonomy> {
 async function fetchTaxonomy(): Promise<Taxonomy> {
   const [a, c, t, s] = await Promise.all([
     supabase.from("area").select("id,code,label,sort_order").eq("is_active", true).order("sort_order"),
-    supabase.from("category").select("id,area_id,code,label,kind,sort_order,description").eq("is_active", true).order("sort_order"),
+    supabase.from("category").select("id,area_id,code,label,kind,sort_order,description,is_active").order("sort_order"),
     supabase.from("area_target").select("area_id,effective_from,weekly_hours,email_weekly_hours"),
     supabase.from("user_setting").select("weeks_per_year,horizon_months,week_starts_on").maybeSingle(),
   ]);
@@ -70,7 +72,8 @@ async function fetchTaxonomy(): Promise<Taxonomy> {
   setWeekStartDay(Number(s.data?.week_starts_on ?? 1));
   return {
     areas: a.data ?? [],
-    categories: c.data ?? [],
+    categories: (c.data ?? []).filter((x) => x.is_active),
+    allCategories: c.data ?? [],
     targets: (t.data ?? []).map((x) => ({
       ...x, weekly_hours: Number(x.weekly_hours), email_weekly_hours: Number(x.email_weekly_hours),
     })),
@@ -433,6 +436,33 @@ export async function addCategory(area: Area, label: string, kind: string, exist
   const inArea = existing.filter((c) => c.area_id === area.id && c.kind !== "email" && c.kind !== "misc");
   const sort_order = Math.min(94, Math.max(10, ...inArea.map((c) => c.sort_order)) + 5);
   await check(supabase.from("category").insert({ area_id: area.id, code, label: label.trim(), kind, sort_order }));
+  await loadTaxonomy(true);
+}
+
+/** How much refers to a category: deciding between delete, retire, or neither. */
+export async function categoryUsage(id: string): Promise<{ entries: number; todos: number; projects: number; liveProjects: number }> {
+  const count = async (q: PromiseLike<{ count: number | null; error: { message: string } | null }>) => {
+    const { count: n, error } = await q;
+    if (error) throw new Error(error.message);
+    // an unreadable count must never pass for "unused": removal stops instead
+    if (n === null) throw new Error("Could not check what uses this category; nothing was removed.");
+    return n;
+  };
+  const [entries, todos, projects, liveProjects] = await Promise.all([
+    count(supabase.from("time_entry").select("id", { count: "exact", head: true }).eq("category_id", id)),
+    count(supabase.from("todo").select("id", { count: "exact", head: true }).eq("category_id", id)),
+    count(supabase.from("project").select("id", { count: "exact", head: true }).eq("category_id", id)),
+    count(supabase.from("project").select("id", { count: "exact", head: true }).eq("category_id", id)
+      .in("status", ["planned", "active", "paused"])),
+  ]);
+  return { entries, todos, projects, liveProjects };
+}
+export async function deleteCategory(id: string): Promise<void> {
+  await check(supabase.from("category").delete().eq("id", id));
+  await loadTaxonomy(true);
+}
+export async function setCategoryActive(id: string, active: boolean): Promise<void> {
+  await check(supabase.from("category").update({ is_active: active }).eq("id", id));
   await loadTaxonomy(true);
 }
 
