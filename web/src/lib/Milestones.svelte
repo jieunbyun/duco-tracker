@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MILESTONE_STATUSES, saveMilestone, deleteMilestone, fmtHours } from "./data";
+  import { MILESTONE_STATUSES, saveMilestone, deleteMilestone, setMilestoneStatus, fmtHours } from "./data";
   import type { Milestone, Project } from "./data";
   import { fmtDay } from "./dates";
   import { plannedOf } from "./horizon";
@@ -66,6 +66,16 @@
     }
   }
 
+  async function setDone(m: Milestone, done: boolean) {
+    error = "";
+    try {
+      await setMilestoneStatus(m.id, done ? "done" : "active");
+      onchange();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+
   const plannedSum = $derived(project.milestone.reduce((s, m) => s + (m.planned_hours ?? 0), 0));
 </script>
 
@@ -115,6 +125,7 @@
             {@render form(m)}
           {:else}
             {@const actual = actualByMilestone.get(m.id) ?? 0}
+            <div class="ms-line" class:complete={m.status === "done"}>
             <button class="ms-row" onclick={() => open(m)}>
               <span class="title">
                 {m.title}
@@ -129,6 +140,11 @@
                 {#if m.planned_hours !== null}<span class="muted"> of {fmtHours(m.planned_hours)}</span>{/if}
               </span>
             </button>
+            <input type="checkbox" class="done-tick" checked={m.status === "done"}
+                   title={m.status === "done" ? "Done — untick to reopen" : "Mark the milestone done"}
+                   aria-label={`${m.title} done`}
+                   onchange={(ev) => setDone(m, (ev.target as HTMLInputElement).checked)} />
+            </div>
           {/if}
         </li>
       {/each}
@@ -163,6 +179,10 @@
     font-size: 0.88rem;
   }
   .ms-row:hover { background: var(--paper); }
+  .ms-line { display: flex; align-items: center; gap: 0.5rem; }
+  .ms-line .ms-row { flex: 1; min-width: 0; }
+  .done-tick { width: auto; flex: none; margin-right: 0.4rem; }
+  .ms-line.complete .title { text-decoration: line-through; color: var(--ink-soft); }
   .title small.hard { margin-left: 0.4rem; color: var(--danger); font-size: 0.72rem; }
   .dates { font-size: 0.8rem; }
   .hours { text-align: right; font-variant-numeric: tabular-nums; }

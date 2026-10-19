@@ -174,6 +174,9 @@ export async function saveMilestone(id: string | null, fields: MilestoneFields):
   const row = await check<{ id: string }>(supabase.from("milestone").insert(fields).select("id").single());
   return row!.id;
 }
+export async function setMilestoneStatus(id: string, status: string): Promise<void> {
+  await check(supabase.from("milestone").update({ status }).eq("id", id));
+}
 export async function deleteMilestone(id: string): Promise<void> {
   await check(supabase.from("milestone").delete().eq("id", id));
 }

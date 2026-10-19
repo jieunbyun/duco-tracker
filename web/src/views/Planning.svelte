@@ -238,10 +238,6 @@
             {@const plan = plannedOf(p)}
             <div class="project" class:open={expanded === p.id} class:complete={p.status === "done"}>
               <div class="p-line">
-              <input type="checkbox" class="p-done" checked={p.status === "done"}
-                     title={p.status === "done" ? "Done — untick to reopen" : "Mark the project done"}
-                     aria-label={`${p.name} done`}
-                     onchange={(ev) => setComplete(p, (ev.target as HTMLInputElement).checked)} />
               <button class="p-row" onclick={() => toggle(p.id)} aria-expanded={expanded === p.id}>
                 <span class="p-name">
                   {#if p.is_important}<span class="star" title="Important">★</span>{/if}{p.name}
@@ -259,6 +255,10 @@
                 </span>
                 <span class="p-flag" class:warn={warn(l)}>{warn(l) ? "⚠ " : ""}{flagText(l, p)}</span>
               </button>
+              <input type="checkbox" class="p-done" checked={p.status === "done"}
+                     title={p.status === "done" ? "Done — untick to reopen" : "Mark the project done"}
+                     aria-label={`${p.name} done`}
+                     onchange={(ev) => setComplete(p, (ev.target as HTMLInputElement).checked)} />
               </div>
               {#if expanded === p.id}
                 <div class="p-body">
@@ -413,7 +413,7 @@
   .cats[open] summary { margin-bottom: 0.8rem; }
   .project { border-radius: var(--radius); }
   .p-line { display: flex; align-items: flex-start; gap: 0.2rem; }
-  .p-done { width: auto; flex: none; margin: 0.75rem 0 0 0.3rem; }
+  .p-done { width: auto; flex: none; margin: 0.75rem 0.6rem 0 0.2rem; }
   .project.complete .p-name { text-decoration: line-through; color: var(--ink-soft); }
   .horizon-head { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
   .horizon-pick { display: flex; gap: 0.25rem; font-family: var(--font-ui); }
