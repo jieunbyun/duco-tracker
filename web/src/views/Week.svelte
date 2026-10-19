@@ -185,6 +185,21 @@
   }
   const loggedOn = (day: string) => entriesOn(day).reduce((s, e) => s + e.minutes / 60, 0);
 
+  /** Hours planned on a day: meetings' lengths and duties' hours for that day, leaving
+   *  out cancelled cards and anything not yet counted (to review, or tentative). */
+  function plannedOn(day: string): { hours: number; unknown: number } {
+    let hours = 0, unknown = 0;
+    for (const s of weekSlots) {
+      if (s.planned_on !== day || s.is_cancelled) continue;
+      const t = todoById.get(s.todo_id);
+      if (!t || uncounted(t)) continue;
+      const h = t.kind === "meeting" ? s.planned_hours : cardHours(s, t);
+      if (h) hours += h;
+      else unknown += 1;
+    }
+    return { hours, unknown };
+  }
+
   // ---- the week's to-do list ------------------------------------------------------
   const tasks = $derived(todos.filter((t) => t.kind === "task"));
   const live = $derived(tasks.filter((t) => !t.is_cancelled));
@@ -877,10 +892,14 @@
     {#each days as d (d)}
       {@const meetings = slotsOn(d, "meeting")}
       {@const duties = slotsOn(d, "task")}
+      {@const plan = plannedOn(d)}
       <div class="day" class:today={d === today()} class:past={d < today()}>
         <div class="day-head">
           <span class="dname">{dayName(d)} <span class="dnum">{dayNum(d)}</span></span>
-          {#if loggedOn(d)}<span class="muted small">{fmtHours(loggedOn(d))} logged</span>{/if}
+          <span class="day-hours small">
+            {#if plan.hours || plan.unknown}<span class="planned" title="Meetings and duties planned for this day">{fmtHours(plan.hours)} planned{plan.unknown ? ` · +${plan.unknown} without hours` : ""}</span>{/if}
+            {#if loggedOn(d)}<span class="muted">{fmtHours(loggedOn(d))} logged</span>{/if}
+          </span>
         </div>
 
         {#each meetings as s (s.id)}
@@ -1259,6 +1278,8 @@
   .dname { font-weight: 600; font-size: 0.85rem; }
   .dnum { font-size: 1.1rem; }
   .day.past .dname { color: var(--ink-soft); }
+  .day-hours { display: grid; justify-items: end; line-height: 1.25; }
+  .day-hours .planned { color: var(--ink); font-weight: 600; }
 
   .outlook-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: -0.4rem 0 1rem; font-family: var(--font-ui); font-size: 0.82rem; }
   .inbox-wrap { margin-bottom: 1.2rem; }
