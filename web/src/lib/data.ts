@@ -431,8 +431,8 @@ export async function addCategory(area: Area, label: string, kind: string, exist
   await loadTaxonomy(true);
 }
 
-export async function saveCategoryNote(id: string, description: string | null): Promise<void> {
-  await check(supabase.from("category").update({ description }).eq("id", id));
+export async function saveCategory(id: string, fields: { label: string; kind: string; description: string | null }): Promise<void> {
+  await check(supabase.from("category").update(fields).eq("id", id));
   await loadTaxonomy(true);
 }
 

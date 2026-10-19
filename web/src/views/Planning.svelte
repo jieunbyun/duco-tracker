@@ -304,7 +304,7 @@
 
     <!-- ================= categories ================= -->
     <details class="cats">
-      <summary><h2>Categories</h2> <span class="muted">what belongs where — your private notes</span></summary>
+      <summary><h2>Categories</h2> <span class="muted">add, rename, change kind, and keep private notes</span></summary>
       <CategoryNotes {tax} onsaved={load} />
     </details>
 
