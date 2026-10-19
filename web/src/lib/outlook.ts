@@ -15,6 +15,10 @@ import { meetingsInRange, eventUids } from "./ics";
 import type { Meeting } from "./ics";
 import { addDays, today } from "./dates";
 
+// The Edge Function's address (its slug), which the dashboard may choose for
+// you when deploying; set VITE_CALENDAR_FUNCTION when it is not "calendar-sync".
+const CALENDAR_FUNCTION = (import.meta.env.VITE_CALENDAR_FUNCTION as string | undefined)?.trim() || "calendar-sync";
+
 export const SYNC_BACK_DAYS = 7;
 export const SYNC_AHEAD_DAYS = 90;
 export const STALE_HOURS = 3;
@@ -96,7 +100,7 @@ function hours(m: Meeting): number | null {
 }
 
 async function fetchCalendar(): Promise<string> {
-  const { data, error } = await supabase.functions.invoke("calendar-sync", { method: "POST" });
+  const { data, error } = await supabase.functions.invoke(CALENDAR_FUNCTION, { method: "POST" });
   if (error) {
     let message = error.message;
     try {
