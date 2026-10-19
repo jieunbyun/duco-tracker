@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, saveSettings, setProjectStatus } from "../lib/data";
+  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus } from "../lib/data";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
   import { horizonRange, projectLoad, areaHorizons, plannedOf, PLANNABLE_KINDS, PACE_DAYS } from "../lib/horizon";
   import type { ProjectLoad } from "../lib/horizon";
-  import { fmtDay, today } from "../lib/dates";
+  import { fmtDay, today, addDays } from "../lib/dates";
   import ProjectEditor from "../lib/ProjectEditor.svelte";
   import Milestones from "../lib/Milestones.svelte";
   import Settings from "../lib/Settings.svelte";
@@ -32,7 +32,32 @@
   load();
 
   // ---- derived figures ----------------------------------------------------
-  const horizon = $derived(horizonRange(tax?.horizonMonths ?? 12));
+  // The viewing period: a button choice remembered in this browser, else the
+  // months in your settings.
+  type Horizon = { key: string; label: string; title: string; weeks?: number; months?: number };
+  const HORIZONS: Horizon[] = [
+    { key: "2w", label: "2 wk", title: "next 2 weeks", weeks: 2 },
+    { key: "1m", label: "1 mo", title: "next month", months: 1 },
+    ...[3, 6, 12, 18, 24].map((m) => ({ key: `${m}m`, label: `${m} mo`, title: `next ${m} months`, months: m })),
+  ];
+  const HORIZON_KEY = "planning.horizon";
+  function savedHorizon(): string | null {
+    try { return localStorage.getItem(HORIZON_KEY); } catch { return null; }
+  }
+  let horizonKey = $state<string | null>(savedHorizon());
+  const choice = $derived.by((): Horizon => {
+    const found = HORIZONS.find((h) => h.key === horizonKey);
+    if (found) return found;
+    const m = tax?.horizonMonths ?? 12;
+    return HORIZONS.find((h) => h.key === `${m}m`) ?? { key: `${m}m`, label: `${m} mo`, title: `next ${m} months`, months: m };
+  });
+  const horizon = $derived(
+    choice.weeks ? { from: today(), to: addDays(today(), 7 * choice.weeks - 1) } : horizonRange(choice.months ?? 12),
+  );
+  function setHorizon(key: string) {
+    horizonKey = key;
+    try { localStorage.setItem(HORIZON_KEY, key); } catch {}
+  }
 
   const actualByProject = $derived.by(() => {
     const m = new Map<string, number>();
@@ -66,22 +91,6 @@
 
   // ---- project list ---------------------------------------------------------
   let showFinished = $state(false);
-
-  // ---- viewing period: one click instead of the settings form ---------------------
-  const HORIZONS = [3, 6, 12, 18, 24];
-  let savingHorizon = $state(false);
-  async function setHorizon(months: number) {
-    if (!tax || months === tax.horizonMonths) return;
-    savingHorizon = true;
-    try {
-      await saveSettings({ week_starts_on: tax.weekStartsOn, weeks_per_year: tax.weeksPerYear, horizon_months: months });
-      await load();
-    } catch (e) {
-      error = (e as Error).message;
-    } finally {
-      savingHorizon = false;
-    }
-  }
 
   // ---- tick a project complete, with a moment to undo -------------------------------
   let flash = $state<{ text: string; undo?: () => Promise<void> } | null>(null);
@@ -171,11 +180,11 @@
   {:else if tax}
     <!-- ================= horizon ================= -->
     <div class="horizon-head">
-      <h2>Remaining time · next {tax.horizonMonths} months</h2>
+      <h2>Remaining time · {choice.title}</h2>
       <div class="horizon-pick" role="group" aria-label="Viewing period">
-        {#each HORIZONS as m (m)}
-          <button class:on={tax.horizonMonths === m} aria-pressed={tax.horizonMonths === m}
-                  disabled={savingHorizon} onclick={() => setHorizon(m)}>{m} mo</button>
+        {#each HORIZONS as h (h.key)}
+          <button class:on={choice.key === h.key} aria-pressed={choice.key === h.key}
+                  onclick={() => setHorizon(h.key)}>{h.label}</button>
         {/each}
       </div>
     </div>

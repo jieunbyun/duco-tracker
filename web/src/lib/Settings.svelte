@@ -12,7 +12,7 @@
 
   let week_starts_on = $state(t0.weekStartsOn);
   let weeks_per_year = $state(t0.weeksPerYear);
-  let horizon_months = $state(t0.horizonMonths);
+  const horizon_months = t0.horizonMonths; // the period is now chosen with Planning's buttons
   let from = $state(weekStart(today()));
   let targets = $state(
     t0.areas.map((a) => {
@@ -58,7 +58,6 @@
       </select>
     </label>
     <label>Working weeks per year <input type="number" min="1" max="52" step="1" bind:value={weeks_per_year} /></label>
-    <label>Planning horizon (months) <input type="number" min="1" max="36" step="1" bind:value={horizon_months} /></label>
   </div>
 
   <table>

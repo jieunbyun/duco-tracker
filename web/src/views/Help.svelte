@@ -115,7 +115,7 @@
 
     <dt>Remaining time (Planning)</dt>
     <dd>
-      Capacity over the horizon{#if tax} ({tax.horizonMonths} months){/if}, minus
+      Capacity over the period chosen with the buttons in Planning (2 weeks to 24 months), minus
       <em>routine</em> time — non-project categories, projected at your pace over the last {PACE_DAYS / 7} weeks —
       minus hours <em>committed</em> to live projects: each project's planned hours less what is already logged,
       spread evenly to its end date, counting only the part inside the horizon. What is left is free.
