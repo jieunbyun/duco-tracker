@@ -2,6 +2,7 @@
   import { MILESTONE_STATUSES, saveMilestone, deleteMilestone, fmtHours } from "./data";
   import type { Milestone, Project } from "./data";
   import { fmtDay } from "./dates";
+  import { plannedOf } from "./horizon";
 
   type Props = { project: Project; actualByMilestone: Map<string, number>; onchange: () => void };
   let { project, actualByMilestone, onchange }: Props = $props();
@@ -94,8 +95,13 @@
 <div class="milestones">
   <div class="head">
     <h3>Milestones</h3>
-    {#if project.planned_hours !== null && plannedSum > 0}
-      <span class="muted">{fmtHours(plannedSum)} of {fmtHours(project.planned_hours)} planned is assigned to milestones</span>
+    {#if plannedOf(project).fromMilestones}
+      <span class="muted">{fmtHours(plannedSum)} across the milestones — used as the project's plan</span>
+    {:else if plannedSum > 0}
+      <span class="muted">
+        {fmtHours(plannedSum)}{project.planned_hours !== null ? ` of ${fmtHours(project.planned_hours)}` : ""} assigned so far;
+        give every milestone hours to use their total as the plan
+      </span>
     {/if}
   </div>
 

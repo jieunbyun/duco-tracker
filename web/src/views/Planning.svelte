@@ -1,7 +1,7 @@
 <script lang="ts">
   import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, saveSettings, setProjectStatus } from "../lib/data";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
-  import { horizonRange, projectLoad, areaHorizons, PLANNABLE_KINDS, PACE_DAYS } from "../lib/horizon";
+  import { horizonRange, projectLoad, areaHorizons, plannedOf, PLANNABLE_KINDS, PACE_DAYS } from "../lib/horizon";
   import type { ProjectLoad } from "../lib/horizon";
   import { fmtDay, today } from "../lib/dates";
   import ProjectEditor from "../lib/ProjectEditor.svelte";
@@ -143,7 +143,7 @@
       case "no-plan": return "no planned hours";
       case "no-end": return "no end date — all remaining hours counted now";
       case "overdue": return `past end date · ${fmtHours(l.remaining)} left`;
-      case "over-budget": return `over plan by ${fmtHours(l.actual - (p.planned_hours ?? 0))}`;
+      case "over-budget": return `over plan by ${fmtHours(l.actual - (plannedOf(p).hours ?? 0))}`;
       default: return l.perWeek ? `needs ${fmtHours(l.perWeek)}/wk to finish` : "";
     }
   }
@@ -235,6 +235,7 @@
         {#snippet projectList(c: Category)}
           {#each projectsIn(c) as p (p.id)}
             {@const l = loads.get(p.id)!}
+            {@const plan = plannedOf(p)}
             <div class="project" class:open={expanded === p.id} class:complete={p.status === "done"}>
               <div class="p-line">
               <input type="checkbox" class="p-done" checked={p.status === "done"}
@@ -248,13 +249,13 @@
                 </span>
                 <span class="p-dates muted">{period(p)}</span>
                 <span class="meter" aria-hidden="true">
-                  {#if p.planned_hours}
-                    <span class="fill" style:width={`${Math.min(100, (100 * l.actual) / p.planned_hours)}%`}></span>
+                  {#if plan.hours}
+                    <span class="fill" style:width={`${Math.min(100, (100 * l.actual) / plan.hours)}%`}></span>
                   {/if}
                 </span>
                 <span class="p-hours">
                   <strong>{fmtHours(l.actual)}</strong>
-                  {#if p.planned_hours !== null}<span class="muted"> of {fmtHours(p.planned_hours)}</span>{/if}
+                  {#if plan.hours !== null}<span class="muted" title={plan.fromMilestones ? "Sum of the milestones' planned hours" : ""}> of {fmtHours(plan.hours)}{plan.fromMilestones ? " Σ" : ""}</span>{/if}
                 </span>
                 <span class="p-flag" class:warn={warn(l)}>{warn(l) ? "⚠ " : ""}{flagText(l, p)}</span>
               </button>

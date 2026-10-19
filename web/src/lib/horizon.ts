@@ -31,21 +31,43 @@ export type ProjectLoad = {
   flag: "no-plan" | "no-end" | "overdue" | "over-budget" | null;
 };
 
+/**
+ * A project's plan. When it has milestones and every one still in play (not
+ * dropped) has planned hours, their sum is the plan, overriding the project's
+ * own figure; otherwise the project's own figure stands.
+ */
+export function plannedOf(p: Project): { hours: number | null; fromMilestones: boolean } {
+  const ms = p.milestone.filter((m) => m.status !== "dropped");
+  if (ms.length && ms.every((m) => m.planned_hours !== null)) {
+    return { hours: ms.reduce((s, m) => s + (m.planned_hours ?? 0), 0), fromMilestones: true };
+  }
+  return { hours: p.planned_hours, fromMilestones: false };
+}
+
+/** The project's end date, or failing that its latest milestone due date. */
+export function endOf(p: Project): string | null {
+  if (p.end_on) return p.end_on;
+  const dues = p.milestone.filter((m) => m.status !== "dropped" && m.due_on).map((m) => m.due_on!).sort();
+  return dues.length ? dues[dues.length - 1] : null;
+}
+
 export function projectLoad(p: Project, actual: number, horizon: Range): ProjectLoad {
   const base = { actual, remaining: 0, inHorizon: 0, perWeek: null };
   if (!LIVE_STATUSES.has(p.status)) return { ...base, flag: null };
-  if (p.planned_hours === null) return { ...base, flag: "no-plan" };
+  const planned = plannedOf(p).hours;
+  if (planned === null) return { ...base, flag: "no-plan" };
 
-  const remaining = Math.max(0, p.planned_hours - actual);
-  const over = actual > p.planned_hours ? "over-budget" : null;
+  const remaining = Math.max(0, planned - actual);
+  const over = actual > planned ? "over-budget" : null;
   const t = horizon.from;
   const from = p.start_on && p.start_on > t ? p.start_on : t;
+  const end = endOf(p);
 
-  if (!p.end_on) return { ...base, remaining, inHorizon: remaining, flag: over ?? "no-end" };
-  if (p.end_on < t) return { ...base, remaining, inHorizon: remaining, flag: remaining > 0 ? "overdue" : over };
+  if (!end) return { ...base, remaining, inHorizon: remaining, flag: over ?? "no-end" };
+  if (end < t) return { ...base, remaining, inHorizon: remaining, flag: remaining > 0 ? "overdue" : over };
 
-  const windowDays = daysIn({ from, to: p.end_on });
-  const overlapTo = p.end_on < horizon.to ? p.end_on : horizon.to;
+  const windowDays = daysIn({ from, to: end });
+  const overlapTo = end < horizon.to ? end : horizon.to;
   const overlapDays = overlapTo >= from ? daysIn({ from, to: overlapTo }) : 0;
   return {
     actual,

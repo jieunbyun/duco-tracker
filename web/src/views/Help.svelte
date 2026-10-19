@@ -101,6 +101,9 @@
       minus hours <em>committed</em> to live projects: each project's planned hours less what is already logged,
       spread evenly to its end date, counting only the part inside the horizon. What is left is free.
       Projects in routine categories (such as one per supervised student) count through routine time, not twice.
+      A project's planned hours are the sum of its milestones' hours whenever every milestone (other than dropped
+      ones) has hours — marked Σ — and its own figure otherwise. With no end date, a project ends with its latest
+      milestone.
     </dd>
 
     <dt>Weeks</dt>

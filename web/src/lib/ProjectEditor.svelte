@@ -2,6 +2,8 @@
   import { untrack } from "svelte";
   import { PROJECT_STATUSES, saveProject, deleteProject } from "./data";
   import type { Category, Project } from "./data";
+  import { plannedOf } from "./horizon";
+  import { fmtHours } from "./data";
 
   type Props = {
     project: Project | null; // null = new project
@@ -82,7 +84,12 @@
   </label>
   <label>Start <input type="date" bind:value={start_on} /></label>
   <label>End <input type="date" bind:value={end_on} min={start_on || undefined} /></label>
-  <label>Planned hours <input type="number" min="0" step="0.5" bind:value={planned} /></label>
+  <label>
+    Planned hours <input type="number" min="0" step="0.5" bind:value={planned} />
+    {#if project && plannedOf(project).fromMilestones}
+      <span class="override">Using the milestones' total, {fmtHours(plannedOf(project).hours ?? 0)}; this figure applies only if a milestone lacks hours.</span>
+    {/if}
+  </label>
   <label class="check"><input type="checkbox" bind:checked={is_important} /> Important</label>
   <label class="wide">Notes <textarea rows="3" bind:value={notes}></textarea></label>
   {#if error}<p class="error wide">{error}</p>{/if}
@@ -102,6 +109,7 @@
   }
   label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .wide { grid-column: 1 / -1; }
+  .override { font-size: 0.75rem; color: var(--accent); }
   .check { display: flex; align-items: center; gap: 0.45rem; align-self: end; padding-bottom: 0.5rem; color: var(--ink); }
   .check input { width: auto; }
   .actions { display: flex; gap: 0.5rem; }
