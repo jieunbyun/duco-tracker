@@ -24,7 +24,7 @@
   const t0 = init.todo;
   const meetingSlot = t0?.kind === "meeting" ? init.slots[0] ?? null : null;
 
-  let kind = $state<"task" | "meeting">(t0?.kind ?? init.kind0 ?? "task");
+  let kind = $state<"task" | "meeting">(t0?.kind === "meeting" ? "meeting" : t0 ? "task" : init.kind0 ?? "task");
   let title = $state(t0?.title ?? "");
   let category_id = $state(t0?.category_id ?? "");
   let project_id = $state(t0?.project_id ?? "");

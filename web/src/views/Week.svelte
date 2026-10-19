@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
-    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry, loadAllHours, targetOn,
+    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry, loadAllHours, targetOn, loadIdeas,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
@@ -86,12 +86,13 @@
     const [from, to, carry] = [start, end, isCurrent];
     loading = true;
     try {
-      const [plan, logged, p, review] = await Promise.all([
-        loadWeekPlan(from, to, carry), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(),
+      const [plan, logged, p, review, thoughts] = await Promise.all([
+        loadWeekPlan(from, to, carry), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(),
       ]);
       if (id !== request) return;
       projects = p;
       inbox = review;
+      ideas = thoughts;
       todos = plan.todos;
       slots = plan.slots;
       carried = plan.carried;
@@ -646,6 +647,54 @@
     await load();
   }
 
+  // ---- "To think about": ideas jotted down as they come ------------------------------------
+  // Not tied to a week and never counted as planned; listed until done, deleted,
+  // or turned into a to-do for the week.
+  let ideas = $state<Todo[]>([]);
+  let ideaText = $state("");
+  let ideaEditing = $state<string | null>(null);
+  let ideaDraft = $state({ title: "", note: "" });
+
+  async function addIdea(event: SubmitEvent) {
+    event.preventDefault();
+    const title = ideaText.trim();
+    if (!title) return;
+    ideaText = "";
+    let id = "";
+    await change(`Jotted down “${title}”`,
+      async () => (id = await saveTodo(null, { kind: "idea", title, due_on: today(), must_this_week: false })),
+      () => deleteTodo(id));
+  }
+  function editIdea(t: Todo) {
+    ideaEditing = t.id;
+    ideaDraft = { title: t.title, note: t.note ?? "" };
+  }
+  async function saveIdea(t: Todo) {
+    const title = ideaDraft.title.trim();
+    if (!title) return;
+    const before = { title: t.title, note: t.note };
+    ideaEditing = null;
+    await change(`Edited ${q(t)}`,
+      () => saveTodo(t.id, { title, note: ideaDraft.note.trim() || null }),
+      () => saveTodo(t.id, before));
+  }
+  function ideaDone(t: Todo) {
+    return change(`Thought through ${q(t)}`,
+      () => saveTodo(t.id, { is_done: true, done_at: new Date().toISOString() }),
+      () => saveTodo(t.id, { is_done: false, done_at: null }));
+  }
+  function ideaToTodo(t: Todo) {
+    const day = isCurrent ? today() : start;
+    return change(`Turned ${q(t)} into a to-do`,
+      () => saveTodo(t.id, { kind: "task", due_on: day }),
+      () => saveTodo(t.id, { kind: "idea", due_on: t.due_on }));
+  }
+  function deleteIdea(t: Todo) {
+    if (!confirm(`Delete “${t.title}”?`)) return;
+    const todo = snapTodo(t);
+    return change(`Deleted ${q(t)}`, () => deleteTodo(t.id), () => reinsertTodo(todo, []));
+  }
+
   // ---- to-dos from milestones live this week ------------------------------------------------
   // Each milestone whose dates touch the week (or which is overdue) is offered
   // with this week's share of its remaining hours; ticked ones become to-dos
@@ -1066,6 +1115,41 @@
     {/if}
   {/each}
 
+  <!-- ================= to think about ================= -->
+  <div class="group ideas">
+    <h3>To think about {#if ideas.length}<span class="muted small">{ideas.length}</span>{/if}</h3>
+    <form class="idea-add" onsubmit={addIdea}>
+      <input bind:value={ideaText} placeholder="Jot down a thought — e.g. a conference session title, an angle to explore…" aria-label="New idea" />
+      <button type="submit" disabled={!ideaText.trim()}>Add</button>
+    </form>
+    <ul class="todos">
+      {#each ideas as t (t.id)}
+        <li class="idea">
+          {#if ideaEditing === t.id}
+            <div class="idea-edit">
+              <input bind:value={ideaDraft.title} aria-label="Idea" />
+              <textarea rows="3" bind:value={ideaDraft.note} placeholder="Develop it — notes, options, who to ask…" aria-label="Notes"></textarea>
+              <div class="t-acts">
+                <button class="mini primary" onclick={() => saveIdea(t)}>Save</button>
+                <button class="mini" onclick={() => (ideaEditing = null)}>Cancel</button>
+              </div>
+            </div>
+          {:else}
+            <div class="t-main">
+              <button class="t-title" onclick={() => editIdea(t)}>{t.title}</button>
+              {#if t.note}<span class="idea-note">{t.note}</span>{/if}
+              <span class="t-meta muted">jotted {fmtDay(t.due_on)}</span>
+            </div>
+            <div class="t-acts">
+              <button class="mini" title="Make it a to-do for this week" onclick={() => ideaToTodo(t)}>→ To-do</button>
+              <button class="mini" title="Thought through — take it off the list" onclick={() => ideaDone(t)}>Done</button>
+              <button class="mini danger" aria-label="Delete" title="Delete" onclick={() => deleteIdea(t)}>✕</button>
+            </div>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+  </div>
 
   <!-- ================= invites ================= -->
   <details class="import">
@@ -1473,6 +1557,13 @@
   .todo.cancelled .t-meta { opacity: 0.7; }
   .x-mark { color: var(--ink-soft); margin-top: 0.1rem; }
   .carried { color: var(--accent); }
+  .ideas { margin-top: 1.4rem; }
+  .idea-add { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; max-width: 46rem; }
+  .idea-add input { flex: 1; }
+  li.idea { display: grid; grid-template-columns: 1fr auto; gap: 0.7rem; align-items: start; padding: 0.45rem 0.3rem; border-radius: var(--radius); }
+  li.idea:hover { background: var(--panel); }
+  .idea-note { font-size: 0.82rem; white-space: pre-line; color: var(--ink); }
+  .idea-edit { grid-column: 1 / -1; display: grid; gap: 0.4rem; max-width: 46rem; }
   .mini.danger { color: var(--danger); }
 
   .import { margin-top: 2rem; font-family: var(--font-ui); }

@@ -243,7 +243,7 @@ export async function deleteEntry(id: string): Promise<void> {
 // task. A sitting that has been logged points at its time entry.
 export type Todo = {
   id: string;
-  kind: "task" | "meeting";
+  kind: "task" | "meeting" | "idea"; // idea: "To think about", not tied to a week
   title: string;
   due_on: string;
   category_id: string | null;
@@ -336,6 +336,14 @@ export async function saveTodo(id: string | null, fields: Partial<TodoFields>): 
   const row = await check<{ id: string }>(supabase.from("todo").insert(fields).select("id").single());
   return row!.id;
 }
+/** Open ideas ("To think about"), newest first — whatever week they were jotted in. */
+export async function loadIdeas(): Promise<Todo[]> {
+  return ((await check<Todo[]>(
+    supabase.from("todo").select(TODO_COLS).eq("kind", "idea").eq("is_done", false).eq("is_cancelled", false)
+      .order("created_at", { ascending: false }),
+  )) ?? []).map(asTodo);
+}
+
 export async function deleteTodo(id: string): Promise<void> {
   await check(supabase.from("todo").delete().eq("id", id));
 }

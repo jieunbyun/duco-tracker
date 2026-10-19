@@ -31,6 +31,9 @@
       week's share of its remaining hours — spread evenly to its due date, as in Planning — and turns the ones you tick
       into to-dos linked to the milestone, its project and category; overdue and due-this-week ones are pre-ticked,
       unless the milestone already has an open to-do this week (named in the list; you can still add another).
+      <em>To think about</em>, at the end of the to-do list, holds ideas jotted down as they come — a conference
+      title, an angle to explore: not tied to a week and never counted as planned time. Click one to develop it with
+      notes; turn it into a to-do, mark it done once thought through, or delete it.
       <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
       more days; mark them must-do or flexible. Once a to-do is on a day it shows on the calendar only, and the list
