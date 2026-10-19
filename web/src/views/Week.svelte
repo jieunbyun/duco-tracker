@@ -665,6 +665,25 @@
       async () => (id = await saveTodo(null, { kind: "idea", title, due_on: today(), must_this_week: false })),
       () => deleteTodo(id));
   }
+  /** Text split around web addresses, so each address can show as a short "link". */
+  function linkParts(text: string): { text?: string; url?: string }[] {
+    const out: { text?: string; url?: string }[] = [];
+    const re = /https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g;
+    let last = 0;
+    for (const m of text.matchAll(re)) {
+      let url = m[0];
+      // keep a closing bracket the address itself opened, e.g. …/Thing_(topic)
+      const opens = (url.match(/\(/g) ?? []).length;
+      const closes = (url.match(/\)/g) ?? []).length;
+      if (opens > closes && text[m.index! + url.length] === ")") url += ")";
+      if (m.index! > last) out.push({ text: text.slice(last, m.index) });
+      out.push({ url });
+      last = m.index! + url.length;
+    }
+    if (last < text.length) out.push({ text: text.slice(last) });
+    return out;
+  }
+
   function editIdea(t: Todo) {
     ideaEditing = t.id;
     ideaDraft = { title: t.title, note: t.note ?? "" };
@@ -1116,10 +1135,11 @@
   {/each}
 
   <!-- ================= to think about ================= -->
+  {#snippet linked(text: string)}{#each linkParts(text) as part, i (i)}{#if part.url}<a class="ulink" href={part.url} target="_blank" rel="noopener" title={part.url}>link</a>{:else}{part.text}{/if}{/each}{/snippet}
   <div class="group ideas">
     <h3>To think about {#if ideas.length}<span class="muted small">{ideas.length}</span>{/if}</h3>
     <form class="idea-add" onsubmit={addIdea}>
-      <input bind:value={ideaText} placeholder="Jot down a thought — e.g. a conference session title, an angle to explore…" aria-label="New idea" />
+      <input bind:value={ideaText} placeholder="Jot down a thought — paste a web address and it shows as a short “link”" aria-label="New idea" />
       <button type="submit" disabled={!ideaText.trim()}>Add</button>
     </form>
     <ul class="todos">
@@ -1136,11 +1156,12 @@
             </div>
           {:else}
             <div class="t-main">
-              <button class="t-title" onclick={() => editIdea(t)}>{t.title}</button>
-              {#if t.note}<span class="idea-note">{t.note}</span>{/if}
+              <span class="idea-title">{@render linked(t.title)}</span>
+              {#if t.note}<span class="idea-note">{@render linked(t.note)}</span>{/if}
               <span class="t-meta muted">jotted {fmtDay(t.due_on)}</span>
             </div>
             <div class="t-acts">
+              <button class="mini" title="Edit the idea and its notes" onclick={() => editIdea(t)}>Edit</button>
               <button class="mini" title="Make it a to-do for this week" onclick={() => ideaToTodo(t)}>→ To-do</button>
               <button class="mini" title="Thought through — take it off the list" onclick={() => ideaDone(t)}>Done</button>
               <button class="mini danger" aria-label="Delete" title="Delete" onclick={() => deleteIdea(t)}>✕</button>
@@ -1563,6 +1584,8 @@
   li.idea { display: grid; grid-template-columns: 1fr auto; gap: 0.7rem; align-items: start; padding: 0.45rem 0.3rem; border-radius: var(--radius); }
   li.idea:hover { background: var(--panel); }
   .idea-note { font-size: 0.82rem; white-space: pre-line; color: var(--ink); }
+  .idea-title { font-size: 0.92rem; overflow-wrap: anywhere; }
+  .ulink { text-decoration: underline; color: var(--accent); }
   .idea-edit { grid-column: 1 / -1; display: grid; gap: 0.4rem; max-width: 46rem; }
   .mini.danger { color: var(--danger); }
 
