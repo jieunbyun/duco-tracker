@@ -53,9 +53,10 @@
       description: blank(description),
       metrics: blank(metrics),
       status,
+      evidence_url: blank(evidence_url),
       ...(supervision
         ? { student_level: blank(student_level), start_on: start_on || null, end_on: end_on || null }
-        : { outcome: blank(outcome), evidence_url: blank(evidence_url) }),
+        : { outcome: blank(outcome) }),
     };
     if (!e0) fields.source_type = p0.source_type ?? "manual";
     busy = true;
@@ -105,6 +106,7 @@
     <label>Supervisory role <input bind:value={role} placeholder="e.g. First / Second / Co- supervisor" /></label>
     <label>Percentage <input bind:value={metrics} placeholder="e.g. 20 — omit for co-/external" /></label>
     <label class="wide">Project topic <input bind:value={description} /></label>
+    <label class="wide">Link <input type="url" bind:value={evidence_url} placeholder="https://… — shown as an underlined “link” after the name" /></label>
   {:else}
     <label>Date <input type="date" bind:value={entry_date} required /></label>
     <label class="span2">Title <input bind:value={title} placeholder="e.g. Editorial Board Member, Structural Safety" /></label>
@@ -114,7 +116,7 @@
     <label class="wide">Description / draft bullet(s) <textarea rows="3" bind:value={description}></textarea></label>
     <label class="wide">Outcome / significance <textarea rows="2" bind:value={outcome}></textarea></label>
     <label>Metrics <input bind:value={metrics} placeholder="e.g. c. 100 attendees, £10,000" /></label>
-    <label class="span2">Evidence URL <input type="url" bind:value={evidence_url} /></label>
+    <label class="span2">Link <input type="url" bind:value={evidence_url} placeholder="https://… — shown as an underlined “link” after the title" /></label>
   {/if}
 
   <label>
