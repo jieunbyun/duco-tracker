@@ -31,8 +31,9 @@
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
       more days; mark them must-do or flexible. Once a to-do is on a day it shows on the calendar only, and the list
       below keeps the ones not yet placed. <em>✓ Log</em> on a card opens the log form already filled in and
-      ties the logged time back to the plan. Open to-dos from earlier weeks are carried into the current week until
-      done or cancelled. A red edge marks a planned day that has passed without being logged.
+      ties the logged time back to the plan. Open to-dos from earlier weeks are carried into the current week, under Must do or Flexible
+      like the rest and marked “from week of …”, until done or cancelled. Cancel keeps a to-do in the list, struck
+      through and restorable; Delete removes it. A red edge marks a planned day that has passed without being logged.
       Click or right-click a meeting or duty on the calendar for its actions: log time, move it a day, cancel it
       (it stays on its day, struck through and restorable, as a record of what was planned), edit it, or take it off
       the calendar (for a meeting, delete it). For a duty, the menu also marks the to-do done or reopens it.

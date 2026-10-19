@@ -189,14 +189,14 @@
   // A to-do on a day this week shows on the calendar only; the list holds the
   // ones not placed yet. Cancelling its last day puts it back on the list.
   const onCalendar = $derived(new Set(weekSlots.filter((s) => !s.is_cancelled).map((s) => s.todo_id)));
-  const unplaced = $derived(live.filter((t) => !onCalendar.has(t.id) && !pending(t)));
+  // Cancelled to-dos stay in their group, struck through, until restored or deleted.
+  const unplaced = $derived(tasks.filter((t) => !onCalendar.has(t.id) && !pending(t)));
   const groups = $derived([
-    { key: "must", title: "Must do this week", rows: unplaced.filter((t) => !t.is_done && t.must_this_week && !carried.has(t.id)) },
-    { key: "flex", title: "Flexible", rows: unplaced.filter((t) => !t.is_done && !t.must_this_week && !carried.has(t.id)) },
-    { key: "carried", title: "Carried over from earlier weeks", rows: unplaced.filter((t) => !t.is_done && carried.has(t.id)) },
-    { key: "done", title: "Done", rows: unplaced.filter((t) => t.is_done) },
+    // to-dos carried over from earlier weeks sit with this week's, marked "from week of …"
+    { key: "must", title: "Must do", rows: unplaced.filter((t) => (!t.is_done || t.is_cancelled) && t.must_this_week) },
+    { key: "flex", title: "Flexible", rows: unplaced.filter((t) => (!t.is_done || t.is_cancelled) && !t.must_this_week) },
+    { key: "done", title: "Done", rows: unplaced.filter((t) => t.is_done && !t.is_cancelled) },
   ].map((g) => ({ ...g, rows: [...g.rows].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)) })));
-  const cancelled = $derived(tasks.filter((t) => t.is_cancelled));
 
   function slotsOf(t: Todo): Slot[] {
     return slots.filter((s) => s.todo_id === t.id).sort((a, b) => a.planned_on.localeCompare(b.planned_on));
@@ -212,7 +212,7 @@
       .reduce((s, x) => s + (x.planned_hours ?? 0), 0);
     const open = live.filter((t) => !t.is_done && !uncounted(t));
     const dutyH = open.reduce((s, t) => s + (t.est_hours ?? 0), 0);
-    const must = live.filter((t) => t.must_this_week && !carried.has(t.id) && !uncounted(t));
+    const must = live.filter((t) => t.must_this_week && !uncounted(t));
     const tentativeH = weekSlots
       .filter((s) => !s.is_cancelled && tentative(todoById.get(s.todo_id)))
       .reduce((sum, x) => sum + (x.planned_hours ?? todoById.get(x.todo_id)?.est_hours ?? 0), 0);
@@ -285,6 +285,18 @@
       error = (e as Error).message;
     }
     await load();
+  }
+  function cancelTodo(t: Todo) {
+    return change(`Cancelled ${q(t)}`,
+      () => saveTodo(t.id, { is_cancelled: true }),
+      () => saveTodo(t.id, { is_cancelled: false }));
+  }
+  function deleteWhole(t: Todo) {
+    const logged = slotsOf(t).some((x) => x.entry_id);
+    if (!confirm(`Delete “${t.title}”${slotsOf(t).length ? " and its planned days" : ""}?${logged ? " Logged time stays." : ""}`)) return;
+    const todo = snapTodo(t);
+    const own = slotsOf(t).map(snapSlot);
+    return change(`Deleted ${q(t)}`, () => deleteTodo(t.id), () => reinsertTodo(todo, own));
   }
   function restore(t: Todo) {
     return change(`Restored ${q(t)}`,
@@ -375,8 +387,10 @@
       ...done,
       ...moves,
       { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
+      ...(meeting ? [] : [{ label: "Cancel the whole to-do (keep, struck through)", run: () => cancelTodo(t) }]),
       edit,
       remove,
+      ...(meeting ? [] : [{ label: "Delete the to-do", run: () => deleteWhole(t), danger: true }]),
       ...fromOutlook,
     ];
   }
@@ -844,8 +858,12 @@
           {#each g.rows as t (t.id)}
             {@const ts = slotsOf(t)}
             {@const lh = loggedFor(t)}
-            <li class="todo">
-              <input type="checkbox" checked={t.is_done} aria-label="Done" onchange={(ev) => setDone(t, (ev.target as HTMLInputElement).checked)} />
+            <li class="todo" class:cancelled={t.is_cancelled}>
+              {#if t.is_cancelled}
+                <span class="x-mark" aria-hidden="true">⊘</span>
+              {:else}
+                <input type="checkbox" checked={t.is_done} aria-label="Done" onchange={(ev) => setDone(t, (ev.target as HTMLInputElement).checked)} />
+              {/if}
               <div class="t-main">
                 <button class="t-title" onclick={() => (panel = { kind: "todo", todo: t })}>
                   {t.is_core ? "🎯 " : ""}{t.title}
@@ -853,7 +871,7 @@
                 <span class="t-meta muted">
                   {label(t)}{label(t) && (t.est_hours || lh) ? " · " : ""}
                   {#if lh}{fmtHours(lh)}{t.est_hours ? ` of ${fmtHours(t.est_hours)}` : ""} logged{:else if t.est_hours}est. {fmtHours(t.est_hours)}{/if}
-                  {#if g.key === "carried"} · from week of {fmtDay(weekStart(t.due_on))}{/if}
+                  {#if carried.has(t.id)} · <span class="carried">from week of {fmtDay(weekStart(t.due_on))}</span>{/if}
                 </span>
                 {#if ts.length}
                   <span class="t-days">
@@ -864,7 +882,11 @@
                 {/if}
               </div>
               <div class="t-acts">
-                {#if !t.is_done}
+                {#if t.is_cancelled}
+                  <span class="muted small">cancelled</span>
+                  <button class="mini" onclick={() => restore(t)}>Restore</button>
+                  <button class="mini danger" title="Delete for good" onclick={() => deleteWhole(t)}>Delete</button>
+                {:else if !t.is_done}
                   <select aria-label="Plan on a day" onchange={(ev) => { const el = ev.target as HTMLSelectElement; if (el.value) placeOn(t, el.value); el.value = ""; }}>
                     <option value="">Plan on…</option>
                     {#each days as d (d)}<option value={d}>{dayName(d)} {dayNum(d)}</option>{/each}
@@ -872,6 +894,10 @@
                   <button class="mini" onclick={() => openSpread(t)}>Plan across days…</button>
                   <button class="mini" onclick={() => openLog(t, null, isCurrent ? today() : start)}>✓ Log</button>
                   <button class="mini" title={t.must_this_week ? "Make flexible" : "Make a must-do"} onclick={() => setMust(t)}>{t.must_this_week ? "→ flexible" : "→ must"}</button>
+                  <button class="mini" title="Cancel — stays here, struck through" onclick={() => cancelTodo(t)}>Cancel</button>
+                  <button class="mini danger" title="Delete for good" aria-label="Delete" onclick={() => deleteWhole(t)}>✕</button>
+                {:else}
+                  <button class="mini danger" title="Delete for good" aria-label="Delete" onclick={() => deleteWhole(t)}>✕</button>
                 {/if}
               </div>
             </li>
@@ -880,19 +906,7 @@
       </div>
     {/if}
   {/each}
-  {#if cancelled.length}
-    <details class="group">
-      <summary class="muted small">Cancelled ({cancelled.length})</summary>
-      <ul class="todos">
-        {#each cancelled as t (t.id)}
-          <li class="todo cancelled">
-            <span class="t-title-static">{t.title}</span>
-            <button class="mini" onclick={() => restore(t)}>Restore</button>
-          </li>
-        {/each}
-      </ul>
-    </details>
-  {/if}
+
 
   <!-- ================= invites ================= -->
   <details class="import">
@@ -1205,8 +1219,11 @@
   .daychip.cancelled { text-decoration: line-through; color: var(--ink-soft); }
   .t-acts { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
   .t-acts select { width: auto; font-size: 0.78rem; padding: 0.15rem 0.3rem; }
-  .cancelled .t-title-static { text-decoration: line-through; color: var(--ink-soft); font-size: 0.88rem; }
-  .todo.cancelled { grid-template-columns: 1fr auto; }
+  .todo.cancelled .t-title { text-decoration: line-through; color: var(--ink-soft); }
+  .todo.cancelled .t-meta { opacity: 0.7; }
+  .x-mark { color: var(--ink-soft); margin-top: 0.1rem; }
+  .carried { color: var(--accent); }
+  .mini.danger { color: var(--danger); }
 
   .import { margin-top: 2rem; font-family: var(--font-ui); }
   .import summary { cursor: pointer; }
