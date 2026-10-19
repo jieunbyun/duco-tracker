@@ -79,17 +79,6 @@ export function supervisionTitle(e: CvEntry, escape = false): string {
     .join(", ");
 }
 
-/**
- * A compact, clickable "link" after the title: \href{URL}{\uline{link}}.
- * Needs \usepackage{hyperref} and \usepackage[normalem]{ulem} in the CV.
- * Inside another command's argument hyperref wants #, % and ~ escaped.
- */
-export function linkLatex(url: string | null | undefined): string {
-  const u = (url ?? "").trim();
-  if (!u) return "";
-  return ` \\href{${u.replace(/([#%~])/g, "\\$1")}}{\\uline{link}}`;
-}
-
 /** "Second supervisor (20%): topic" */
 export function supervisionBody(e: CvEntry, escape = false): string {
   const esc = escape ? texEscape : (x: string) => x;
@@ -103,9 +92,9 @@ export function supervisionBody(e: CvEntry, escape = false): string {
 
 export function entryLatex(e: CvEntry): string {
   if (e.cv_section === SUPERVISION) {
-    return `\\begin{jobshort}{${supervisionTitle(e, true)}${linkLatex(e.evidence_url)}}{${texEscape(supervisionDates(e))}}\n${supervisionBody(e, true)}\n\\end{jobshort}`;
+    return `\\begin{jobshort}{${supervisionTitle(e, true)}}{${texEscape(supervisionDates(e))}}\n${supervisionBody(e, true)}\n\\end{jobshort}`;
   }
-  const title = texEscape(e.title) + linkLatex(e.evidence_url);
+  const title = texEscape(e.title);
   const date = texEscape(e.entry_date || String(e.cv_year ?? ""));
   const bullets: string[] = [];
   for (const v of [e.description, e.outcome, e.metrics]) {
@@ -114,6 +103,7 @@ export function entryLatex(e: CvEntry): string {
       if (t) bullets.push(texEscape(t));
     }
   }
+  if (e.evidence_url) bullets.push(`Evidence: \\url{${texEscape(e.evidence_url)}}`);
   if (bullets.length <= 1) {
     return `\\begin{jobshort}{${title}}{${date}}\n${bullets[0] ?? ""}\n\\end{jobshort}`;
   }
