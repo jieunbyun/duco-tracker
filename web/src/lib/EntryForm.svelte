@@ -65,6 +65,7 @@
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
   const project = $derived(projects.find((p) => p.id === projectPick) ?? null);
+  const categoryNote = $derived(tax.categories.find((c) => c.id === category_id)?.description ?? "");
   const milestoneOptions = $derived(
     (project?.milestone ?? []).filter((m) => (m.status !== "done" && m.status !== "dropped") || m.id === e0?.milestone_id),
   );
@@ -192,6 +193,7 @@
       <option value={NEW}>+ New project…</option>
     </select>
   </label>
+  {#if categoryNote}<p class="hint">{categoryNote}</p>{/if}
   {#if projectPick === NEW}
     <label>New project name <input bind:value={newProject} placeholder="e.g. DAFNI Fellowship" /></label>
   {/if}
@@ -251,6 +253,8 @@
   }
   label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .wide, .when { grid-column: 1 / -1; }
+  .hint { grid-column: 1 / -1; margin: -0.35rem 0 0; font-size: 0.8rem; color: var(--ink-soft); white-space: pre-line; }
+
   .when {
     display: grid;
     grid-template-columns: 10rem auto 8rem 8rem 1fr;

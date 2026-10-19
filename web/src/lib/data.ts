@@ -1,7 +1,15 @@
 import { supabase } from "./supabase";
 import { setWeekStartDay, addDays } from "./dates";
 
-export type Category = { id: string; area_id: string; code: string; label: string; kind: string; sort_order: number };
+export type Category = {
+  id: string;
+  area_id: string;
+  code: string;
+  label: string;
+  kind: string;
+  sort_order: number;
+  description: string | null; // your own note on what belongs here
+};
 export type Target = { area_id: string; effective_from: string; weekly_hours: number; email_weekly_hours: number };
 export type Area = { id: string; code: string; label: string; sort_order: number };
 export type Taxonomy = {
@@ -54,7 +62,7 @@ export function loadTaxonomy(refresh = false): Promise<Taxonomy> {
 async function fetchTaxonomy(): Promise<Taxonomy> {
   const [a, c, t, s] = await Promise.all([
     supabase.from("area").select("id,code,label,sort_order").eq("is_active", true).order("sort_order"),
-    supabase.from("category").select("id,area_id,code,label,kind,sort_order").eq("is_active", true).order("sort_order"),
+    supabase.from("category").select("id,area_id,code,label,kind,sort_order,description").eq("is_active", true).order("sort_order"),
     supabase.from("area_target").select("area_id,effective_from,weekly_hours,email_weekly_hours"),
     supabase.from("user_setting").select("weeks_per_year,horizon_months,week_starts_on").maybeSingle(),
   ]);
@@ -400,6 +408,11 @@ export async function deleteCv(id: string): Promise<void> {
 }
 
 export type Settings = { weeks_per_year: number; horizon_months: number; week_starts_on: number };
+export async function saveCategoryNote(id: string, description: string | null): Promise<void> {
+  await check(supabase.from("category").update({ description }).eq("id", id));
+  await loadTaxonomy(true);
+}
+
 export async function saveSettings(fields: Settings): Promise<void> {
   await check(supabase.from("user_setting").upsert(fields));
   await loadTaxonomy(true);

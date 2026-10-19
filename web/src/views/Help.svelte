@@ -63,6 +63,20 @@
     </dd>
   </dl>
 
+  <h2>Categories</h2>
+  <p class="muted small">Your own notes, kept in your database (edit them under Planning › Categories).</p>
+  {#if tax}
+    {#each tax.areas as a (a.id)}
+      <h3>{a.label}</h3>
+      <dl class="cats">
+        {#each tax.categories.filter((c) => c.area_id === a.id) as c (c.id)}
+          <dt>{c.label} <span class="muted kind">{c.kind}</span></dt>
+          <dd>{#if c.description}{c.description}{:else}<span class="muted">No note yet.</span>{/if}</dd>
+        {/each}
+      </dl>
+    {/each}
+  {/if}
+
   <h2>How the numbers are worked out</h2>
   <dl>
     <dt>Targets</dt>
@@ -112,5 +126,9 @@
   .help h2 { margin-top: 2rem; }
   dl { margin: 0; }
   dt { font-weight: 600; margin-top: 1rem; }
-  dd { margin: 0.2rem 0 0; color: var(--ink); }
+  dd { margin: 0.2rem 0 0; color: var(--ink); white-space: pre-line; }
+  .help h3 { margin-top: 1.2rem; font-size: 1rem; }
+  .cats dt { margin-top: 0.6rem; }
+  .kind { font-weight: 400; font-size: 0.8rem; font-family: var(--font-ui); }
+  .small { font-size: 0.85rem; font-family: var(--font-ui); }
 </style>

@@ -7,6 +7,7 @@
   import ProjectEditor from "../lib/ProjectEditor.svelte";
   import Milestones from "../lib/Milestones.svelte";
   import Settings from "../lib/Settings.svelte";
+  import CategoryNotes from "../lib/CategoryNotes.svelte";
   import { shareEmail } from "../lib/email";
 
   let tax = $state<Taxonomy | null>(null);
@@ -300,6 +301,12 @@
       </div>
     {/each}
 
+    <!-- ================= categories ================= -->
+    <details class="cats">
+      <summary><h2>Categories</h2> <span class="muted">what belongs where — your private notes</span></summary>
+      <CategoryNotes {tax} onsaved={load} />
+    </details>
+
     <!-- ================= allocation ================= -->
     <div class="projects-head">
       <h2>Allocation</h2>
@@ -398,6 +405,11 @@
   .add { font-size: 0.8rem; padding: 0.15rem 0.6rem; }
   .empty { font-family: var(--font-ui); font-size: 0.82rem; margin: 0.2rem 0 0; }
 
+  .cats { margin-top: 2.2rem; }
+  .cats summary { cursor: pointer; font-family: var(--font-ui); }
+  .cats summary h2 { display: inline; margin: 0; }
+  .cats summary .muted { font-size: 0.82rem; margin-left: 0.4rem; }
+  .cats[open] summary { margin-bottom: 0.8rem; }
   .project { border-radius: var(--radius); }
   .p-line { display: flex; align-items: flex-start; gap: 0.2rem; }
   .p-done { width: auto; flex: none; margin: 0.75rem 0 0 0.3rem; }

@@ -48,6 +48,7 @@
       .sort((a, b) => a.name.localeCompare(b.name)),
   );
   const project = $derived(projects.find((p) => p.id === project_id) ?? null);
+  const categoryNote = $derived(tax.categories.find((c) => c.id === category_id)?.description ?? "");
   const milestoneOptions = $derived(
     (project?.milestone ?? []).filter((m) => (m.status !== "done" && m.status !== "dropped") || m.id === t0?.milestone_id),
   );
@@ -168,6 +169,7 @@
       {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
     </select>
   </label>
+  {#if categoryNote}<p class="hint">{categoryNote}</p>{/if}
   {#if project_id}
     <label>
       Milestone
@@ -215,6 +217,8 @@
   }
   label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .wide { grid-column: 1 / -1; }
+  .hint { grid-column: 1 / -1; margin: -0.35rem 0 0; font-size: 0.8rem; color: var(--ink-soft); white-space: pre-line; }
+
   .kind { display: flex; }
   .kind button { font-size: 0.85rem; border-radius: 0; }
   .kind button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
