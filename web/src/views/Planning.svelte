@@ -149,6 +149,11 @@
   }
   const warn = (l: ProjectLoad) => l.flag === "overdue" || l.flag === "over-budget";
 
+  /** " (38%)": part of capacity, or nothing when there is no capacity to compare with. */
+  function share(part: number, capacity: number, suffix = ""): string {
+    return capacity > 0 ? ` (${Math.round((100 * part) / capacity)}%${suffix})` : "";
+  }
+
   function period(p: Project): string {
     if (!p.start_on && !p.end_on) return "no dates";
     return `${p.start_on ? fmtDay(p.start_on) : "…"} – ${p.end_on ? fmtDay(p.end_on) : "…"}`;
@@ -198,9 +203,9 @@
           </div>
           <span class="value" class:over>
             {#if over}
-              <strong>⚠ over by {fmtHours(-r.free)}</strong>
+              <strong>⚠ over by {fmtHours(-r.free)}{share(-r.free, r.capacity, " over")}</strong>
             {:else}
-              <strong>{fmtHours(r.free)} free</strong>
+              <strong>{fmtHours(r.free)} free{share(r.free, r.capacity)}</strong>
               <span class="muted">· ≈ {fmtHours(r.freePerWeek)}/wk</span>
             {/if}
           </span>
@@ -214,7 +219,7 @@
         <span>
           capacity <strong>{fmtHours(total.capacity)}</strong> · routine {fmtHours(total.routine)} ·
           projects {fmtHours(total.committed)} ·
-          {#if total.free >= 0}<strong>{fmtHours(total.free)} free</strong>{:else}<strong class="over">⚠ over by {fmtHours(-total.free)}</strong>{/if}
+          {#if total.free >= 0}<strong>{fmtHours(total.free)} free{share(total.free, total.capacity)}</strong>{:else}<strong class="over">⚠ over by {fmtHours(-total.free)}{share(-total.free, total.capacity, " over")}</strong>{/if}
         </span>
       </div>
     </div>
