@@ -112,3 +112,55 @@ export function projectLoad(
     flag: overdue ? "overdue" : over ?? (noEnd ? "no-end" : null),
   };
 }
+
+// ---- a milestone's share of one week ------------------------------------------
+export type MilestoneWeek = {
+  due: string | null; // its due date, or the project's end
+  remaining: number | null; // planned − logged; null when it has no planned hours
+  suggested: number | null; // this week's share of `remaining`
+  overdue: boolean;
+  dueThisWeek: boolean;
+};
+
+/**
+ * Whether a milestone is live in `week` (its dates overlap it, or it is overdue
+ * and not done), and how many of its remaining hours fall in that week when
+ * spread evenly from today (or its start) to its due date — the same rule as
+ * the planning horizon. Null when the milestone is not live that week.
+ */
+export function milestoneWeek(
+  p: Project,
+  m: Project["milestone"][number],
+  logged: number,
+  week: Range,
+  todayIso: string,
+): MilestoneWeek | null {
+  if (!LIVE_STATUSES.has(p.status) || m.status === "done" || m.status === "dropped") return null;
+  const start = m.start_on ?? p.start_on;
+  const due = m.due_on ?? endOf(p);
+  const overdue = !!due && due < todayIso;
+  if (!overdue) {
+    if (start && start > week.to) return null; // not started by the end of the week
+    if (due && due < week.from) return null; // over before the week begins
+  }
+  const remaining = m.planned_hours === null ? null : Math.max(0, m.planned_hours - logged);
+  let suggested: number | null = null;
+  if (remaining !== null && remaining > 0) {
+    if (overdue) suggested = remaining;
+    else if (due) {
+      // spread from today (or the start) to the due date; this week's slice of that
+      let from = start && start > todayIso ? start : todayIso;
+      if (from > due) from = due;
+      const lo = from > week.from ? from : week.from;
+      const hi = due < week.to ? due : week.to;
+      suggested = hi >= lo ? (remaining * daysIn({ from: lo, to: hi })) / daysIn({ from, to: due }) : 0;
+    }
+  }
+  return {
+    due,
+    remaining,
+    suggested: suggested === null ? null : Math.round(suggested * 2) / 2, // to the half hour
+    overdue,
+    dueThisWeek: !!due && due >= week.from && due <= week.to,
+  };
+}

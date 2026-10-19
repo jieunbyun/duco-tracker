@@ -1,9 +1,11 @@
 <script lang="ts">
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
-    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry,
+    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry, loadAllHours,
   } from "../lib/data";
-  import type { Taxonomy, Project, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
+  import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
+  import { milestoneWeek } from "../lib/plan";
+  import type { MilestoneWeek } from "../lib/plan";
   import { addDays, today, weekStart, parse, fmtDay } from "../lib/dates";
   import { meetingsInRange } from "../lib/ics";
   import type { Meeting } from "../lib/ics";
@@ -425,7 +427,8 @@
     | { kind: "entry"; entry: TimeEntry | null; day: string }
     | { kind: "spread"; todo: Todo }
     | { kind: "email" }
-    | { kind: "outlook" };
+    | { kind: "outlook" }
+    | { kind: "milestones" };
   let panel = $state<Panel | null>(null);
   let markDone = $state(false);
   let cvOpen = $state(false); // the CV form inside an entry's dialog
@@ -609,6 +612,66 @@
     await load();
   }
 
+  // ---- to-dos from milestones live this week ------------------------------------------------
+  // Each milestone whose dates touch the week (or which is overdue) is offered
+  // with this week's share of its remaining hours; ticked ones become to-dos
+  // linked to the milestone, its project and category.
+  type MsRow = { p: Project; m: Milestone; info: MilestoneWeek; already: boolean; pick: boolean; hours: number | null; must: boolean };
+  let msRows = $state<MsRow[]>([]);
+  let msLoading = $state(false);
+
+  async function openMilestones() {
+    panel = { kind: "milestones" };
+    msLoading = true;
+    msRows = [];
+    try {
+      const logged = new Map<string, number>();
+      for (const h of await loadAllHours()) {
+        if (h.milestone_id) logged.set(h.milestone_id, (logged.get(h.milestone_id) ?? 0) + h.hours);
+      }
+      const week = { from: start, to: end };
+      const rows: MsRow[] = [];
+      for (const p of projects) {
+        for (const m of p.milestone) {
+          const info = milestoneWeek(p, m, logged.get(m.id) ?? 0, week, today());
+          if (!info) continue;
+          const already = todos.some((t) => t.milestone_id === m.id && t.kind === "task" && !t.is_cancelled);
+          const urgent = info.overdue || info.dueThisWeek;
+          rows.push({ p, m, info, already, pick: !already && urgent, hours: info.suggested, must: m.hard_deadline || urgent });
+        }
+      }
+      // overdue first, then by due date; undated last
+      msRows = rows.sort((a, b) =>
+        Number(b.info.overdue) - Number(a.info.overdue) || (a.info.due ?? "9").localeCompare(b.info.due ?? "9"));
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      msLoading = false;
+    }
+  }
+
+  async function addFromMilestones() {
+    const picked = msRows.filter((r) => r.pick && !r.already);
+    const added: string[] = [];
+    try {
+      for (const r of picked) {
+        added.push(await saveTodo(null, {
+          kind: "task", title: r.m.title, due_on: isCurrent ? today() : start,
+          category_id: r.p.category_id, project_id: r.p.id, milestone_id: r.m.id,
+          est_hours: r.hours, must_this_week: r.must,
+        }));
+      }
+      if (added.length) {
+        remember(`Added ${added.length} to-${added.length === 1 ? "do" : "dos"} from milestones`,
+          async () => { for (const id of added) await deleteTodo(id); });
+      }
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    panel = null;
+    await load();
+  }
+
   // ---- email checks: one to-do per weekday ------------------------------------------------
   const EMAIL_TITLE = "Email check";
   const weekdays = $derived(days.filter((d) => { const w = parse(d).getDay(); return w >= 1 && w <= 5; }));
@@ -757,6 +820,7 @@
   <div class="toolbar">
     <button class="primary" onclick={() => openEntry(null, isCurrent ? today() : start)}>+ Log</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "task" })}>+ To-do</button>
+    <button onclick={openMilestones} title="To-dos from milestones that fall in this week">+ From milestones</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: isCurrent ? today() : start })}>+ Meeting</button>
     <button onclick={undoLast} disabled={!history.length}
             title={history.length ? `Undo: ${history[history.length - 1].label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
@@ -1004,6 +1068,52 @@
           <button onclick={() => (panel = null)}>Cancel</button>
         </div>
       </div>
+    {:else if panel.kind === "milestones"}
+      <h2>To-dos from milestones · {fmtDay(start)} – {fmtDay(end)}</h2>
+      <div class="pick">
+        {#if msLoading}
+          <p class="muted">Loading…</p>
+        {:else if !msRows.length}
+          <p class="muted">No milestones fall in this week. Milestones need dates (or their project's) to show here.</p>
+        {:else}
+          <p class="muted small">
+            Hours suggested are this week's share of what is left, spread evenly to the due date. Overdue and
+            due-this-week milestones are ticked for you.
+          </p>
+          <ul class="ms-pick">
+            {#each msRows as r (r.m.id)}
+              <li class:off={r.already}>
+                <input type="checkbox" bind:checked={r.pick} disabled={r.already} aria-label={`Add ${r.m.title}`} />
+                <div class="ms-what">
+                  <strong>{r.m.title}</strong>
+                  <span class="muted">{r.p.name}</span>
+                  <span class="ms-when" class:late={r.info.overdue}>
+                    {#if r.info.overdue}overdue since {fmtDay(r.info.due!)}
+                    {:else if r.info.due}due {fmtDay(r.info.due)}{r.m.due_on ? "" : " (project end)"}
+                    {:else}no due date{/if}
+                    {#if r.m.hard_deadline} · hard deadline{/if}
+                    {#if r.info.remaining !== null} · {fmtHours(r.info.remaining)} left{:else} · no planned hours{/if}
+                    {#if r.already} · already a to-do this week{/if}
+                  </span>
+                </div>
+                {#if !r.already}
+                  <label class="ms-h">h <input type="number" min="0" step="0.5" bind:value={r.hours} aria-label="Hours this week" /></label>
+                  <label class="ms-must"><input type="checkbox" bind:checked={r.must} /> must</label>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        <div class="pick-actions">
+          {#if msRows.some((r) => r.pick && !r.already)}
+            {@const n = msRows.filter((r) => r.pick && !r.already).length}
+            <button class="primary" onclick={addFromMilestones}>Add {n} to-{n === 1 ? "do" : "dos"}</button>
+          {:else}
+            <button class="primary" disabled>Tick milestones to add</button>
+          {/if}
+          <button onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </div>
     {:else if panel.kind === "outlook"}
       <h2>Outlook calendar</h2>
       <OutlookSettings oncancel={() => (panel = null)}
@@ -1119,6 +1229,17 @@
   .pick-row { display: flex; flex-wrap: wrap; gap: 1rem; }
   .pick-hours { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); max-width: 16rem; }
   .pick-actions { display: flex; gap: 0.5rem; }
+  .ms-pick { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; max-height: 55vh; overflow-y: auto; }
+  .ms-pick li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.6rem; align-items: center; padding: 0.4rem 0.3rem; border-bottom: 1px solid var(--rule); }
+  .ms-pick li.off { opacity: 0.55; }
+  .ms-pick input[type="checkbox"] { width: auto; }
+  .ms-what { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; align-items: baseline; font-size: 0.88rem; }
+  .ms-when { width: 100%; font-size: 0.78rem; color: var(--ink-soft); }
+  .ms-when.late { color: var(--danger); }
+  .ms-h { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--ink-soft); }
+  .ms-h input { width: 4.5rem; padding: 0.25rem 0.35rem; font-size: 0.85rem; }
+  .ms-must { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; }
+  @media (max-width: 40rem) { .ms-pick li { grid-template-columns: auto 1fr; } }
   .card-body {
     display: grid;
     gap: 0.1rem;
