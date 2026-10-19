@@ -32,16 +32,20 @@ export type ProjectLoad = {
 };
 
 /**
- * A project's plan. When it has milestones and every one still in play (not
- * dropped) has planned hours, their sum is the plan, overriding the project's
- * own figure; otherwise the project's own figure stands.
+ * A project's plan, from its milestones (dropped ones aside) when:
+ *   - every milestone has planned hours — their sum overrides the project's own figure; or
+ *   - the project has no figure of its own — the sum of those milestones that have hours.
+ * Otherwise (own figure, and some milestones without hours) the project's figure stands.
  */
-export function plannedOf(p: Project): { hours: number | null; fromMilestones: boolean } {
+export function plannedOf(p: Project): { hours: number | null; fromMilestones: boolean; complete: boolean } {
   const ms = p.milestone.filter((m) => m.status !== "dropped");
-  if (ms.length && ms.every((m) => m.planned_hours !== null)) {
-    return { hours: ms.reduce((s, m) => s + (m.planned_hours ?? 0), 0), fromMilestones: true };
+  const withHours = ms.filter((m) => m.planned_hours !== null);
+  const sum = withHours.reduce((s, m) => s + (m.planned_hours ?? 0), 0);
+  const complete = ms.length > 0 && withHours.length === ms.length;
+  if (complete || (p.planned_hours === null && withHours.length)) {
+    return { hours: sum, fromMilestones: true, complete };
   }
-  return { hours: p.planned_hours, fromMilestones: false };
+  return { hours: p.planned_hours, fromMilestones: false, complete };
 }
 
 /** The project's end date, or failing that its latest milestone due date. */

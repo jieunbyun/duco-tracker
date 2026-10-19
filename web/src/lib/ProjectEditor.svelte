@@ -87,7 +87,11 @@
   <label>
     Planned hours <input type="number" min="0" step="0.5" bind:value={planned} />
     {#if project && plannedOf(project).fromMilestones}
-      <span class="override">Using the milestones' total, {fmtHours(plannedOf(project).hours ?? 0)}; this figure applies only if a milestone lacks hours.</span>
+      <span class="override">
+        Using the milestones' total, {fmtHours(plannedOf(project).hours ?? 0)}{plannedOf(project).complete
+          ? "; a figure here applies only if a milestone loses its hours."
+          : " (only the milestones that have hours); enter a figure here to use it instead."}
+      </span>
     {/if}
   </label>
   <label class="check"><input type="checkbox" bind:checked={is_important} /> Important</label>

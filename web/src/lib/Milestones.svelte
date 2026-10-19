@@ -96,7 +96,9 @@
   <div class="head">
     <h3>Milestones</h3>
     {#if plannedOf(project).fromMilestones}
-      <span class="muted">{fmtHours(plannedSum)} across the milestones — used as the project's plan</span>
+      <span class="muted">
+        {fmtHours(plannedSum)} across the milestones — used as the project's plan{plannedOf(project).complete ? "" : " (some milestones have no hours yet)"}
+      </span>
     {:else if plannedSum > 0}
       <span class="muted">
         {fmtHours(plannedSum)}{project.planned_hours !== null ? ` of ${fmtHours(project.planned_hours)}` : ""} assigned so far;
