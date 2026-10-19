@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
-    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry, loadAllHours,
+    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry, loadAllHours, targetOn,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
@@ -184,6 +184,23 @@
     return entries.filter((e) => e.started_at.slice(0, 10) === day);
   }
   const loggedOn = (day: string) => entriesOn(day).reduce((s, e) => s + e.minutes / 60, 0);
+
+  // The week at a glance: planned (the days' figures added up), logged, and the
+  // weekly target (every area's time plus email, as set in Planning).
+  const weekTotals = $derived.by(() => {
+    let planned = 0, unknown = 0;
+    for (const d of days) {
+      const p = plannedOn(d);
+      planned += p.hours;
+      unknown += p.unknown;
+    }
+    const logged = entries.reduce((sum, e) => sum + e.minutes / 60, 0);
+    const target = (tax?.areas ?? []).reduce((sum, a) => {
+      const t = targetOn(tax!.targets, a.id, start);
+      return sum + (t ? t.weekly_hours + t.email_weekly_hours : 0);
+    }, 0);
+    return { planned, unknown, logged, target };
+  });
 
   /** Hours planned on a day: meetings' lengths and duties' hours for that day, leaving
    *  out cancelled cards and anything not yet counted (to review, or tentative). */
@@ -853,6 +870,28 @@
 
   {#if error}<p class="error">{error}</p>{/if}
 
+  <div class="week-totals" aria-label="Week totals">
+    <div class="wt">
+      <span class="wt-label">Planned</span>
+      <span class="wt-value">{fmtHours(weekTotals.planned)}</span>
+      {#if weekTotals.unknown}<span class="wt-sub">+{weekTotals.unknown} without hours</span>{/if}
+    </div>
+    <div class="wt">
+      <span class="wt-label">Logged</span>
+      <span class="wt-value">{fmtHours(weekTotals.logged)}</span>
+      {#if weekTotals.target}<span class="wt-sub">{Math.round((100 * weekTotals.logged) / weekTotals.target)}% of target</span>{/if}
+    </div>
+    {#if weekTotals.target}
+      <div class="wt">
+        <span class="wt-label">Weekly target</span>
+        <span class="wt-value">{fmtHours(weekTotals.target)}</span>
+        <span class="wt-sub">
+          {#if weekTotals.planned >= weekTotals.target}planned covers it{:else}{fmtHours(weekTotals.target - weekTotals.planned)} not yet planned{/if}
+        </span>
+      </div>
+    {/if}
+  </div>
+
   <p class="summary">
     Meetings <strong>{fmtHours(summary.meetingH)}</strong> ·
     open duties <strong>{fmtHours(summary.dutyH)}</strong> ·
@@ -1266,6 +1305,11 @@
   .nav button { padding: 0.3rem 0.7rem; }
   .nav .link { background: none; border: none; color: var(--accent); text-decoration: underline; }
   .summary { font-family: var(--font-ui); font-size: 0.9rem; color: var(--ink-soft); margin: 0 0 0.8rem; }
+  .week-totals { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: 0.6rem; margin: 0.4rem 0 0.7rem; font-family: var(--font-ui); max-width: 40rem; }
+  .wt { display: grid; gap: 0.05rem; background: var(--panel); border-radius: var(--radius); padding: 0.55rem 0.8rem; }
+  .wt-label { font-size: 0.75rem; color: var(--ink-soft); }
+  .wt-value { font-size: 1.35rem; font-weight: 600; line-height: 1.2; }
+  .wt-sub { font-size: 0.75rem; color: var(--ink-soft); }
   .summary strong { color: var(--ink); }
   .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 1rem; font-family: var(--font-ui); }
   .toggle { display: inline-flex; align-items: center; gap: 0.4rem; margin-left: auto; font-size: 0.85rem; color: var(--ink-soft); }
