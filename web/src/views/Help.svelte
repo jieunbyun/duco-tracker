@@ -29,7 +29,8 @@
       Click a logged entry on a day to edit, delete, copy it to another date, or turn it into a CV achievement.
       <em>+ From milestones</em> lists the milestones whose dates fall in the week (and any overdue), each with this
       week's share of its remaining hours — spread evenly to its due date, as in Planning — and turns the ones you tick
-      into to-dos linked to the milestone, its project and category; overdue and due-this-week ones are pre-ticked.
+      into to-dos linked to the milestone, its project and category; overdue and due-this-week ones are pre-ticked,
+      unless the milestone already has an open to-do this week (named in the list; you can still add another).
       <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
       more days; mark them must-do or flexible. Once a to-do is on a day it shows on the calendar only, and the list

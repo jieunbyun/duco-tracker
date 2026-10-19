@@ -648,7 +648,9 @@
   // Each milestone whose dates touch the week (or which is overdue) is offered
   // with this week's share of its remaining hours; ticked ones become to-dos
   // linked to the milestone, its project and category.
-  type MsRow = { p: Project; m: Milestone; info: MilestoneWeek; already: boolean; pick: boolean; hours: number | null; must: boolean };
+  // `existing`: an open to-do this week already linked to the milestone — noted, and
+  // the row starts unticked, but it can still be added (e.g. a different task on it)
+  type MsRow = { p: Project; m: Milestone; info: MilestoneWeek; existing: Todo | null; pick: boolean; hours: number | null; must: boolean };
   let msRows = $state<MsRow[]>([]);
   let msLoading = $state(false);
 
@@ -667,9 +669,9 @@
         for (const m of p.milestone) {
           const info = milestoneWeek(p, m, logged.get(m.id) ?? 0, week, today());
           if (!info) continue;
-          const already = todos.some((t) => t.milestone_id === m.id && t.kind === "task" && !t.is_cancelled);
+          const existing = todos.find((t) => t.milestone_id === m.id && t.kind === "task" && !t.is_cancelled && !t.is_done) ?? null;
           const urgent = info.overdue || info.dueThisWeek;
-          rows.push({ p, m, info, already, pick: !already && urgent, hours: info.suggested, must: m.hard_deadline || urgent });
+          rows.push({ p, m, info, existing, pick: !existing && urgent, hours: info.suggested, must: m.hard_deadline || urgent });
         }
       }
       // overdue first, then by due date; undated last
@@ -699,20 +701,20 @@
         out.push({
           key: c.id,
           label: `${a.label} › ${c.label}`,
-          urgent: rows.some((r) => !r.already && (r.info.overdue || r.info.dueThisWeek)),
+          urgent: rows.some((r) => !r.existing && (r.info.overdue || r.info.dueThisWeek)),
           projects: [...byProject.values()].sort((x, y) => x.p.name.localeCompare(y.p.name)),
         });
       }
     }
     return out;
   });
-  const pickedIn = (rows: MsRow[]) => rows.filter((r) => r.pick && !r.already).length;
+  const pickedIn = (rows: MsRow[]) => rows.filter((r) => r.pick).length;
   function pickAll(rows: MsRow[], on: boolean) {
-    for (const r of rows) if (!r.already) r.pick = on;
+    for (const r of rows) r.pick = on;
   }
 
   async function addFromMilestones() {
-    const picked = msRows.filter((r) => r.pick && !r.already);
+    const picked = msRows.filter((r) => r.pick);
     const added: string[] = [];
     try {
       for (const r of picked) {
@@ -1179,15 +1181,13 @@
                   <div class="ms-project">
                     <div class="ms-project-head">
                       <span>{gp.p.name}</span>
-                      {#if gp.rows.some((r) => !r.already)}
-                        <button class="mini" onclick={() => pickAll(gp.rows, true)}>all</button>
-                        <button class="mini" onclick={() => pickAll(gp.rows, false)}>none</button>
-                      {/if}
+                      <button class="mini" onclick={() => pickAll(gp.rows, true)}>all</button>
+                      <button class="mini" onclick={() => pickAll(gp.rows, false)}>none</button>
                     </div>
                     <ul class="ms-pick">
                       {#each gp.rows as r (r.m.id)}
-                        <li class:off={r.already}>
-                          <input type="checkbox" bind:checked={r.pick} disabled={r.already} aria-label={`Add ${r.m.title}`} />
+                        <li class:off={!!r.existing && !r.pick}>
+                          <input type="checkbox" bind:checked={r.pick} aria-label={`Add ${r.m.title}`} />
                           <div class="ms-what">
                             <strong>{r.m.title}</strong>
                             <span class="ms-when" class:late={r.info.overdue}>
@@ -1196,13 +1196,13 @@
                               {:else}no due date{/if}
                               {#if r.m.hard_deadline} · hard deadline{/if}
                               {#if r.info.remaining !== null} · {fmtHours(r.info.remaining)} left{:else} · no planned hours{/if}
-                              {#if r.already} · already a to-do this week{/if}
+                              {#if r.existing}
+                                <span class="ms-existing">· already a to-do this week: “{r.existing.title}”{carried.has(r.existing.id) ? " (carried over)" : ""} — tick to add another</span>
+                              {/if}
                             </span>
                           </div>
-                          {#if !r.already}
-                            <label class="ms-h">h <input type="number" min="0" step="0.5" bind:value={r.hours} aria-label="Hours this week" /></label>
-                            <label class="ms-must"><input type="checkbox" bind:checked={r.must} /> must</label>
-                          {/if}
+                          <label class="ms-h">h <input type="number" min="0" step="0.5" bind:value={r.hours} aria-label="Hours this week" /></label>
+                          <label class="ms-must"><input type="checkbox" bind:checked={r.must} /> must</label>
                         </li>
                       {/each}
                     </ul>
@@ -1213,8 +1213,8 @@
           </div>
         {/if}
         <div class="pick-actions">
-          {#if msRows.some((r) => r.pick && !r.already)}
-            {@const n = msRows.filter((r) => r.pick && !r.already).length}
+          {#if msRows.some((r) => r.pick)}
+            {@const n = msRows.filter((r) => r.pick).length}
             <button class="primary" onclick={addFromMilestones}>Add {n} to-{n === 1 ? "do" : "dos"}</button>
           {:else}
             <button class="primary" disabled>Tick milestones to add</button>
@@ -1357,6 +1357,7 @@
   .ms-what { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; align-items: baseline; font-size: 0.88rem; }
   .ms-when { width: 100%; font-size: 0.78rem; color: var(--ink-soft); }
   .ms-when.late { color: var(--danger); }
+  .ms-existing { color: var(--accent); }
   .ms-h { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; color: var(--ink-soft); }
   .ms-h input { width: 4.5rem; padding: 0.25rem 0.35rem; font-size: 0.85rem; }
   .ms-must { display: inline-flex; align-items: center; gap: 0.25rem; font-size: 0.8rem; }
