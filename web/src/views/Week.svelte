@@ -10,6 +10,10 @@
   import EntryForm from "../lib/EntryForm.svelte";
   import TodoForm from "../lib/TodoForm.svelte";
   import CvForm from "../lib/CvForm.svelte";
+  import OutlookInbox from "../lib/OutlookInbox.svelte";
+  import OutlookSettings from "../lib/OutlookSettings.svelte";
+  import { loadFeed, syncOutlook, isStale, loadUnreviewed, dismissOutlook } from "../lib/outlook";
+  import type { Feed } from "../lib/outlook";
 
   const SHOW_LOGGED = "week.showLogged";
   const LAST_CATEGORY = "log.category";
@@ -34,16 +38,54 @@
 
   loadTaxonomy().then((t) => (tax = t)).catch((e) => (error = e.message));
 
+  // ---- Outlook: synced when Week opens (if stale) and on demand -------------------------
+  let inbox = $state<{ todos: Todo[]; slots: Slot[] }>({ todos: [], slots: [] });
+  let feed = $state<Feed | null>(null);
+  let syncing = $state(false);
+  let syncNote = $state("");
+
+  async function runSync() {
+    if (syncing) return;
+    syncing = true;
+    syncNote = "";
+    try {
+      const r = await syncOutlook();
+      const parts = [r.added && `${r.added} new`, r.updated && `${r.updated} changed`, r.removed && `${r.removed} removed`].filter(Boolean);
+      syncNote = parts.length ? parts.join(", ") : "up to date";
+    } catch (e) {
+      syncNote = `sync failed — ${(e as Error).message}`;
+    }
+    feed = await loadFeed().catch(() => feed);
+    syncing = false;
+    await load();
+  }
+  loadFeed()
+    .then((f) => {
+      feed = f;
+      if (isStale(f)) runSync();
+    })
+    .catch(() => {}); // before 0005_outlook_sync.sql is run there is no feed table: Outlook stays off
+
+  /** An Outlook event not yet kept: shown, but not counted as planned. */
+  const pending = (t: Todo | undefined) => !!t && t.source === "outlook" && !t.reviewed;
+  function syncedAt(f: Feed | null): string {
+    if (!f?.last_synced_at) return "never synced";
+    const d = new Date(f.last_synced_at);
+    const sameDay = d.toDateString() === new Date().toDateString();
+    return `synced ${sameDay ? d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : d.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`;
+  }
+
   async function load() {
     const id = ++request;
     const [from, to, carry] = [start, end, isCurrent];
     loading = true;
     try {
-      const [plan, logged, p] = await Promise.all([
-        loadWeekPlan(from, to, carry), loadEntriesBetween(from, to), loadProjects(),
+      const [plan, logged, p, review] = await Promise.all([
+        loadWeekPlan(from, to, carry), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(),
       ]);
       if (id !== request) return;
       projects = p;
+      inbox = review;
       todos = plan.todos;
       slots = plan.slots;
       carried = plan.carried;
@@ -143,7 +185,7 @@
   // A to-do on a day this week shows on the calendar only; the list holds the
   // ones not placed yet. Cancelling its last day puts it back on the list.
   const onCalendar = $derived(new Set(weekSlots.filter((s) => !s.is_cancelled).map((s) => s.todo_id)));
-  const unplaced = $derived(live.filter((t) => !onCalendar.has(t.id)));
+  const unplaced = $derived(live.filter((t) => !onCalendar.has(t.id) && !pending(t)));
   const groups = $derived([
     { key: "must", title: "Must do this week", rows: unplaced.filter((t) => !t.is_done && t.must_this_week && !carried.has(t.id)) },
     { key: "flex", title: "Flexible", rows: unplaced.filter((t) => !t.is_done && !t.must_this_week && !carried.has(t.id)) },
@@ -162,11 +204,11 @@
   // ---- summary ----------------------------------------------------------------------
   const summary = $derived.by(() => {
     const meetingH = weekSlots
-      .filter((s) => todoById.get(s.todo_id)?.kind === "meeting" && !s.is_cancelled)
+      .filter((s) => todoById.get(s.todo_id)?.kind === "meeting" && !s.is_cancelled && !pending(todoById.get(s.todo_id)))
       .reduce((s, x) => s + (x.planned_hours ?? 0), 0);
-    const open = live.filter((t) => !t.is_done);
+    const open = live.filter((t) => !t.is_done && !pending(t));
     const dutyH = open.reduce((s, t) => s + (t.est_hours ?? 0), 0);
-    const must = live.filter((t) => t.must_this_week && !carried.has(t.id));
+    const must = live.filter((t) => t.must_this_week && !carried.has(t.id) && !pending(t));
     const logged = entries.reduce((s, e) => s + e.minutes / 60, 0);
     return { meetingH, dutyH, logged, mustDone: must.filter((t) => t.is_done).length, mustAll: must.length };
   });
@@ -219,6 +261,18 @@
       () => saveTodo(t.id, { must_this_week: !was }),
       () => saveTodo(t.id, { must_this_week: was }));
   }
+  function keepAsIs(t: Todo) {
+    return change(`Kept ${q(t)}`, () => saveTodo(t.id, { reviewed: true }), () => saveTodo(t.id, { reviewed: false }));
+  }
+  async function ignoreEvent(t: Todo, s: Slot | null, all: boolean) {
+    try {
+      const undo = await dismissOutlook(snapTodo(t), s ? snapSlot(s) : null, all);
+      remember(all ? `Ignored ${q(t)} and its repeats` : `Ignored ${q(t)}`, undo);
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    await load();
+  }
   function restore(t: Todo) {
     return change(`Restored ${q(t)}`,
       () => saveTodo(t.id, { is_cancelled: false }),
@@ -260,6 +314,16 @@
     const t = todoById.get(s.todo_id);
     if (!t) return [];
     const meeting = t.kind === "meeting";
+    const fromOutlook: Item[] = t.source === "outlook"
+      ? [
+          ...(pending(t) ? [{ label: "✓ Keep as it is", run: () => keepAsIs(t) }] : []),
+          { label: pending(t) ? "Irrelevant" : "Irrelevant — stop syncing it", run: () => ignoreEvent(t, s, false), danger: true },
+          ...(t.source_key?.includes("|")
+            ? [{ label: "Irrelevant — all repeats", run: () => ignoreEvent(t, s, true), danger: true }]
+            : []),
+        ]
+      : [];
+    if (pending(t)) return [...fromOutlook, { label: "Edit…", run: () => (panel = { kind: "todo", todo: t }) }];
     const edit: Item = { label: meeting ? "Edit meeting" : "Edit to-do", run: () => (panel = { kind: "todo", todo: t }) };
     const remove: Item = meeting
       ? { label: "Delete meeting", run: () => unplan(s), danger: true }
@@ -269,7 +333,7 @@
       : [t.is_done
           ? { label: "Reopen to-do", run: () => setDone(t, false) }
           : { label: "✔ Mark to-do done", run: () => setDone(t, true) }];
-    if (s.is_cancelled) return [{ label: "Restore", run: () => setCancelled(s, false) }, edit, remove];
+    if (s.is_cancelled) return [{ label: "Restore", run: () => setCancelled(s, false) }, edit, remove, ...fromOutlook];
     if (s.entry_id) {
       const e = entryById.get(s.entry_id);
       return [...done, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
@@ -320,7 +384,8 @@
     | { kind: "log"; todo: Todo; slot: Slot | null; day: string }
     | { kind: "entry"; entry: TimeEntry | null; day: string }
     | { kind: "spread"; todo: Todo }
-    | { kind: "email" };
+    | { kind: "email" }
+    | { kind: "outlook" };
   let panel = $state<Panel | null>(null);
   let markDone = $state(false);
   let cvOpen = $state(false); // the CV form inside an entry's dialog
@@ -656,6 +721,22 @@
             title={history.length ? `Undo: ${history[history.length - 1].label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
     <label class="toggle"><input type="checkbox" bind:checked={showLogged} /> Show logged time</label>
   </div>
+  <div class="outlook-bar">
+    {#if feed?.ics_url}
+      <span class="muted">Outlook · {syncing ? "syncing…" : syncedAt(feed)}{syncNote ? ` · ${syncNote}` : ""}</span>
+      <button class="mini" disabled={syncing} onclick={runSync}>Sync now</button>
+      <button class="mini" onclick={() => (panel = { kind: "outlook" })}>Settings</button>
+    {:else}
+      <button class="mini" onclick={() => (panel = { kind: "outlook" })}>Connect Outlook calendar…</button>
+    {/if}
+  </div>
+
+  {#if inbox.todos.length && tax}
+    <details class="inbox-wrap" open>
+      <summary><h2>From Outlook — to review ({inbox.todos.length})</h2></summary>
+      <OutlookInbox todos={inbox.todos} slots={inbox.slots} {tax} {projects} onchange={load} {remember} />
+    </details>
+  {/if}
 
   <!-- ================= days ================= -->
   <div class="days">
@@ -670,14 +751,14 @@
 
         {#each meetings as s (s.id)}
           {@const t = todoById.get(s.todo_id)!}
-          <div class="card meeting" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled}
+          <div class="card meeting" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled} class:review={pending(t)}
                role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="time">{hhmm(s.start_time)}–{hhmm(s.end_time)}</span>
               <span class="title">{t.is_core ? "🎯 " : ""}{t.title}</span>
               {#if label(t)}<span class="sub">{label(t)}</span>{/if}
-              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ logged</span>{/if}
+              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ logged</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{/if}
             </button>
           </div>
         {/each}
@@ -687,14 +768,14 @@
           {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
           {@const h = cardHours(s, t)}
           <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done}
-               class:cancelled={s.is_cancelled}
+               class:cancelled={s.is_cancelled} class:review={pending(t)}
                class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}
                role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
               {#if label(t) || h}<span class="sub">{label(t)}{label(t) && h ? " · " : ""}{h ? fmtHours(h) : ""}</span>{/if}
-              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if t.is_done}<span class="ok">done</span>{/if}
+              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{:else if t.is_done}<span class="ok">done</span>{/if}
             </button>
           </div>
         {/each}
@@ -881,6 +962,10 @@
           <button onclick={() => (panel = null)}>Cancel</button>
         </div>
       </div>
+    {:else if panel.kind === "outlook"}
+      <h2>Outlook calendar</h2>
+      <OutlookSettings oncancel={() => (panel = null)}
+                       onsaved={async (changed) => { panel = null; feed = await loadFeed(); if (changed && feed?.ics_url) runSync(); }} />
     {:else if panel.kind === "email"}
       <h2>Create email checks</h2>
       <div class="pick">
@@ -973,6 +1058,11 @@
   .dnum { font-size: 1.1rem; }
   .day.past .dname { color: var(--ink-soft); }
 
+  .outlook-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin: -0.4rem 0 1rem; font-family: var(--font-ui); font-size: 0.82rem; }
+  .inbox-wrap { margin-bottom: 1.2rem; }
+  .inbox-wrap summary { cursor: pointer; margin-bottom: 0.6rem; }
+  .inbox-wrap summary h2 { display: inline; font-size: 1.05rem; margin: 0; }
+  .card.review { border-left-style: dashed; border-left-color: var(--ink-soft); opacity: 0.85; }
   .below-days { display: flex; gap: 0.5rem; margin-top: 0.6rem; font-family: var(--font-ui); }
   .below-days button { font-size: 0.82rem; }
   .pick { display: grid; gap: 0.8rem; font-family: var(--font-ui); }

@@ -43,6 +43,17 @@
       undone: use the bar that appears at the bottom, <em>↶ Undo</em>, or Ctrl+Z.
     </dd>
 
+    <dt>Outlook</dt>
+    <dd>
+      Connect your published Outlook calendar (Week › Connect Outlook calendar). It syncs when you open Week, if
+      the last sync is a few hours old, and with Sync now — from a week back to three months ahead. New events
+      wait under <em>From Outlook — to review</em>, dashed on the calendar and not counted as planned: give each a
+      category (and project), adjust its times or hours, then <em>Keep</em> it, or mark it <em>Irrelevant</em> —
+      this one, or every repeat — and it never comes back. Events moved in Outlook move here too unless already
+      logged; events removed there disappear if unreviewed, or are struck through if kept. Ignored events can be
+      brought back in the Outlook settings. The calendar link stays in your database.
+    </dd>
+
     <dt>Planning</dt>
     <dd>
       Projects under each project-based category, with dates, planned hours and milestones, against the hours

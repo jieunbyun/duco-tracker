@@ -5,7 +5,7 @@
 // Covers what invites actually use: UTC or zoned start times (IANA names and
 // Outlook's Windows names), DTEND or DURATION, daily/weekly RRULEs with
 // INTERVAL/COUNT/UNTIL/BYDAY, EXDATE, moved occurrences (RECURRENCE-ID) and
-// cancellations. All-day events are not meetings and are skipped.
+// cancellations. All-day events are skipped unless asked for (opts.allDay).
 
 export type Meeting = {
   uid: string;
@@ -14,6 +14,11 @@ export type Meeting = {
   start: string; // HH:MM, local
   end: string; // HH:MM, local
   location: string;
+  /** stable identity of this occurrence across syncs: the event's UID, plus
+   *  the original start for one occurrence of a repeating event */
+  key: string;
+  allDay: boolean; // date only; start and end are ""
+  free: boolean; // shown as Free in Outlook (often a reminder or deadline)
 };
 
 const WINDOWS_ZONES: Record<string, string> = {
@@ -165,7 +170,7 @@ function* occurrences(start: Stamp, rrule: string, untilInstant: number): Genera
 }
 
 /** Timed meetings from an .ics text whose start falls on a day in [from, to]. */
-export function meetingsInRange(text: string, from: string, to: string): Meeting[] {
+export function meetingsInRange(text: string, from: string, to: string, opts: { allDay?: boolean } = {}): Meeting[] {
   const events: VEvent[] = [];
   let current: VEvent | null = null;
   for (const line of unfold(text)) {
@@ -190,20 +195,24 @@ export function meetingsInRange(text: string, from: string, to: string): Meeting
   }
 
   const out: Meeting[] = [];
-  const emit = (e: VEvent, startAt: number, lengthMs: number) => {
+  const emit = (e: VEvent, startAt: number, lengthMs: number, key: string, allDay: boolean) => {
     if (get(e, "STATUS")?.value.toUpperCase() === "CANCELLED") return;
     if (startAt < rangeStart || startAt >= rangeEnd) return;
     const s = localParts(startAt);
     const endAt = startAt + Math.max(lengthMs, 0);
     const en = localParts(endAt);
+    const busy = (get(e, "X-MICROSOFT-CDO-BUSYSTATUS")?.value ?? "").toUpperCase();
     out.push({
       uid: get(e, "UID")?.value ?? "",
       title: unescapeText(get(e, "SUMMARY")?.value ?? "(no title)"),
       date: s.date,
-      start: s.time,
+      start: allDay ? "" : s.time,
       // a meeting that runs past midnight is cut at the end of its day
-      end: en.date === s.date && en.time > s.time ? en.time : "23:59",
+      end: allDay ? "" : en.date === s.date && en.time > s.time ? en.time : "23:59",
       location: unescapeText(get(e, "LOCATION")?.value ?? ""),
+      key,
+      allDay,
+      free: busy === "FREE" || (get(e, "TRANSP")?.value ?? "").toUpperCase() === "TRANSPARENT",
     });
   };
 
@@ -211,7 +220,7 @@ export function meetingsInRange(text: string, from: string, to: string): Meeting
     if (get(e, "RECURRENCE-ID")) continue; // handled as overrides
     const dt = get(e, "DTSTART");
     const start = dt && parseStamp(dt.value, dt.params);
-    if (!start || start.allDay) continue;
+    if (!start || (start.allDay && !opts.allDay)) continue;
     const startAt = toInstant(start.wall, start.zone, start.utc);
     const dtEnd = get(e, "DTEND");
     const end = dtEnd && parseStamp(dtEnd.value, dtEnd.params);
@@ -221,7 +230,7 @@ export function meetingsInRange(text: string, from: string, to: string): Meeting
     const uid = get(e, "UID")?.value ?? "";
     const rrule = get(e, "RRULE")?.value;
     if (!rrule) {
-      emit(e, startAt, lengthMs);
+      emit(e, startAt, lengthMs, uid || `${get(e, "SUMMARY")?.value ?? ""}|${startAt}`, start.allDay);
       continue;
     }
     const excluded = new Set<number>();
@@ -235,6 +244,7 @@ export function meetingsInRange(text: string, from: string, to: string): Meeting
       const at = toInstant(w, start.zone, start.utc);
       if (excluded.has(at)) continue;
       const moved = overrides.get(`${uid}@${at}`);
+      const key = `${uid}|${new Date(at).toISOString()}`;
       if (moved) {
         const ms = get(moved, "DTSTART");
         const me = get(moved, "DTEND");
@@ -242,11 +252,21 @@ export function meetingsInRange(text: string, from: string, to: string): Meeting
         if (!s) continue;
         const sAt = toInstant(s.wall, s.zone, s.utc);
         const eStamp = me && parseStamp(me.value, me.params);
-        emit(moved, sAt, eStamp ? toInstant(eStamp.wall, eStamp.zone, eStamp.utc) - sAt : lengthMs);
+        emit(moved, sAt, eStamp ? toInstant(eStamp.wall, eStamp.zone, eStamp.utc) - sAt : lengthMs, key, s.allDay);
       } else {
-        emit(e, at, lengthMs);
+        emit(e, at, lengthMs, key, start.allDay);
       }
     }
   }
   return out.sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start));
+}
+
+/** Every UID+occurrence key in a calendar, for telling "not in range" from "gone". */
+export function eventUids(text: string): Set<string> {
+  const uids = new Set<string>();
+  for (const line of unfold(text)) {
+    const m = line.match(/^UID[:;](?:.*:)?(.*)$/i);
+    if (m) uids.add(m[1].trim());
+  }
+  return uids;
 }
