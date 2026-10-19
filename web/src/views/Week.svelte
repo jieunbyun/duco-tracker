@@ -258,18 +258,78 @@
   });
 
   // ---- actions ------------------------------------------------------------------------
+  /** The to-do's open (not logged, not cancelled) card on a day, other than `except`. */
+  function openCardOn(todoId: string, day: string, except?: string): Slot | undefined {
+    return slots.find((x) => x.todo_id === todoId && x.planned_on === day && x.id !== except && !x.entry_id && !x.is_cancelled);
+  }
+  const sumHours = (a: number | null, b: number | null) => (a === null && b === null ? null : (a ?? 0) + (b ?? 0));
+
   function placeOn(t: Todo, day: string) {
+    if (openCardOn(t.id, day)) {
+      showToast(`${q(t)} is already on ${dayName(day)} ${dayNum(day)}`, false);
+      return;
+    }
     let id = "";
     return change(`Planned ${q(t)} on ${dayName(day)} ${dayNum(day)}`,
       async () => (id = await saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null })),
       () => deleteSlot(id));
   }
+
+  // Moving a card onto a day that already holds the same to-do merges the two
+  // into one card with their hours added.
   function move(s: Slot, by: number) {
     const t = todoById.get(s.todo_id)!;
     const to = addDays(s.planned_on, by);
-    return change(`Moved ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
-      () => saveSlot(s.id, { planned_on: to }),
-      () => saveSlot(s.id, { planned_on: s.planned_on }));
+    const there = openCardOn(t.id, to, s.id);
+    if (!there) {
+      return change(`Moved ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
+        () => saveSlot(s.id, { planned_on: to }),
+        () => saveSlot(s.id, { planned_on: s.planned_on }));
+    }
+    const moving = snapSlot(s);
+    const before = there.planned_hours;
+    const merged = sumHours(there.planned_hours, s.planned_hours);
+    return change(`Merged ${q(t)} into ${dayName(to)} ${dayNum(to)}${merged ? ` (${fmtHours(merged)})` : ""}`,
+      async () => {
+        await saveSlot(there.id, { planned_hours: merged });
+        await deleteSlot(s.id);
+      },
+      async () => {
+        await reinsertSlot(moving);
+        await saveSlot(there.id, { planned_hours: before });
+      });
+  }
+
+  /** Planned hours of a logged card not yet done: planned minus logged, when positive. */
+  function remainingOf(s: Slot, t: Todo): number {
+    const planned = cardHours(s, t);
+    const e = s.entry_id ? entryById.get(s.entry_id) : null;
+    if (planned === null || !e) return 0;
+    const left = Math.round((planned - e.minutes / 60) * 4) / 4;
+    return left > 0 ? left : 0;
+  }
+  /** A partly done day: it keeps what was logged; the rest joins (or makes) the next day's card. */
+  function moveRest(s: Slot, by: number) {
+    const t = todoById.get(s.todo_id)!;
+    const rest = remainingOf(s, t);
+    if (!rest) return;
+    const to = addDays(s.planned_on, by);
+    const there = openCardOn(t.id, to, s.id);
+    const ownBefore = s.planned_hours;
+    const thereBefore = there?.planned_hours ?? null;
+    const done = (cardHours(s, t) ?? 0) - rest;
+    let made = "";
+    return change(`Moved the remaining ${fmtHours(rest)} of ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
+      async () => {
+        await saveSlot(s.id, { planned_hours: done });
+        if (there) await saveSlot(there.id, { planned_hours: sumHours(there.planned_hours, rest) });
+        else made = await saveSlot(null, { todo_id: t.id, planned_on: to, planned_hours: rest });
+      },
+      async () => {
+        await saveSlot(s.id, { planned_hours: ownBefore });
+        if (there) await saveSlot(there.id, { planned_hours: thereBefore });
+        else if (made) await deleteSlot(made);
+      });
   }
   function unplan(s: Slot) {
     const t = todoById.get(s.todo_id);
@@ -408,7 +468,11 @@
     if (s.is_cancelled) return [{ label: "Restore", run: () => setCancelled(s, false) }, edit, remove, ...fromOutlook];
     if (s.entry_id) {
       const e = entryById.get(s.entry_id);
-      return [...done, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
+      const rest = meeting ? 0 : remainingOf(s, t);
+      const restItems: Item[] = rest
+        ? [{ label: `Move the remaining ${fmtHours(rest)} to the day after ›`, run: () => moveRest(s, 1) }]
+        : [];
+      return [...done, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
     }
     const moves: Item[] = meeting
       ? []
