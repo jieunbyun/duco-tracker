@@ -650,6 +650,35 @@
     }
   }
 
+  type MsProject = { p: Project; rows: MsRow[] };
+  type MsGroup = { key: string; label: string; urgent: boolean; projects: MsProject[] };
+  const msGroups = $derived.by(() => {
+    if (!tax) return [] as MsGroup[];
+    const out: MsGroup[] = [];
+    for (const a of tax.areas) {
+      for (const c of tax.categories.filter((x) => x.area_id === a.id)) {
+        const rows = msRows.filter((r) => r.p.category_id === c.id);
+        if (!rows.length) continue;
+        const byProject = new Map<string, MsProject>();
+        for (const r of rows) {
+          if (!byProject.has(r.p.id)) byProject.set(r.p.id, { p: r.p, rows: [] });
+          byProject.get(r.p.id)!.rows.push(r);
+        }
+        out.push({
+          key: c.id,
+          label: `${a.label} › ${c.label}`,
+          urgent: rows.some((r) => !r.already && (r.info.overdue || r.info.dueThisWeek)),
+          projects: [...byProject.values()].sort((x, y) => x.p.name.localeCompare(y.p.name)),
+        });
+      }
+    }
+    return out;
+  });
+  const pickedIn = (rows: MsRow[]) => rows.filter((r) => r.pick && !r.already).length;
+  function pickAll(rows: MsRow[], on: boolean) {
+    for (const r of rows) if (!r.already) r.pick = on;
+  }
+
   async function addFromMilestones() {
     const picked = msRows.filter((r) => r.pick && !r.already);
     const added: string[] = [];
@@ -1080,29 +1109,50 @@
             Hours suggested are this week's share of what is left, spread evenly to the due date. Overdue and
             due-this-week milestones are ticked for you.
           </p>
-          <ul class="ms-pick">
-            {#each msRows as r (r.m.id)}
-              <li class:off={r.already}>
-                <input type="checkbox" bind:checked={r.pick} disabled={r.already} aria-label={`Add ${r.m.title}`} />
-                <div class="ms-what">
-                  <strong>{r.m.title}</strong>
-                  <span class="muted">{r.p.name}</span>
-                  <span class="ms-when" class:late={r.info.overdue}>
-                    {#if r.info.overdue}overdue since {fmtDay(r.info.due!)}
-                    {:else if r.info.due}due {fmtDay(r.info.due)}{r.m.due_on ? "" : " (project end)"}
-                    {:else}no due date{/if}
-                    {#if r.m.hard_deadline} · hard deadline{/if}
-                    {#if r.info.remaining !== null} · {fmtHours(r.info.remaining)} left{:else} · no planned hours{/if}
-                    {#if r.already} · already a to-do this week{/if}
-                  </span>
-                </div>
-                {#if !r.already}
-                  <label class="ms-h">h <input type="number" min="0" step="0.5" bind:value={r.hours} aria-label="Hours this week" /></label>
-                  <label class="ms-must"><input type="checkbox" bind:checked={r.must} /> must</label>
-                {/if}
-              </li>
+          <div class="ms-groups">
+            {#each msGroups as g (g.key)}
+              {@const all = g.projects.flatMap((x) => x.rows)}
+              <details class="ms-group" open={g.urgent}>
+                <summary>
+                  <strong>{g.label}</strong>
+                  <span class="muted">{all.length} {all.length === 1 ? "milestone" : "milestones"}{pickedIn(all) ? ` · ${pickedIn(all)} ticked` : ""}</span>
+                </summary>
+                {#each g.projects as gp (gp.p.id)}
+                  <div class="ms-project">
+                    <div class="ms-project-head">
+                      <span>{gp.p.name}</span>
+                      {#if gp.rows.some((r) => !r.already)}
+                        <button class="mini" onclick={() => pickAll(gp.rows, true)}>all</button>
+                        <button class="mini" onclick={() => pickAll(gp.rows, false)}>none</button>
+                      {/if}
+                    </div>
+                    <ul class="ms-pick">
+                      {#each gp.rows as r (r.m.id)}
+                        <li class:off={r.already}>
+                          <input type="checkbox" bind:checked={r.pick} disabled={r.already} aria-label={`Add ${r.m.title}`} />
+                          <div class="ms-what">
+                            <strong>{r.m.title}</strong>
+                            <span class="ms-when" class:late={r.info.overdue}>
+                              {#if r.info.overdue}overdue since {fmtDay(r.info.due!)}
+                              {:else if r.info.due}due {fmtDay(r.info.due)}{r.m.due_on ? "" : " (project end)"}
+                              {:else}no due date{/if}
+                              {#if r.m.hard_deadline} · hard deadline{/if}
+                              {#if r.info.remaining !== null} · {fmtHours(r.info.remaining)} left{:else} · no planned hours{/if}
+                              {#if r.already} · already a to-do this week{/if}
+                            </span>
+                          </div>
+                          {#if !r.already}
+                            <label class="ms-h">h <input type="number" min="0" step="0.5" bind:value={r.hours} aria-label="Hours this week" /></label>
+                            <label class="ms-must"><input type="checkbox" bind:checked={r.must} /> must</label>
+                          {/if}
+                        </li>
+                      {/each}
+                    </ul>
+                  </div>
+                {/each}
+              </details>
             {/each}
-          </ul>
+          </div>
         {/if}
         <div class="pick-actions">
           {#if msRows.some((r) => r.pick && !r.already)}
@@ -1229,7 +1279,13 @@
   .pick-row { display: flex; flex-wrap: wrap; gap: 1rem; }
   .pick-hours { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); max-width: 16rem; }
   .pick-actions { display: flex; gap: 0.5rem; }
-  .ms-pick { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; max-height: 55vh; overflow-y: auto; }
+  .ms-groups { display: grid; gap: 0.4rem; max-height: 58vh; overflow-y: auto; padding-right: 0.2rem; }
+  .ms-group { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.3rem 0.6rem; }
+  .ms-group summary { cursor: pointer; display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; padding: 0.25rem 0; font-size: 0.9rem; }
+  .ms-group summary .muted { font-size: 0.78rem; }
+  .ms-project { margin: 0.3rem 0 0.5rem 0.4rem; }
+  .ms-project-head { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); }
+  .ms-pick { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; }
   .ms-pick li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.6rem; align-items: center; padding: 0.4rem 0.3rem; border-bottom: 1px solid var(--rule); }
   .ms-pick li.off { opacity: 0.55; }
   .ms-pick input[type="checkbox"] { width: auto; }
