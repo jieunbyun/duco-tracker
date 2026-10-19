@@ -103,7 +103,8 @@
       Projects in routine categories (such as one per supervised student) count through routine time, not twice.
       A project's planned hours are the sum of its milestones' hours — marked Σ — when every milestone (other than
       dropped ones) has hours, or when the project has no figure of its own; otherwise its own figure. With no end date, a project ends with its latest
-      milestone.
+      milestone. When the plan comes from milestones, each milestone's remaining hours are spread over
+      its own dates (start to due, falling back to the project's), so work due soon weighs on the near term.
     </dd>
 
     <dt>Weeks</dt>

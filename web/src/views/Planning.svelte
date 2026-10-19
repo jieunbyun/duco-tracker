@@ -45,7 +45,7 @@
     return m;
   });
   const loads = $derived(
-    new Map(projects.map((p) => [p.id, projectLoad(p, actualByProject.get(p.id) ?? 0, horizon)] as const)),
+    new Map(projects.map((p) => [p.id, projectLoad(p, actualByProject.get(p.id) ?? 0, horizon, actualByMilestone)] as const)),
   );
   // Routine time counts email in equal shares to each area with an Email category.
   const areaRows = $derived(tax ? areaHorizons(tax, shareEmail(hours, tax), projects, loads, horizon) : []);

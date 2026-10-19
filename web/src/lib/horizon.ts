@@ -4,16 +4,20 @@
 //   routine    time in non-project categories (meetings, supervision, email, misc),
 //              projected at the pace of the last PACE_DAYS days
 //   committed  for each live project in a project-kind category, its remaining
-//              planned hours (planned − logged), spread evenly from today (or its
-//              start) to its end date; only the share inside the horizon counts
+//              planned hours spread over time (see plan.ts — by milestone when
+//              the plan comes from milestones); only the share inside counts
 //   free       capacity − routine − committed (negative means over-committed)
 import type { Area, HourRow, Project, Taxonomy } from "./data";
 import { targetOn } from "./data";
 import { addDays, daysIn, today } from "./dates";
 import type { Range } from "./dates";
+import type { ProjectLoad } from "./plan";
+
+// The project plan lives in plan.ts; re-exported for the views.
+export { LIVE_STATUSES, plannedOf, endOf, projectLoad } from "./plan";
+export type { ProjectLoad } from "./plan";
 
 export const PLANNABLE_KINDS = new Set(["project", "mixed"]);
-export const LIVE_STATUSES = new Set(["planned", "active", "paused"]);
 export const PACE_DAYS = 56;
 
 export function horizonRange(months: number, from = today()): Range {
@@ -21,65 +25,6 @@ export function horizonRange(months: number, from = today()): Range {
   const end = new Date(y, m - 1 + months, d);
   const iso = `${end.getFullYear()}-${String(end.getMonth() + 1).padStart(2, "0")}-${String(end.getDate()).padStart(2, "0")}`;
   return { from, to: addDays(iso, -1) };
-}
-
-export type ProjectLoad = {
-  actual: number;
-  remaining: number;     // planned − actual, never below 0
-  inHorizon: number;     // the part of `remaining` that falls inside the horizon
-  perWeek: number | null; // pace needed to finish by the end date
-  flag: "no-plan" | "no-end" | "overdue" | "over-budget" | null;
-};
-
-/**
- * A project's plan, from its milestones (dropped ones aside) when:
- *   - every milestone has planned hours — their sum overrides the project's own figure; or
- *   - the project has no figure of its own — the sum of those milestones that have hours.
- * Otherwise (own figure, and some milestones without hours) the project's figure stands.
- */
-export function plannedOf(p: Project): { hours: number | null; fromMilestones: boolean; complete: boolean } {
-  const ms = p.milestone.filter((m) => m.status !== "dropped");
-  const withHours = ms.filter((m) => m.planned_hours !== null);
-  const sum = withHours.reduce((s, m) => s + (m.planned_hours ?? 0), 0);
-  const complete = ms.length > 0 && withHours.length === ms.length;
-  if (complete || (p.planned_hours === null && withHours.length)) {
-    return { hours: sum, fromMilestones: true, complete };
-  }
-  return { hours: p.planned_hours, fromMilestones: false, complete };
-}
-
-/** The project's end date, or failing that its latest milestone due date. */
-export function endOf(p: Project): string | null {
-  if (p.end_on) return p.end_on;
-  const dues = p.milestone.filter((m) => m.status !== "dropped" && m.due_on).map((m) => m.due_on!).sort();
-  return dues.length ? dues[dues.length - 1] : null;
-}
-
-export function projectLoad(p: Project, actual: number, horizon: Range): ProjectLoad {
-  const base = { actual, remaining: 0, inHorizon: 0, perWeek: null };
-  if (!LIVE_STATUSES.has(p.status)) return { ...base, flag: null };
-  const planned = plannedOf(p).hours;
-  if (planned === null) return { ...base, flag: "no-plan" };
-
-  const remaining = Math.max(0, planned - actual);
-  const over = actual > planned ? "over-budget" : null;
-  const t = horizon.from;
-  const from = p.start_on && p.start_on > t ? p.start_on : t;
-  const end = endOf(p);
-
-  if (!end) return { ...base, remaining, inHorizon: remaining, flag: over ?? "no-end" };
-  if (end < t) return { ...base, remaining, inHorizon: remaining, flag: remaining > 0 ? "overdue" : over };
-
-  const windowDays = daysIn({ from, to: end });
-  const overlapTo = end < horizon.to ? end : horizon.to;
-  const overlapDays = overlapTo >= from ? daysIn({ from, to: overlapTo }) : 0;
-  return {
-    actual,
-    remaining,
-    inHorizon: (remaining * overlapDays) / windowDays,
-    perWeek: remaining > 0 ? remaining / (windowDays / 7) : null,
-    flag: over,
-  };
 }
 
 export type AreaHorizon = {
