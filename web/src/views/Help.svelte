@@ -46,7 +46,8 @@
     <dt>Outlook</dt>
     <dd>
       Connect your published Outlook calendar (Week › Connect Outlook calendar). It syncs when you open Week, if
-      the last sync is a few hours old, and with Sync now — from a week back to three months ahead. New events
+      the last sync is a few hours old, and with Sync now — for this week, or further ahead if you choose
+      so in the Outlook settings. New events
       wait under <em>From Outlook — to review</em>, dashed on the calendar and not counted as planned: give each a
       category (and project), adjust its times or hours, then <em>Keep</em> it, or mark it <em>Irrelevant</em> —
       this one, or every repeat — and it never comes back. Events moved in Outlook move here too unless already

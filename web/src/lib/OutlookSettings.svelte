@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { loadFeed, saveFeedUrl, loadIgnores, removeIgnore } from "./outlook";
+  import { loadFeed, saveFeed, loadIgnores, removeIgnore, RANGES } from "./outlook";
   import type { Ignore } from "./outlook";
 
   type Props = { onsaved: (linkChanged: boolean) => void; oncancel: () => void };
@@ -7,6 +7,8 @@
 
   let url = $state("");
   let saved = $state("");
+  let weeks = $state(1);
+  let savedWeeks = $state(1);
   let show = $state(false);
   let ignores = $state<Ignore[]>([]);
   let busy = $state(false);
@@ -15,6 +17,7 @@
   Promise.all([loadFeed(), loadIgnores()])
     .then(([f, i]) => {
       url = saved = f?.ics_url ?? "";
+      weeks = savedWeeks = f?.sync_weeks ?? 1;
       ignores = i;
     })
     .catch((e) => (error = e.message));
@@ -26,8 +29,8 @@
     busy = true;
     error = "";
     try {
-      await saveFeedUrl(clean || null);
-      onsaved(clean !== saved);
+      await saveFeed({ ics_url: clean || null, sync_weeks: weeks });
+      onsaved(clean !== saved || weeks !== savedWeeks);
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -57,6 +60,17 @@
       <button type="button" onclick={() => (show = !show)}>{show ? "Hide" : "Show"}</button>
     </span>
   </label>
+
+  <label>
+    Bring in events for
+    <select bind:value={weeks}>
+      {#each RANGES as r (r.weeks)}<option value={r.weeks}>{r.label}</option>{/each}
+    </select>
+  </label>
+  <p class="muted small">
+    Counted from the start of this week. Events still waiting for review outside the range are cleared at the next
+    sync (and come back if you widen it); events you have kept stay.
+  </p>
 
   {#if ignores.length}
     <div class="ignores">

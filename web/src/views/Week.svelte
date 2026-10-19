@@ -50,7 +50,8 @@
     syncNote = "";
     try {
       const r = await syncOutlook();
-      const parts = [r.added && `${r.added} new`, r.updated && `${r.updated} changed`, r.removed && `${r.removed} removed`].filter(Boolean);
+      const parts = [r.added && `${r.added} new`, r.updated && `${r.updated} changed`, r.removed && `${r.removed} removed`,
+                     r.cleared && `${r.cleared} outside the range cleared`].filter(Boolean);
       syncNote = parts.length ? parts.join(", ") : "up to date";
     } catch (e) {
       syncNote = `sync failed — ${(e as Error).message}`;

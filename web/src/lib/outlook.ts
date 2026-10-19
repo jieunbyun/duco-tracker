@@ -13,25 +13,39 @@ import { check, TODO_COLS, SLOT_COLS, asTodo, asSlot, saveTodo, saveSlot, delete
 import type { Todo, Slot } from "./data";
 import { meetingsInRange, eventUids } from "./ics";
 import type { Meeting } from "./ics";
-import { addDays, today } from "./dates";
+import { addDays, today, weekStart } from "./dates";
 
 // The Edge Function's address (its slug), which the dashboard may choose for
 // you when deploying; set VITE_CALENDAR_FUNCTION when it is not "calendar-sync".
 const CALENDAR_FUNCTION = (import.meta.env.VITE_CALENDAR_FUNCTION as string | undefined)?.trim() || "calendar-sync";
 
-export const SYNC_BACK_DAYS = 7;
-export const SYNC_AHEAD_DAYS = 90;
+/** How far ahead to bring events in, in weeks from the start of this week. */
+export const RANGES = [
+  { weeks: 1, label: "This week" },
+  { weeks: 2, label: "This and next week" },
+  { weeks: 4, label: "Next 4 weeks" },
+  { weeks: 13, label: "Next 3 months" },
+];
+export function syncWindow(weeks: number): { from: string; to: string } {
+  const from = weekStart(today());
+  return { from, to: addDays(from, 7 * Math.max(1, weeks) - 1) };
+}
 export const STALE_HOURS = 3;
 
-export type Feed = { ics_url: string | null; last_synced_at: string | null; last_status: string | null };
+export type Feed = { ics_url: string | null; last_synced_at: string | null; last_status: string | null; sync_weeks: number };
 export type Ignore = { id: string; uid: string; occurrence: string | null; title: string | null };
-export type SyncResult = { added: number; updated: number; removed: number; skipped: number };
+export type SyncResult = { added: number; updated: number; removed: number; skipped: number; cleared: number };
 
 export async function loadFeed(): Promise<Feed | null> {
-  return ((await check<Feed>(supabase.from("calendar_feed").select("ics_url,last_synced_at,last_status").maybeSingle())) ?? null);
+  const full = await supabase.from("calendar_feed").select("ics_url,last_synced_at,last_status,sync_weeks").maybeSingle();
+  if (!full.error) return full.data ? { ...full.data, sync_weeks: Number(full.data.sync_weeks ?? 1) } : null;
+  // before 0006_outlook_range.sql: no range column yet, so this week only
+  const basic = await check<Omit<Feed, "sync_weeks">>(
+    supabase.from("calendar_feed").select("ics_url,last_synced_at,last_status").maybeSingle());
+  return basic ? { ...basic, sync_weeks: 1 } : null;
 }
-export async function saveFeedUrl(url: string | null): Promise<void> {
-  await check(supabase.from("calendar_feed").upsert({ ics_url: url?.trim() || null }));
+export async function saveFeed(fields: { ics_url: string | null; sync_weeks: number }): Promise<void> {
+  await check(supabase.from("calendar_feed").upsert({ ics_url: fields.ics_url?.trim() || null, sync_weeks: fields.sync_weeks }));
 }
 async function saveFeedStatus(status: string): Promise<void> {
   await check(supabase.from("calendar_feed").update({ last_synced_at: new Date().toISOString(), last_status: status }).not("user_id", "is", null));
@@ -114,8 +128,7 @@ async function fetchCalendar(): Promise<string> {
 }
 
 export async function syncOutlook(): Promise<SyncResult> {
-  const from = addDays(today(), -SYNC_BACK_DAYS);
-  const to = addDays(today(), SYNC_AHEAD_DAYS);
+  const { from, to } = syncWindow((await loadFeed())?.sync_weeks ?? 1);
   let text: string;
   try {
     text = await fetchCalendar();
@@ -139,7 +152,7 @@ export async function syncOutlook(): Promise<SyncResult> {
   const slotOf = (t: Todo) => slots.find((s) => s.todo_id === t.id) ?? null;
   const byKey = new Map(existing.map((t) => [t.source_key, t]));
 
-  const result: SyncResult = { added: 0, updated: 0, removed: 0, skipped: 0 };
+  const result: SyncResult = { added: 0, updated: 0, removed: 0, skipped: 0, cleared: 0 };
   const seen = new Set<string>();
 
   for (const m of events) {
@@ -201,10 +214,27 @@ export async function syncOutlook(): Promise<SyncResult> {
     }
   }
 
+  // keep the review list to the range: unreviewed events outside it go (they
+  // come back if the range widens); kept ones stay whatever their date
+  const outside = ((await check<Todo[]>(
+    supabase.from("todo").select(TODO_COLS).eq("source", "outlook").eq("reviewed", false)
+      .or(`due_on.lt.${from},due_on.gt.${to}`),
+  )) ?? []).map(asTodo);
+  if (outside.length) {
+    const logged = new Set(((await check<Slot[]>(
+      supabase.from("todo_slot").select(SLOT_COLS).in("todo_id", outside.map((t) => t.id)).not("entry_id", "is", null),
+    )) ?? []).map((x) => x.todo_id));
+    for (const t of outside.filter((x) => !logged.has(x.id))) {
+      await deleteTodo(t.id);
+      result.cleared += 1;
+    }
+  }
+
   const parts = [
     result.added && `${result.added} new`,
     result.updated && `${result.updated} changed`,
     result.removed && `${result.removed} removed`,
+    result.cleared && `${result.cleared} outside the range cleared`,
   ].filter(Boolean);
   await saveFeedStatus(parts.length ? parts.join(", ") : "No changes");
   return result;
