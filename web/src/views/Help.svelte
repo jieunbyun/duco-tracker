@@ -76,6 +76,14 @@
       work › area › category › project › milestone.
     </dd>
 
+    <dt>Reading</dt>
+    <dd>
+      Journal articles, books, chapters and reports you read: details (a DOI fills them in from Crossref), status —
+      reading, to read, finished, abandoned — with start and finish dates, an optional project, dated notes (with a
+      page if you like), a citation and BibTeX to copy, and the PDF if you have one. PDFs are kept privately in your
+      Supabase storage (1 GB free, 50 MB a file) and open through a link that lasts an hour.
+    </dd>
+
     <dt>CV</dt>
     <dd>
       Achievement records by CV section, with a tailored form for supervision, and a LaTeX export
