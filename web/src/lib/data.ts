@@ -420,6 +420,17 @@ export async function deleteCv(id: string): Promise<void> {
 }
 
 export type Settings = { weeks_per_year: number; horizon_months: number; week_starts_on: number };
+/** A new category in an area; it sorts after the others but before Email and Miscellaneous. */
+export async function addCategory(area: Area, label: string, kind: string, existing: Category[]): Promise<void> {
+  const slug = label.toUpperCase().replace(/[^A-Z0-9]+/g, "_").replace(/^_|_$/g, "").slice(0, 16) || "CAT";
+  let code = `${area.code}_${slug}`;
+  for (let n = 2; existing.some((c) => c.code === code); n++) code = `${area.code}_${slug}_${n}`;
+  const inArea = existing.filter((c) => c.area_id === area.id && c.kind !== "email" && c.kind !== "misc");
+  const sort_order = Math.min(94, Math.max(10, ...inArea.map((c) => c.sort_order)) + 5);
+  await check(supabase.from("category").insert({ area_id: area.id, code, label: label.trim(), kind, sort_order }));
+  await loadTaxonomy(true);
+}
+
 export async function saveCategoryNote(id: string, description: string | null): Promise<void> {
   await check(supabase.from("category").update({ description }).eq("id", id));
   await loadTaxonomy(true);

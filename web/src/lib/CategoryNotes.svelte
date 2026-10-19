@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { saveCategoryNote } from "./data";
-  import type { Taxonomy, Category } from "./data";
+  import { saveCategoryNote, addCategory } from "./data";
+  import type { Taxonomy, Category, Area } from "./data";
 
   type Props = { tax: Taxonomy; onsaved: () => void };
   let { tax, onsaved }: Props = $props();
@@ -12,6 +12,27 @@
     misc: "miscellaneous",
     email: "email",
   };
+
+  // adding a category to an area
+  let addingTo = $state<string | null>(null);
+  let newLabel = $state("");
+  let newKind = $state("project");
+
+  async function add(a: Area) {
+    if (!newLabel.trim()) return (error = "Give the category a name.");
+    busy = true;
+    error = "";
+    try {
+      await addCategory(a, newLabel, newKind, tax.categories);
+      addingTo = null;
+      newLabel = "";
+      onsaved();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
 
   let editing = $state<string | null>(null);
   let draft = $state("");
@@ -42,7 +63,28 @@
 <div class="notes">
   {#each tax.areas as a (a.id)}
     <div class="area">
-      <h3>{a.label}</h3>
+      <div class="area-head">
+        <h3>{a.label}</h3>
+        {#if addingTo !== a.id}
+          <button class="edit" onclick={() => { addingTo = a.id; newLabel = ""; newKind = "project"; error = ""; }}>+ Category</button>
+        {/if}
+      </div>
+      {#if addingTo === a.id}
+        <div class="new">
+          <input bind:value={newLabel} placeholder="Name, e.g. Project lead" aria-label="Category name" />
+          <select bind:value={newKind} aria-label="Kind">
+            <option value="project">project-based — planned with projects and hours</option>
+            <option value="routine">routine — counted at your recent pace</option>
+            <option value="mixed">mixed</option>
+            <option value="misc">miscellaneous</option>
+          </select>
+          {#if error}<p class="error">{error}</p>{/if}
+          <div class="actions">
+            <button class="primary" disabled={busy} onclick={() => add(a)}>Add</button>
+            <button disabled={busy} onclick={() => (addingTo = null)}>Cancel</button>
+          </div>
+        </div>
+      {/if}
       <ul>
         {#each tax.categories.filter((c) => c.area_id === a.id) as c (c.id)}
           <li>
@@ -72,7 +114,10 @@
 
 <style>
   .notes { display: grid; gap: 1rem; font-family: var(--font-ui); }
-  .area h3 { font-size: 0.95rem; margin-bottom: 0.3rem; }
+  .area h3 { font-size: 0.95rem; margin: 0; }
+  .area-head { display: flex; align-items: baseline; gap: 0.6rem; margin-bottom: 0.3rem; }
+  .area-head .edit { margin-left: 0; }
+  .new { display: grid; gap: 0.4rem; max-width: 30rem; margin: 0.2rem 0 0.6rem; }
   ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.15rem; }
   li { padding: 0.4rem 0.5rem; border-radius: var(--radius); }
   li:hover { background: var(--panel); }
