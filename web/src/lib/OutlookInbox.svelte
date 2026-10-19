@@ -61,7 +61,7 @@
     }
   }
 
-  function keep(t: Todo) {
+  function keep(t: Todo, tentative = false) {
     const d = drafts[t.id];
     if (!d) return;
     const s = slotOf(t);
@@ -70,14 +70,20 @@
     const slotBefore = s ? snap(s) : null;
     return run(t, async () => {
       const len = t.source_all_day ? d.hours : Math.round(((+d.end.slice(0, 2) * 60 + +d.end.slice(3) - +d.start.slice(0, 2) * 60 - +d.start.slice(3)) / 60) * 100) / 100;
-      await saveTodo(t.id, { category_id: d.category_id || null, project_id: d.project_id || null, est_hours: len, reviewed: true });
+      await saveTodo(t.id, {
+        category_id: d.category_id || null, project_id: d.project_id || null, est_hours: len,
+        reviewed: true, is_tentative: tentative,
+      });
       if (s) {
         await saveSlot(s.id, t.source_all_day
           ? { planned_hours: null }
           : { start_time: d.start, end_time: d.end, planned_hours: len });
       }
-      remember(`Kept “${t.title}”`, async () => {
-        await saveTodo(t.id, { category_id: before.category_id, project_id: before.project_id, est_hours: before.est_hours, reviewed: false });
+      remember(`${tentative ? "Kept as tentative" : "Kept"} “${t.title}”`, async () => {
+        await saveTodo(t.id, {
+          category_id: before.category_id, project_id: before.project_id, est_hours: before.est_hours,
+          reviewed: false, is_tentative: before.is_tentative,
+        });
         if (slotBefore) {
           await saveSlot(slotBefore.id, { start_time: slotBefore.start_time, end_time: slotBefore.end_time, planned_hours: slotBefore.planned_hours });
         }
@@ -106,6 +112,7 @@
           <span class="when">{day(t.due_on)} · {t.source_all_day ? "all day" : `${d.start}–${d.end}`}</span>
           <strong class="title">{t.title}</strong>
           {#if t.source_free}<span class="tag">Free</span>{/if}
+          {#if t.source_tentative}<span class="tag">tentative in Outlook</span>{/if}
           {#if t.source_all_day}<span class="tag">all day</span>{/if}
           {#if repeats(t)}<span class="tag">repeats</span>{/if}
           {#if t.note}<span class="muted where">{t.note}</span>{/if}
@@ -132,6 +139,8 @@
         </div>
         <div class="acts">
           <button class="primary" disabled={busy === t.id} onclick={() => keep(t)}>Keep</button>
+          <button disabled={busy === t.id} onclick={() => keep(t, true)}
+                  title="On the calendar, not counted as planned until you confirm it">Tentative</button>
           <button disabled={busy === t.id} onclick={() => dismiss(t, false)}>Irrelevant</button>
           {#if repeats(t)}
             <button disabled={busy === t.id} onclick={() => dismiss(t, true)} title="Ignore every occurrence, now and in future syncs">Irrelevant — all repeats</button>

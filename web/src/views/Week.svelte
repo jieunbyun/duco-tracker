@@ -69,6 +69,9 @@
 
   /** An Outlook event not yet kept: shown, but not counted as planned. */
   const pending = (t: Todo | undefined) => !!t && t.source === "outlook" && !t.reviewed;
+  /** Kept as tentative: on the calendar, not counted as planned until confirmed. */
+  const tentative = (t: Todo | undefined) => !!t && t.is_tentative && !pending(t);
+  const uncounted = (t: Todo | undefined) => pending(t) || tentative(t);
   function syncedAt(f: Feed | null): string {
     if (!f?.last_synced_at) return "never synced";
     const d = new Date(f.last_synced_at);
@@ -205,13 +208,16 @@
   // ---- summary ----------------------------------------------------------------------
   const summary = $derived.by(() => {
     const meetingH = weekSlots
-      .filter((s) => todoById.get(s.todo_id)?.kind === "meeting" && !s.is_cancelled && !pending(todoById.get(s.todo_id)))
+      .filter((s) => todoById.get(s.todo_id)?.kind === "meeting" && !s.is_cancelled && !uncounted(todoById.get(s.todo_id)))
       .reduce((s, x) => s + (x.planned_hours ?? 0), 0);
-    const open = live.filter((t) => !t.is_done && !pending(t));
+    const open = live.filter((t) => !t.is_done && !uncounted(t));
     const dutyH = open.reduce((s, t) => s + (t.est_hours ?? 0), 0);
-    const must = live.filter((t) => t.must_this_week && !carried.has(t.id) && !pending(t));
+    const must = live.filter((t) => t.must_this_week && !carried.has(t.id) && !uncounted(t));
+    const tentativeH = weekSlots
+      .filter((s) => !s.is_cancelled && tentative(todoById.get(s.todo_id)))
+      .reduce((sum, x) => sum + (x.planned_hours ?? todoById.get(x.todo_id)?.est_hours ?? 0), 0);
     const logged = entries.reduce((s, e) => s + e.minutes / 60, 0);
-    return { meetingH, dutyH, logged, mustDone: must.filter((t) => t.is_done).length, mustAll: must.length };
+    return { meetingH, dutyH, logged, tentativeH, mustDone: must.filter((t) => t.is_done).length, mustAll: must.length };
   });
 
   // ---- actions ------------------------------------------------------------------------
@@ -261,6 +267,12 @@
     return change(`Made ${q(t)} ${was ? "flexible" : "a must-do"}`,
       () => saveTodo(t.id, { must_this_week: !was }),
       () => saveTodo(t.id, { must_this_week: was }));
+  }
+  function setTentative(t: Todo, on: boolean, keep = false) {
+    const before = { is_tentative: t.is_tentative, reviewed: t.reviewed };
+    return change(on ? `Marked ${q(t)} tentative` : `Confirmed ${q(t)}`,
+      () => saveTodo(t.id, { is_tentative: on, ...(keep ? { reviewed: true } : {}) }),
+      () => saveTodo(t.id, before));
   }
   function keepAsIs(t: Todo) {
     return change(`Kept ${q(t)}`, () => saveTodo(t.id, { reviewed: true }), () => saveTodo(t.id, { reviewed: false }));
@@ -324,7 +336,17 @@
             : []),
         ]
       : [];
-    if (pending(t)) return [...fromOutlook, { label: "Edit…", run: () => (panel = { kind: "todo", todo: t }) }];
+    if (pending(t)) {
+      return [
+        ...fromOutlook.slice(0, 1),
+        { label: "Keep as tentative", run: () => setTentative(t, true, true) },
+        ...fromOutlook.slice(1),
+        { label: "Edit…", run: () => (panel = { kind: "todo", todo: t }) },
+      ];
+    }
+    const tentativeItem: Item = t.is_tentative
+      ? { label: "✓ Confirm (no longer tentative)", run: () => setTentative(t, false) }
+      : { label: "Mark tentative", run: () => setTentative(t, true) };
     const edit: Item = { label: meeting ? "Edit meeting" : "Edit to-do", run: () => (panel = { kind: "todo", todo: t }) };
     const remove: Item = meeting
       ? { label: "Delete meeting", run: () => unplan(s), danger: true }
@@ -346,13 +368,16 @@
           { label: "Move to the day after ›", run: () => move(s, 1) },
         ];
     return [
+      ...(t.is_tentative ? [tentativeItem] : []),
       { label: "✓ Log time", run: () => openLog(t, s, m.day) },
+      ...(t.is_tentative ? [] : [tentativeItem]),
       ...(meeting ? [] : [{ label: "Plan across days…", run: () => openSpread(t) }]),
       ...done,
       ...moves,
       { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
       edit,
       remove,
+      ...fromOutlook,
     ];
   }
 
@@ -712,6 +737,7 @@
     open duties <strong>{fmtHours(summary.dutyH)}</strong> ·
     logged <strong>{fmtHours(summary.logged)}</strong>
     {#if summary.mustAll} · must-dos <strong>{summary.mustDone}/{summary.mustAll}</strong> done{/if}
+    {#if summary.tentativeH} · tentative <strong>{fmtHours(summary.tentativeH)}</strong> (not counted){/if}
   </p>
 
   <div class="toolbar">
@@ -753,13 +779,14 @@
         {#each meetings as s (s.id)}
           {@const t = todoById.get(s.todo_id)!}
           <div class="card meeting" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled} class:review={pending(t)}
+               class:tentative={tentative(t)}
                role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="time">{hhmm(s.start_time)}–{hhmm(s.end_time)}</span>
               <span class="title">{t.is_core ? "🎯 " : ""}{t.title}</span>
               {#if label(t)}<span class="sub">{label(t)}</span>{/if}
-              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ logged</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{/if}
+              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ logged</span>{:else if pending(t)}<span class="off">from Outlook — to review{t.source_tentative ? " · tentative" : ""}</span>{:else if tentative(t)}<span class="off">tentative</span>{/if}
             </button>
           </div>
         {/each}
@@ -769,14 +796,14 @@
           {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
           {@const h = cardHours(s, t)}
           <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done}
-               class:cancelled={s.is_cancelled} class:review={pending(t)}
+               class:cancelled={s.is_cancelled} class:review={pending(t)} class:tentative={tentative(t)}
                class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}
                role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
               {#if label(t) || h}<span class="sub">{label(t)}{label(t) && h ? " · " : ""}{h ? fmtHours(h) : ""}</span>{/if}
-              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{:else if t.is_done}<span class="ok">done</span>{/if}
+              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{:else if tentative(t)}<span class="off">tentative</span>{:else if t.is_done}<span class="ok">done</span>{/if}
             </button>
           </div>
         {/each}
@@ -1064,6 +1091,7 @@
   .inbox-wrap summary { cursor: pointer; margin-bottom: 0.6rem; }
   .inbox-wrap summary h2 { display: inline; font-size: 1.05rem; margin: 0; }
   .card.review { border-left-style: dashed; border-left-color: var(--ink-soft); opacity: 0.85; }
+  .card.tentative { border-left-style: dotted; opacity: 0.8; }
   .below-days { display: flex; gap: 0.5rem; margin-top: 0.6rem; font-family: var(--font-ui); }
   .below-days button { font-size: 0.82rem; }
   .pick { display: grid; gap: 0.8rem; font-family: var(--font-ui); }

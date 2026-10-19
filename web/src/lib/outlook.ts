@@ -162,14 +162,14 @@ export async function syncOutlook(): Promise<SyncResult> {
     const t = byKey.get(m.key);
     const outlookFields = {
       source_uid: m.uid, source_date: m.date, source_start: m.start || null, source_end: m.end || null,
-      source_free: m.free, source_all_day: m.allDay,
+      source_free: m.free, source_all_day: m.allDay, source_tentative: m.tentative,
     };
 
     if (!t) {
       const id = await saveTodo(null, {
         kind: m.allDay ? "task" : "meeting", title: m.title, due_on: m.date, est_hours: len,
         must_this_week: false, note: m.location || null,
-        source: "outlook", source_key: m.key, reviewed: false, ...outlookFields,
+        source: "outlook", source_key: m.key, reviewed: false, is_tentative: m.tentative, ...outlookFields,
       });
       await saveSlot(null, {
         todo_id: id, planned_on: m.date, start_time: m.start || null, end_time: m.end || null, planned_hours: len,
@@ -182,11 +182,14 @@ export async function syncOutlook(): Promise<SyncResult> {
     const renamed = !t.reviewed && t.title !== m.title;
     const s = slotOf(t);
     const reappeared = !!s?.is_cancelled && !s.entry_id;
-    if (!moved && !renamed && !reappeared && t.source_free === m.free) continue;
+    // accepted or declined in Outlook since: the tentative mark follows (unless logged)
+    const statusChanged = t.source_tentative !== m.tentative;
+    if (!moved && !renamed && !reappeared && !statusChanged && t.source_free === m.free) continue;
 
     await saveTodo(t.id, {
       ...outlookFields,
       ...(renamed ? { title: m.title } : {}),
+      ...(statusChanged && !s?.entry_id ? { is_tentative: m.tentative } : {}),
       ...(moved && !s?.entry_id ? { due_on: m.date, ...(m.allDay ? {} : { est_hours: len }) } : {}),
     });
     if (s && !s.entry_id && (moved || reappeared)) {

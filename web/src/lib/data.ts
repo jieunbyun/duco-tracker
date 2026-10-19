@@ -261,6 +261,8 @@ export type Todo = {
   source_free: boolean;
   source_all_day: boolean;
   reviewed: boolean;
+  is_tentative: boolean; // on the calendar, not counted as planned until confirmed
+  source_tentative: boolean;
 };
 export type TodoFields = Omit<Todo, "id">;
 
@@ -278,7 +280,7 @@ export type Slot = {
 export type SlotFields = Omit<Slot, "id">;
 
 const TODO_COLS =
-  "id,kind,title,due_on,category_id,project_id,milestone_id,est_hours,is_core,must_this_week,is_done,done_at,is_cancelled,sort_order,note,source,source_key,source_uid,source_date,source_start,source_end,source_free,source_all_day,reviewed";
+  "id,kind,title,due_on,category_id,project_id,milestone_id,est_hours,is_core,must_this_week,is_done,done_at,is_cancelled,sort_order,note,source,source_key,source_uid,source_date,source_start,source_end,source_free,source_all_day,reviewed,is_tentative,source_tentative";
 export { TODO_COLS, SLOT_COLS, asTodo, asSlot, check };
 const SLOT_COLS = "id,todo_id,planned_on,start_time,end_time,planned_hours,entry_id,is_cancelled,sort_order";
 

@@ -50,7 +50,10 @@
       so in the Outlook settings. New events
       wait under <em>From Outlook — to review</em>, dashed on the calendar and not counted as planned: give each a
       category (and project), adjust its times or hours, then <em>Keep</em> it, or mark it <em>Irrelevant</em> —
-      this one, or every repeat — and it never comes back. Events moved in Outlook move here too unless already
+      this one, or every repeat — and it never comes back. <em>Tentative</em> keeps it on the calendar, dotted and not
+      counted as planned, until you confirm it from its card's menu; events Outlook shows as tentative (or not yet
+      accepted) arrive tagged so, and the mark follows when you accept or decline there. Any meeting can be marked
+      tentative from its menu. Events moved in Outlook move here too unless already
       logged; events removed there disappear if unreviewed, or are struck through if kept. Ignored events can be
       brought back in the Outlook settings. The calendar link stays in your database.
     </dd>

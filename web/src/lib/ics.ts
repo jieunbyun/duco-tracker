@@ -19,6 +19,7 @@ export type Meeting = {
   key: string;
   allDay: boolean; // date only; start and end are ""
   free: boolean; // shown as Free in Outlook (often a reminder or deadline)
+  tentative: boolean; // shown as Tentative, or an invitation not yet accepted
 };
 
 const WINDOWS_ZONES: Record<string, string> = {
@@ -213,6 +214,7 @@ export function meetingsInRange(text: string, from: string, to: string, opts: { 
       key,
       allDay,
       free: busy === "FREE" || (get(e, "TRANSP")?.value ?? "").toUpperCase() === "TRANSPARENT",
+      tentative: busy === "TENTATIVE" || (get(e, "STATUS")?.value ?? "").toUpperCase() === "TENTATIVE",
     });
   };
 
