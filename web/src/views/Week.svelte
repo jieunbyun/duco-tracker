@@ -204,13 +204,14 @@
   });
 
   /** Hours planned on a day: meetings' lengths and duties' hours for that day, leaving
-   *  out cancelled cards and anything not yet counted (to review, or tentative). */
+   *  out cancelled cards, finished (done) ones, and anything not yet counted (to
+   *  review, or tentative). */
   function plannedOn(day: string): { hours: number; unknown: number } {
     let hours = 0, unknown = 0;
     for (const s of weekSlots) {
       if (s.planned_on !== day || s.is_cancelled) continue;
       const t = todoById.get(s.todo_id);
-      if (!t || uncounted(t)) continue;
+      if (!t || uncounted(t) || t.is_done) continue;
       const h = t.kind === "meeting" ? s.planned_hours : cardHours(s, t);
       if (h) hours += h;
       else unknown += 1;
