@@ -152,6 +152,9 @@ export async function saveProject(id: string | null, fields: ProjectFields): Pro
   const row = await check<{ id: string }>(supabase.from("project").insert(fields).select("id").single());
   return row!.id;
 }
+export async function setProjectStatus(id: string, status: string): Promise<void> {
+  await check(supabase.from("project").update({ status }).eq("id", id));
+}
 export async function deleteProject(id: string): Promise<void> {
   await check(supabase.from("project").delete().eq("id", id));
 }

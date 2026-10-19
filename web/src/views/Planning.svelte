@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours } from "../lib/data";
+  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, saveSettings, setProjectStatus } from "../lib/data";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
   import { horizonRange, projectLoad, areaHorizons, PLANNABLE_KINDS, PACE_DAYS } from "../lib/horizon";
   import type { ProjectLoad } from "../lib/horizon";
@@ -65,6 +65,43 @@
 
   // ---- project list ---------------------------------------------------------
   let showFinished = $state(false);
+
+  // ---- viewing period: one click instead of the settings form ---------------------
+  const HORIZONS = [3, 6, 12, 18, 24];
+  let savingHorizon = $state(false);
+  async function setHorizon(months: number) {
+    if (!tax || months === tax.horizonMonths) return;
+    savingHorizon = true;
+    try {
+      await saveSettings({ week_starts_on: tax.weekStartsOn, weeks_per_year: tax.weeksPerYear, horizon_months: months });
+      await load();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      savingHorizon = false;
+    }
+  }
+
+  // ---- tick a project complete, with a moment to undo -------------------------------
+  let flash = $state<{ text: string; undo?: () => Promise<void> } | null>(null);
+  let flashTimer: ReturnType<typeof setTimeout> | undefined;
+  function showFlash(text: string, undo?: () => Promise<void>) {
+    flash = { text, undo };
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => (flash = null), 8000);
+  }
+  async function setComplete(p: Project, done: boolean) {
+    const before = p.status;
+    const after = done ? "done" : "active";
+    try {
+      await setProjectStatus(p.id, after);
+      showFlash(done ? `Marked “${p.name}” done${showFinished ? "" : " — hidden with done projects"}` : `Reopened “${p.name}”`,
+        async () => { await setProjectStatus(p.id, before); flash = null; await load(); });
+    } catch (e) {
+      error = (e as Error).message;
+    }
+    await load();
+  }
   let editingSettings = $state(false);
   async function settingsSaved() {
     editingSettings = false;
@@ -127,7 +164,15 @@
     <p class="error">{error}</p>
   {:else if tax}
     <!-- ================= horizon ================= -->
-    <h2>Remaining time · next {tax.horizonMonths} months</h2>
+    <div class="horizon-head">
+      <h2>Remaining time · next {tax.horizonMonths} months</h2>
+      <div class="horizon-pick" role="group" aria-label="Viewing period">
+        {#each HORIZONS as m (m)}
+          <button class:on={tax.horizonMonths === m} aria-pressed={tax.horizonMonths === m}
+                  disabled={savingHorizon} onclick={() => setHorizon(m)}>{m} mo</button>
+        {/each}
+      </div>
+    </div>
     <p class="muted note">
       {fmtDay(horizon.from)} – {fmtDay(horizon.to)}. Routine time is projected at your pace over the last
       {PACE_DAYS / 7} weeks; projects count their remaining planned hours, spread to their end date.
@@ -189,7 +234,12 @@
         {#snippet projectList(c: Category)}
           {#each projectsIn(c) as p (p.id)}
             {@const l = loads.get(p.id)!}
-            <div class="project" class:open={expanded === p.id}>
+            <div class="project" class:open={expanded === p.id} class:complete={p.status === "done"}>
+              <div class="p-line">
+              <input type="checkbox" class="p-done" checked={p.status === "done"}
+                     title={p.status === "done" ? "Done — untick to reopen" : "Mark the project done"}
+                     aria-label={`${p.name} done`}
+                     onchange={(ev) => setComplete(p, (ev.target as HTMLInputElement).checked)} />
               <button class="p-row" onclick={() => toggle(p.id)} aria-expanded={expanded === p.id}>
                 <span class="p-name">
                   {#if p.is_important}<span class="star" title="Important">★</span>{/if}{p.name}
@@ -207,6 +257,7 @@
                 </span>
                 <span class="p-flag" class:warn={warn(l)}>{warn(l) ? "⚠ " : ""}{flagText(l, p)}</span>
               </button>
+              </div>
               {#if expanded === p.id}
                 <div class="p-body">
                   <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id}
@@ -289,6 +340,14 @@
   {/if}
 </section>
 
+{#if flash}
+  <div class="flash" role="status">
+    <span>{flash.text}</span>
+    {#if flash.undo}<button onclick={flash.undo}>Undo</button>{/if}
+    <button class="x" aria-label="Dismiss" onclick={() => (flash = null)}>✕</button>
+  </div>
+{/if}
+
 <style>
   .planning h2 { margin-top: 2.2rem; }
   .note { font-family: var(--font-ui); font-size: 0.85rem; margin: -0.2rem 0 0.6rem; max-width: 46rem; }
@@ -340,8 +399,26 @@
   .empty { font-family: var(--font-ui); font-size: 0.82rem; margin: 0.2rem 0 0; }
 
   .project { border-radius: var(--radius); }
+  .p-line { display: flex; align-items: flex-start; gap: 0.2rem; }
+  .p-done { width: auto; flex: none; margin: 0.75rem 0 0 0.3rem; }
+  .project.complete .p-name { text-decoration: line-through; color: var(--ink-soft); }
+  .horizon-head { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; }
+  .horizon-pick { display: flex; gap: 0.25rem; font-family: var(--font-ui); }
+  .horizon-pick button { font-size: 0.8rem; padding: 0.2rem 0.55rem; }
+  .horizon-pick button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .flash {
+    position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 60;
+    display: flex; align-items: center; gap: 0.8rem; max-width: calc(100vw - 32px);
+    padding: 0.55rem 0.6rem 0.55rem 1rem; background: var(--ink); color: var(--paper);
+    border-radius: var(--radius); box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+    font-family: var(--font-ui); font-size: 0.88rem;
+  }
+  .flash button { background: none; border: 1px solid var(--paper); color: var(--paper); padding: 0.2rem 0.7rem; font-size: 0.82rem; }
+  .flash button.x { border: none; padding: 0.2rem 0.4rem; opacity: 0.8; }
   .project.open { background: var(--panel); }
   .p-row {
+    flex: 1;
+    min-width: 0;
     width: 100%;
     display: grid;
     grid-template-columns: minmax(10rem, 1.6fr) 12rem minmax(5rem, 1fr) 8.5rem;
