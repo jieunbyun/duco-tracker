@@ -74,7 +74,22 @@
   );
   // Routine time counts email in equal shares to each area with an Email category.
   const areaRows = $derived(tax ? areaHorizons(tax, shareEmail(hours, tax), projects, loads, horizon) : []);
-  const scale = $derived(Math.max(1, ...areaRows.map((r) => Math.max(r.capacity, r.routine + r.committed))));
+  // Teaching and Admin also shown together: their capacity, routine and
+  // projects added up, the projects stacked in each area's colour.
+  const COMBINED = ["TEA", "ADM"];
+  const combo = $derived.by(() => {
+    const parts = COMBINED.map((code) => areaRows.find((r) => r.area.code === code)).filter((r) => !!r);
+    if (parts.length < 2) return null;
+    const sum = (k: "capacity" | "routine" | "committed" | "free" | "freePerWeek") => parts.reduce((s, r) => s + r![k], 0);
+    return {
+      parts,
+      label: parts.map((r) => r!.area.label).join(" + "),
+      capacity: sum("capacity"), routine: sum("routine"), committed: sum("committed"),
+      free: sum("free"), freePerWeek: sum("freePerWeek"),
+    };
+  });
+  const scale = $derived(Math.max(1, ...areaRows.map((r) => Math.max(r.capacity, r.routine + r.committed)),
+    combo ? Math.max(combo.capacity, combo.routine + combo.committed) : 0));
   const total = $derived(
     areaRows.reduce(
       (s, r) => ({ capacity: s.capacity + r.capacity, routine: s.routine + r.routine,
@@ -223,6 +238,32 @@
           </span>
         </div>
       {/each}
+      {#if combo}
+        {@const over = combo.free < 0}
+        <div class="h-row combo">
+          <span class="name"><em>{combo.label}</em> <small class="tag">combined</small></span>
+          <div class="stack thin" aria-hidden="true">
+            <span class="seg routine" style:width={`${(100 * combo.routine) / scale}%`}></span>
+            {#each combo.parts as part (part!.area.id)}
+              <span class="seg committed" style:width={`${(100 * part!.committed) / scale}%`} style:background={areaColor(part!.area.id)}></span>
+            {/each}
+            {#if !over}<span class="seg free" style:width={`${(100 * combo.free) / scale}%`}></span>{/if}
+            <span class="cap" style:left={`${(100 * combo.capacity) / scale}%`}></span>
+          </div>
+          <span class="value" class:over>
+            {#if over}
+              <strong>⚠ over by {fmtHours(-combo.free)}{share(-combo.free, combo.capacity, " over")}</strong>
+            {:else}
+              <strong>{fmtHours(combo.free)} free{share(combo.free, combo.capacity)}</strong>
+              <span class="muted">· ≈ {fmtHours(combo.freePerWeek)}/wk</span>
+            {/if}
+          </span>
+          <span class="detail muted">
+            capacity {fmtHours(combo.capacity)} · routine {fmtHours(combo.routine)} ·
+            projects {combo.parts.map((part) => `${part!.area.label} ${fmtHours(part!.committed)}`).join(" + ")}
+          </span>
+        </div>
+      {/if}
       <div class="h-total">
         <span class="name">All work</span>
         <span>
@@ -399,6 +440,11 @@
   .seg:nth-last-child(2) { border-radius: 0 4px 4px 0; }
   .seg.routine { background: var(--ink-soft); opacity: 0.55; }
   .seg.free { background: var(--track); }
+  /* the combined row: set apart, thinner, stacked from its areas' own colours */
+  .h-row.combo { border-top: 1px dashed var(--rule); padding-top: 0.8rem; }
+  .h-row.combo .name { font-weight: 400; }
+  .h-row.combo .tag { font-size: 0.68rem; color: var(--ink-soft); border: 1px solid var(--rule); border-radius: 999px; padding: 0 0.35rem; font-style: normal; }
+  .stack.thin { height: 7px; }
   .cap { position: absolute; top: -4px; bottom: -4px; width: 2px; margin-left: -1px; background: var(--ink); }
   .h-row .value { grid-area: value; font-variant-numeric: tabular-nums; }
   .h-row .detail { grid-area: detail; font-size: 0.8rem; }
