@@ -36,7 +36,6 @@
 
   const shown = $derived(filter ? entries.filter((e) => e.project_id === filter) : entries);
   const myName = $derived(members.find((m) => m.user_id === me)?.display_name ?? "me");
-  const supervisor = $derived(members.find((m) => m.user_id === me)?.role === "supervisor");
   // yours first: the projects you lead or are on
   const ordered = $derived([
     ...projects.filter((p) => p.lead_id === me || p.members.includes(me)),
@@ -52,10 +51,7 @@
   <span class="eyebrow">Logbook</span>
   <h1>Logbook</h1>
   <p class="muted intro">
-    A few lines a day: what you did, what came of it, what's next — and links to the files on OneDrive.
-    {#if supervisor}This one is yours, for the projects you lead; members don't see it.
-    {:else}Your supervisor reads it and comments; nobody else in the group sees it.{/if}
-    You can edit any entry (the earlier version is kept in its history) and delete one on the day you wrote it.
+    A few lines a day and links to the files on OneDrive.
   </p>
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="muted">Loading…</p>{:else}

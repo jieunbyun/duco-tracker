@@ -182,7 +182,7 @@
     </div>
   </article>
 {:else}
-  <p class="muted">{canWrite ? "No entries yet. Write the first one above — a few lines a day is plenty." : "No entries yet."}</p>
+  <p class="muted">No entries yet.</p>
 {/each}
 
 <style>
