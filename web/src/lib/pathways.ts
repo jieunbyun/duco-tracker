@@ -7,7 +7,7 @@ export const LANES = [
   { key: "research", label: "Research" },
   { key: "teaching", label: "Teaching" },
   { key: "outreach", label: "Outreach" },
-  { key: "supervision", label: "Supervision" },
+  { key: "supervision", label: "Supervision & collaboration" },
   { key: "grants", label: "Grant writing" },
 ] as const;
 export type Lane = (typeof LANES)[number]["key"];

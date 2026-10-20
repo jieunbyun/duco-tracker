@@ -380,7 +380,7 @@
 
   // ---- bring existing Planning projects onto the map ------------------------------------
   // Each lands in its area's lane (student projects under Supervision go to the
-  // Supervision lane), keeps the project's dates, and stays linked to it.
+  // Supervision & collaboration lane), keeps the project's dates, and stays linked to it.
   type ImportRow = { p: Project; group: string; lane: Lane; kind: "project" | "grant"; already: boolean; pick: boolean };
   let importRows = $state<ImportRow[]>([]);
   let importing = $state(false);
@@ -640,7 +640,7 @@
   .map.dragging { cursor: grabbing; }
   .lane { position: absolute; left: 0; right: 0; border-top: 1px solid var(--rule); }
   .lane.alt { background: color-mix(in srgb, var(--panel) 55%, transparent); }
-  .lane-label { position: absolute; left: 10px; top: 10px; font-size: 0.85rem; font-weight: 600; }
+  .lane-label { position: absolute; left: 10px; top: 10px; max-width: 92px; font-size: 0.85rem; font-weight: 600; line-height: 1.25; }
   .lane-research .lane-label { color: var(--lane-research); }
   .lane-teaching .lane-label { color: var(--lane-teaching); }
   .lane-outreach .lane-label { color: var(--lane-outreach); }

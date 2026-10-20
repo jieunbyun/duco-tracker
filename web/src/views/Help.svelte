@@ -86,7 +86,7 @@
 
     <dt>Pathways</dt>
     <dd>
-      A map of where your work is heading: lanes for Research, Teaching, Outreach, Supervision and Grant writing, time running
+      A map of where your work is heading: lanes for Research, Teaching, Outreach, Supervision & collaboration, and Grant writing, time running
       from now to a horizon you choose (3–20 years), and long-term goals on the right. Add goals, near-term
       objectives, projects (linked to a Planning project — + From Planning brings several at once, each into its
       area's lane with its dates — or potential, dashed, with person-months and cost),
