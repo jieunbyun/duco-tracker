@@ -67,7 +67,8 @@
   }
 
   // ---- geometry -------------------------------------------------------------------
-  const LABEL_W = 110, GOAL_W = 250, GAP = 18, AXIS_H = 30, ROW_H = 58, NODE_H = 44, PAD = 10, MIN_W = 96;
+  const LABEL_W = 110, GOAL_W = 270, GOAL_R = 44, GAP = 18, AXIS_H = 30, ROW_H = 58, NODE_H = 44, PAD = 10, MIN_W = 96;
+  // GOAL_R: room right of the goals column for the goals' ○ and for links that loop between two goals
   let width = $state(1000);
   const mapW = $derived(Math.max(width, 980));
   const x0 = LABEL_W;
@@ -128,7 +129,7 @@
   type Box = { x: number; y: number; w: number; open: boolean };
   function box(n: PwNode): Box {
     const y = laneTop[n.lane] + PAD + n.lane_row * ROW_H;
-    if (inColumn(n)) return { x: x1 + GAP, y, w: GOAL_W - 10, open: false };
+    if (inColumn(n)) return { x: x1 + GAP, y, w: GOAL_W - GOAL_R, open: false };
     const s = n.start_on ?? today();
     const e = endOf(n, s);
     const left = xOf(s < from ? from : s);
@@ -432,7 +433,7 @@
         <div class="tick" class:major={t.major} style:left={`${t.x}px`} style:height={`${mapH - 6}px`}><span>{t.label}</span></div>
       {/each}
       <div class="now" style:left={`${todayX}px`} style:height={`${mapH - 6}px`}><span>now</span></div>
-      <div class="goals-head" style:left={`${x1 + GAP}px`} style:width={`${GOAL_W - 10}px`}>Goals · by {fmtDay(to).replace(/^1 /, "")}</div>
+      <div class="goals-head" style:left={`${x1 + GAP}px`} style:width={`${GOAL_W - GOAL_R}px`}>Goals · by {fmtDay(to).replace(/^1 /, "")}</div>
 
       <!-- links -->
       <svg class="links" width={mapW} height={mapH} aria-hidden="true">
