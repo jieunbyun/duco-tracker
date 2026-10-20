@@ -545,7 +545,8 @@
   }
 
   function openLog(t: Todo, slot: Slot | null, day: string) {
-    markDone = t.kind === "meeting" || slotsOf(t).filter((s) => !s.entry_id && !s.is_cancelled).length <= 1;
+    // a logged meeting has happened; a to-do may need more, so you tick it done yourself
+    markDone = t.kind === "meeting";
     panel = { kind: "log", todo: t, slot, day };
   }
 
