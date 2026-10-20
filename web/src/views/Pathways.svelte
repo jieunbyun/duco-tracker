@@ -5,7 +5,7 @@
   import { loadReadings } from "../lib/reading";
   import type { Reading } from "../lib/reading";
   import {
-    LANES, NODE_KINDS, loadPathways, saveYears, saveNode, saveLink,
+    LANES, NODE_KINDS, staged, loadPathways, loadMemberMap, loadContributors, saveYears, saveNode, saveLink,
     monthStart, monthEnd, fmtMonth, addMonths, fraction, monthAt, monthsBetween, shiftMonths,
   } from "../lib/pathways";
   import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
@@ -16,8 +16,11 @@
   import AssetEditor from "../lib/AssetEditor.svelte";
   import { loadAssets } from "../lib/assets";
   import type { Asset } from "../lib/assets";
-  import { loadGroupProjects, loadEntries } from "../lib/group";
-  import type { GroupProject, Entry } from "../lib/group";
+  import { loadGroupProjects, loadEntries, loadMembers } from "../lib/group";
+  import type { GroupProject, Entry, Member } from "../lib/group";
+
+  // A member sees a read-only chart: the items they contribute to, and the goals they lead to.
+  let { member = false }: { member?: boolean } = $props();
 
   // ---- data -----------------------------------------------------------------------
   let nodes = $state<PwNode[]>([]);
@@ -28,6 +31,8 @@
   let assets = $state<Asset[]>([]);
   let groupProjects = $state<GroupProject[]>([]);
   let groupEntries = $state<Entry[]>([]);
+  let groupMembers = $state<Member[]>([]);
+  let contributors = $state(new Map<string, string[]>());
 
   // three views of the same pathways: the map, a list for entering and linking, and the information system
   type View = "map" | "list" | "system";
@@ -49,6 +54,17 @@
   let showAll = $state(false);
 
   async function load() {
+    if (member) {
+      try {
+        ({ nodes, links } = await loadMemberMap());
+        error = "";
+      } catch (e) {
+        error = (e as Error).message;
+      } finally {
+        loading = false;
+      }
+      return;
+    }
     try {
       const [pw, p, r, t, as] = await Promise.all([
         loadPathways(), loadProjects(), loadReadings().catch(() => [] as Reading[]), loadTaxonomy(),
@@ -57,8 +73,9 @@
       tax = t;
       assets = as;
       // students' shared projects and their logbooks (none before 0015, or without a group)
-      [groupProjects, groupEntries] = await Promise.all([
+      [groupProjects, groupEntries, groupMembers, contributors] = await Promise.all([
         loadGroupProjects().catch(() => [] as GroupProject[]), loadEntries().catch(() => [] as Entry[]),
+        loadMembers().catch(() => [] as Member[]), loadContributors(),
       ]);
       nodes = pw.nodes;
       links = pw.links;
@@ -162,7 +179,7 @@
   }
 
   function begin(ev: PointerEvent, n: PwNode, mode: "move" | "resize" | "link") {
-    if (ev.button !== 0) return;
+    if (ev.button !== 0 || member) return;
     ev.preventDefault();
     ev.stopPropagation();
     const p = local(ev);
@@ -349,7 +366,7 @@
 
   function openEdit(n: PwNode) { panel = { node: n }; }
 
-  const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6, grant: 3 };
+  const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6, grant: 3, award: 3 };
   /** The first row in a lane free over a span (goals: the first free row in the goals column). */
   function freeRow(lane: Lane, kind: NodeKind, s: string, e: string, also: PwNode[] = []): number {
     const inLane = [...visible, ...also].filter((n) => n.lane === lane && (kind === "goal") === inColumn(n));
@@ -360,13 +377,13 @@
     }
   }
   function openNew(kind: NodeKind) {
-    const lane = (NODE_KINDS.find((k) => k.key === kind)?.lane ?? "research") as Lane;
+    const lane = (NODE_KINDS.find((k) => k.key === kind)?.lane ?? "goals") as Lane;
     const s = monthStart(today());
     const e = monthEnd(addMonths(s, Math.max(1, DEFAULT_MONTHS[kind]) - 1));
     panel = {
       node: null,
       draft: {
-        kind, lane, potential: kind === "project", grant_stage: kind === "grant" ? "drafting" : null,
+        kind, lane, potential: kind === "project", grant_stage: staged(kind) ? "drafting" : null,
         start_on: kind === "goal" ? null : s, end_on: kind === "goal" ? null : e,
         lane_row: freeRow(lane, kind, s, e),
       },
@@ -380,7 +397,7 @@
     const inCol = kind === "goal" && !s && !e;
     const rs = s ?? today(), re = e ?? addMonths(monthStart(rs), 12);
     await saveNode(null, {
-      kind, lane, title, potential: kind === "project", grant_stage: kind === "grant" ? "drafting" : null,
+      kind, lane, title, potential: kind === "project", grant_stage: staged(kind) ? "drafting" : null,
       start_on: s, end_on: e, lane_row: inCol ? freeRow(lane, "goal", rs, re) : freeRow(lane, kind === "goal" ? "project" : kind, rs, re),
     });
     await load();
@@ -400,7 +417,7 @@
     if (c?.code === "RES_PROP") return { lane: "grants", kind: "grant", group };
     if (a?.code === "TEA") return { lane: "teaching", kind: "project", group };
     if (a?.code === "OUT") return { lane: "outreach", kind: "project", group };
-    return { lane: "projects", kind: "project", group };
+    return { lane: "publications", kind: "project", group };
   }
   function openImport() {
     const onMap = new Set(nodes.map((n) => n.project_id).filter(Boolean));
@@ -453,9 +470,9 @@
     return stages.some((s) => s !== "declined") ? "funding pending" : null;
   }
   function sub(n: PwNode): string {
-    const bits: string[] = [n.potential ? "potential project" : n.kind === "grant" ? `grant · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
+    const bits: string[] = [n.potential ? "potential project" : staged(n.kind) ? `${n.kind} · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
     if (n.kind === "project" && n.hands_on) bits.unshift("hands-on");
-    if (n.kind === "grant" && n.end_on) bits.push(`deadline ${fmtMonth(n.end_on)}`);
+    if (staged(n.kind) && n.end_on) bits.push(`deadline ${fmtMonth(n.end_on)}`);
     else if (n.start_on) bits.push(`${fmtMonth(n.start_on)} → ${n.end_on ? fmtMonth(n.end_on) : "…"}`);
     else if (n.end_on) bits.push(`by ${fmtMonth(n.end_on)}`);
     if (n.kind === "grant" && n.cost) bits.push(n.cost.toLocaleString());
@@ -468,30 +485,36 @@
       const k = groupEntries.filter((e) => e.project_id === n.group_project_id && e.entry_date >= since).length;
       bits.push(`logbook ${k} this week`);
     }
+    const who = (contributors.get(n.id) ?? []).map((u) => groupMembers.find((m) => m.user_id === u)?.display_name).filter(Boolean);
+    if (who.length) bits.push(who.join(", "));
     const k = assetCount(n.id);
     if (k) bits.push(`${k} ${k === 1 ? "asset" : "assets"}`);
     return bits.join(" · ");
   }
 </script>
 
-<section class="pathways">
+<section class="pathways" class:member>
   <span class="eyebrow">Pathways</span>
   <h1>Pathways</h1>
 
   <div class="views" role="tablist" aria-label="Pathways view">
     <button role="tab" aria-selected={view === "map"} class:on={view === "map"} onclick={() => setView("map")}>Map</button>
-    <button role="tab" aria-selected={view === "list"} class:on={view === "list"} onclick={() => setView("list")}>List</button>
-    <button role="tab" aria-selected={view === "system"} class:on={view === "system"} onclick={() => setView("system")}>Information system</button>
+    {#if !member}
+      <button role="tab" aria-selected={view === "list"} class:on={view === "list"} onclick={() => setView("list")}>List</button>
+      <button role="tab" aria-selected={view === "system"} class:on={view === "system"} onclick={() => setView("system")}>Information system</button>
+    {/if}
   </div>
 
-  {#if view === "system"}
+  {#if view === "system" && !member}
     <InfoSystem {assets} {nodes} onadd={() => (panel = { asset: null })} onedit={(a) => (panel = { asset: a })} />
   {:else}
   <div class="toolbar">
-    {#each NODE_KINDS as k (k.key)}
-      <button class:primary={k.key === "project"} onclick={() => openNew(k.key)}>+ {k.label}</button>
-    {/each}
-    <button onclick={openImport} title="Put existing Planning projects on the map, linked to them">+ From Planning</button>
+    {#if !member}
+      {#each NODE_KINDS as k (k.key)}
+        <button class:primary={k.key === "project"} onclick={() => openNew(k.key)}>+ {k.label}</button>
+      {/each}
+      <button onclick={openImport} title="Put existing Planning projects on the map, linked to them">+ From Planning</button>
+    {/if}
     <span class="spacer"></span>
     {#if view === "map"}
       <div class="years" role="group" aria-label="How far ahead">
@@ -505,11 +528,15 @@
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="muted">Loading…</p>{/if}
 
-  {#if view === "list"}
+  {#if view === "list" && !member}
     <PwList shown={visible} all={nodes.map(eff)} {links} {sub} onedit={openEdit} onadd={quickAdd} onchanged={load} />
   {:else}
   <div class="legend muted" aria-hidden="true">
-    <span class="hint">Drag an item to move it in time or across lanes · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit</span>
+    {#if member}
+      <span class="hint">Your items, and the goals and objectives they lead to.</span>
+    {:else}
+      <span class="hint">Drag an item to move it in time or across lanes · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit</span>
+    {/if}
   </div>
 
   <div class="scroller" bind:clientWidth={width}>
@@ -549,7 +576,7 @@
       <!-- items -->
       {#each drawn as n (n.id)}
         {@const b = boxes.get(n.id)!}
-        <div class="node kind-{n.kind} lane-{n.lane} {n.kind === "grant" ? `gs-${n.grant_stage ?? "drafting"}` : ""}" class:potential={n.potential} class:hands-on={n.kind === "project" && n.hands_on} class:open-end={b.open}
+        <div class="node kind-{n.kind} lane-{n.lane} {staged(n.kind) ? `gs-${n.grant_stage ?? "drafting"}` : ""}" class:potential={n.potential} class:hands-on={n.kind === "project" && n.hands_on} class:open-end={b.open}
              class:inactive={n.status !== "active"} class:moving={drag?.id === n.id}
              data-node={n.id} role="button" tabindex="0" title={`${n.title}${n.detail ? `\n${n.detail}` : ""}`}
              style:left={`${b.x}px`} style:top={`${b.y}px`} style:width={`${b.w}px`} style:height={`${NODE_H}px`}
@@ -557,11 +584,11 @@
              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEdit(n); } }}>
           <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}</span>
           <span class="n-sub">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
-          {#if !inColumn(n)}
+          {#if !inColumn(n) && !member}
             <!-- pointer shortcuts; the editor's dates and Links do the same by keyboard -->
             <span class="resize" role="presentation" aria-hidden="true" title="Drag to change the end" onpointerdown={(ev) => begin(ev, n, "resize")}></span>
           {/if}
-          <span class="connector" role="presentation" aria-hidden="true" title="Drag onto another item to link them" onpointerdown={(ev) => begin(ev, n, "link")}>○</span>
+          {#if !member}<span class="connector" role="presentation" aria-hidden="true" title="Drag onto another item to link them" onpointerdown={(ev) => begin(ev, n, "link")}>○</span>{/if}
         </div>
       {/each}
     </div>
@@ -615,22 +642,24 @@
   {:else if panel && "node" in panel}
     <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
     {#key panel}
-      <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} onsaved={saved} oncancel={() => (panel = null)} />
+      <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} members={groupMembers}
+        contributors={panel.node ? contributors.get(panel.node.id) ?? [] : []} onsaved={saved} oncancel={() => (panel = null)} />
     {/key}
   {/if}
 </dialog>
 
 <style>
   .pathways {
-    --lane-research: var(--series-1);
+    --lane-goals: var(--series-1);
+    --lane-awards: #c0398a;
+    --lane-publications: #6250d6;
     --lane-teaching: var(--series-2);
     --lane-outreach: var(--series-4);
-    --lane-projects: #6250d6;
     --lane-grants: var(--series-3);
     --lk: var(--ink-soft);
   }
   @media (prefers-color-scheme: dark) {
-    .pathways { --lane-projects: #9085e9; }
+    .pathways { --lane-publications: #9085e9; --lane-awards: #e06aae; }
   }
 
   .views { display: flex; gap: 0.25rem; margin-top: 0.6rem; font-family: var(--font-ui); }
@@ -654,10 +683,11 @@
   .lane { position: absolute; left: 0; right: 0; border-top: 1px solid var(--rule); }
   .lane.alt { background: color-mix(in srgb, var(--panel) 55%, transparent); }
   .lane-label { position: absolute; left: 10px; top: 10px; max-width: 92px; font-size: 0.85rem; font-weight: 600; line-height: 1.25; }
-  .lane-research .lane-label { color: var(--lane-research); }
+  .lane-goals .lane-label { color: var(--lane-goals); }
+  .lane-awards .lane-label { color: var(--lane-awards); }
   .lane-teaching .lane-label { color: var(--lane-teaching); }
   .lane-outreach .lane-label { color: var(--lane-outreach); }
-  .lane-projects .lane-label { color: var(--lane-projects); }
+  .lane-publications .lane-label { color: var(--lane-publications); }
   .lane-grants .lane-label { color: var(--lane-grants); }
   .tick { position: absolute; top: 4px; border-left: 1px dotted var(--rule); pointer-events: none; }
   .tick.major { border-left-style: solid; }
@@ -676,15 +706,17 @@
   .node {
     position: absolute; box-sizing: border-box; display: grid; align-content: center; gap: 1px;
     padding: 0.2rem 1.1rem 0.2rem 0.55rem; background: var(--paper); border: 1px solid var(--rule);
-    border-left: 4px solid var(--lane-research); border-radius: 6px; cursor: grab; overflow: visible;
+    border-left: 4px solid var(--lane-goals); border-radius: 6px; cursor: grab; overflow: visible;
     box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
   }
+  .member .node { cursor: default; }
   .node:hover { box-shadow: 0 0 0 1px var(--ink-soft); z-index: 3; }
   .node:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .node.moving { opacity: 0.85; z-index: 5; box-shadow: 0 6px 16px rgb(0 0 0 / 0.2); }
   .node.lane-teaching { border-left-color: var(--lane-teaching); }
   .node.lane-outreach { border-left-color: var(--lane-outreach); }
-  .node.lane-projects { border-left-color: var(--lane-projects); }
+  .node.lane-publications { border-left-color: var(--lane-publications); }
+  .node.lane-awards { border-left-color: var(--lane-awards); }
   /* hands-on: your own research time goes into it */
   .node.hands-on { border-width: 2px; border-left-width: 7px; background: color-mix(in srgb, var(--accent) 9%, var(--paper)); }
   .node.hands-on .n-title { font-weight: 700; }

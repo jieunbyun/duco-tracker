@@ -86,8 +86,8 @@
 
     <dt>Pathways</dt>
     <dd>
-      A map of where your work is heading: lanes for Research, Projects (the smaller projects — yours, your students', your collaborators' — that
-      feed into an objective or a goal), Teaching, Outreach and Grant writing, time running
+      A map of where your work is heading: rows for Goals &amp; Objectives, Awards, Publications &amp; code/database, Teaching, Outreach and Grant
+      Writing, time running
       from now to a horizon you choose (3–20 years), and long-term goals on the right. Add goals, near-term
       objectives, projects (linked to a Planning project — + From Planning brings several at once, each into its
       area's lane with its dates — or potential, dashed, with person-months and cost),
@@ -101,7 +101,11 @@
       goes into it substantially; it stands out on the map, bolder and shaded.
       Dates on Pathways are months: an item runs from the start of its first month to the end of its last
       (a linked Planning project keeps its exact days, but shows months here too).
-      The <em>Grant writing</em> lane holds grant applications: writing period up to the deadline, stage
+      An item can list its <em>contributors</em> from your group (in its editor). Each member then sees, in their
+      own Pathways tab, a read-only chart of the items they contribute to and the goals and objectives those lead
+      to — titles, dates and stages only, never your notes, costs or effort.
+      An <em>award</em> (in the Awards row) goes through the same stages as a grant.
+      The <em>Grant Writing</em> row holds grant applications: writing period up to the deadline, stage
       (drafting, submitted, awarded, declined) and, if you like, the amount sought. Link a grant to whatever it
       would fund, in any lane; that item reads “funding pending” until the grant is awarded, then “funded”. Projects under Proposals in Planning arrive here as grants.
       <em>List</em> (the second view) shows every item by lane, with quick entry at the top — kind, title, lane and

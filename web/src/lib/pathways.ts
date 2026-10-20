@@ -4,22 +4,26 @@ import { supabase } from "./supabase";
 import { check } from "./data";
 
 export const LANES = [
-  { key: "research", label: "Research" },
-  { key: "projects", label: "Projects" }, // the smaller projects feeding objectives and goals
+  { key: "goals", label: "Goals & Objectives" },
+  { key: "awards", label: "Awards" },
+  { key: "publications", label: "Publications & code/database" },
   { key: "teaching", label: "Teaching" },
   { key: "outreach", label: "Outreach" },
-  { key: "grants", label: "Grant writing" },
+  { key: "grants", label: "Grant Writing" },
 ] as const;
 export type Lane = (typeof LANES)[number]["key"];
 
 export const NODE_KINDS = [
-  { key: "goal", label: "Goal", lane: "research" },
-  { key: "objective", label: "Objective", lane: "research" },
-  { key: "project", label: "Project", lane: "projects" },
-  { key: "person", label: "Person", lane: "projects" },
-  { key: "gap", label: "Knowledge gap", lane: "research" },
+  { key: "goal", label: "Goal", lane: "goals" },
+  { key: "objective", label: "Objective", lane: "goals" },
+  { key: "project", label: "Project", lane: "publications" },
+  { key: "person", label: "Person", lane: "publications" },
+  { key: "gap", label: "Knowledge gap", lane: "goals" },
+  { key: "award", label: "Award", lane: "awards" },
   { key: "grant", label: "Grant", lane: "grants" },
 ] as const;
+/** Grants and awards go through stages: drafting, submitted, awarded or declined. */
+export const staged = (kind: string) => kind === "grant" || kind === "award";
 export type NodeKind = (typeof NODE_KINDS)[number]["key"];
 
 // Where a grant application stands. Until it is awarded, what it would fund is uncertain.
@@ -67,6 +71,33 @@ export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]
     links: (l.data ?? []) as PwLink[],
     years: Number(s.data?.pathway_years ?? 5),
   };
+}
+
+// ---- contributors, and what a member sees ------------------------------------------
+/** Who contributes to each item (none before 0017, or without a group). */
+export async function loadContributors(): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  const { data, error } = await supabase.from("pw_contributor").select("node_id,user_id");
+  if (error) return out;
+  for (const r of data as { node_id: string; user_id: string }[]) out.set(r.node_id, [...(out.get(r.node_id) ?? []), r.user_id]);
+  return out;
+}
+export async function setContributors(nodeId: string, want: string[], had: string[]): Promise<void> {
+  const add = want.filter((u) => !had.includes(u));
+  const drop = had.filter((u) => !want.includes(u));
+  if (add.length) await check(supabase.from("pw_contributor").insert(add.map((user_id) => ({ node_id: nodeId, user_id }))));
+  if (drop.length) await check(supabase.from("pw_contributor").delete().eq("node_id", nodeId).in("user_id", drop));
+}
+/** A member's chart: the items they contribute to and the goals those lead to — titles, dates and stages only. */
+export async function loadMemberMap(): Promise<{ nodes: PwNode[]; links: PwLink[] }> {
+  const [n, l] = await Promise.all([supabase.rpc("member_map"), supabase.rpc("member_map_links")]);
+  for (const r of [n, l]) if (r.error) throw new Error(r.error.message);
+  const nodes = ((n.data ?? []) as Pick<PwNode, "id" | "kind" | "lane" | "title" | "start_on" | "end_on" | "status" | "grant_stage" | "lane_row">[])
+    .map((x) => ({
+      ...x, detail: null, potential: false, project_id: null, reading_id: null, effort_pm: null, cost: null, fte: null,
+      hands_on: false, group_project_id: null,
+    }) as PwNode);
+  return { nodes, links: (l.data ?? []) as PwLink[] };
 }
 
 export async function saveYears(years: number): Promise<void> {

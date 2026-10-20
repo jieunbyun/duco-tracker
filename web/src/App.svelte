@@ -22,18 +22,20 @@
     help: () => import("./views/Help.svelte"),
     logbook: () => import("./views/MyLogbook.svelte"),
     projects: () => import("./views/MyProjects.svelte"),
+    chart: () => import("./views/MemberPathways.svelte"),
   };
   const labels: Record<keyof typeof views, string> = {
     week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Members", time: "Time", reading: "Reading",
-    cv: "CV", help: "Help", logbook: "Logbook", projects: "Projects",
+    cv: "CV", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
   };
   type Route = keyof typeof views;
 
   // Who sees which tabs: the planner is yours alone; a member sees only their
-  // logbook and projects. You keep a logbook too, for the projects you lead.
+  // logbook, projects and Pathways chart. You keep a logbook too, for the
+  // projects you lead.
   const OWNER: Route[] = ["week", "planning", "pathways", "time", "reading", "cv", "help"];
   const SUPERVISOR: Route[] = ["week", "planning", "pathways", "supervision", "logbook", "time", "reading", "cv", "help"];
-  const MEMBER: Route[] = ["logbook", "projects"];
+  const MEMBER: Route[] = ["logbook", "projects", "chart"];
 
   let session = $state<Session | null>(null);
   let ready = $state(false);

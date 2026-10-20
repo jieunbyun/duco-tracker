@@ -1,13 +1,13 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import {
-    LANES, NODE_KINDS, GRANT_STAGES, fromMonth, saveNode, deleteNode, saveLink, deleteLink, loadRevisions, addRevision,
+    LANES, NODE_KINDS, GRANT_STAGES, staged, setContributors, fromMonth, saveNode, deleteNode, saveLink, deleteLink, loadRevisions, addRevision,
   } from "./pathways";
   import type { PwNode, PwNodeFields, PwLink, PwRevision, NodeKind, Lane, GrantStage } from "./pathways";
   import type { Project } from "./data";
   import { setProjectDates } from "./data";
   import type { Reading } from "./reading";
-  import type { GroupProject } from "./group";
+  import type { GroupProject, Member } from "./group";
   import { LIVE_STATUSES } from "./plan";
   import { fmtDay } from "./dates";
 
@@ -19,16 +19,21 @@
     projects: Project[];
     readings: Reading[];
     groupProjects?: GroupProject[]; // members' shared projects (Members tab)
+    members?: Member[]; // the group, to name contributors
+    contributors?: string[]; // this item's contributors now
     onsaved: () => void;
     oncancel: () => void;
   };
-  let { node, draft, nodes, links, projects, readings, groupProjects = [], onsaved, oncancel }: Props = $props();
+  let { node, draft, nodes, links, projects, readings, groupProjects = [], members = [], contributors = [], onsaved, oncancel }: Props = $props();
+  const had = untrack(() => contributors);
+  let contrib = $state<string[]>([...untrack(() => contributors)]);
+  const eligible = $derived(members.filter((m) => m.active || contrib.includes(m.user_id)));
 
   const n0 = untrack(() => node);
   const d0 = untrack(() => draft) ?? {};
   let f = $state({
     kind: (n0?.kind ?? d0.kind ?? "project") as NodeKind,
-    lane: (n0?.lane ?? d0.lane ?? "research") as Lane,
+    lane: (n0?.lane ?? d0.lane ?? "goals") as Lane,
     title: n0?.title ?? "",
     detail: n0?.detail ?? "",
     status: n0?.status ?? "active",
@@ -103,7 +108,7 @@
         effort_pm: f.kind === "project" ? n(f.effort_pm) : null,
         cost: plannable ? n(f.cost) : null,
         fte: f.kind === "person" ? n(f.fte) : null,
-        grant_stage: f.kind === "grant" ? f.grant_stage : null,
+        grant_stage: staged(f.kind) ? f.grant_stage : null,
         hands_on: f.kind === "project" ? f.hands_on : false,
         ...(groupProjects.length || n0?.group_project_id ? { group_project_id: f.kind === "project" ? f.group_project_id || null : null } : {}),
       };
@@ -113,7 +118,8 @@
       if (p && (startOn !== p.start_on || endOn !== p.end_on)) {
         await setProjectDates(p.id, startOn, endOn);
       }
-      await saveNode(n0?.id ?? null, fields);
+      const id = await saveNode(n0?.id ?? null, fields);
+      if (members.length) await setContributors(id, contrib, had);
       onsaved();
     } catch (e) {
       error = (e as Error).message;
@@ -215,6 +221,11 @@
     <label>Amount sought (optional) <input type="number" min="0" step="1000" bind:value={f.cost} /></label>
     <p class="hint wide">Link it to what it would fund — projects, people, objectives. They read “funding pending” until it is awarded.</p>
   {/if}
+  {#if f.kind === "award"}
+    <label>Stage
+      <select bind:value={f.grant_stage}>{#each GRANT_STAGES as s (s)}<option value={s}>{s}</option>{/each}</select>
+    </label>
+  {/if}
   {#if f.kind === "person"}
     <label>Share of time (0–1) <input type="number" min="0" max="1" step="0.05" bind:value={f.fte} /></label>
   {/if}
@@ -227,11 +238,20 @@
     </label>
   {/if}
   {#if dated}
-    <label>{f.kind === "grant" ? "Writing from" : f.kind === "goal" ? "From (optional)" : "From"} <input type="month" bind:value={f.start_on} /></label>
-    <label>{f.kind === "grant" ? "Deadline" : f.kind === "goal" ? "By (optional)" : "To"} <input type="month" bind:value={f.end_on} min={f.start_on || undefined} /></label>
+    <label>{staged(f.kind) ? "Writing from" : f.kind === "goal" ? "From (optional)" : "From"} <input type="month" bind:value={f.start_on} /></label>
+    <label>{staged(f.kind) ? "Deadline" : f.kind === "goal" ? "By (optional)" : "To"} <input type="month" bind:value={f.end_on} min={f.start_on || undefined} /></label>
     {#if f.kind === "goal"}
       <p class="hint wide">Without dates the goal sits in the goals column at the horizon; with them it sits on the timeline. You can also drag it between the two.</p>
     {/if}
+  {/if}
+
+  {#if eligible.length && f.kind !== "goal"}
+    <fieldset class="wide contrib">
+      <legend>Contributors — they see this item, and the goals it leads to, on their own chart</legend>
+      {#each eligible as m (m.user_id)}
+        <label class="check"><input type="checkbox" value={m.user_id} bind:group={contrib} /> {m.role === "supervisor" ? `${m.display_name} (you)` : m.display_name}</label>
+      {/each}
+    </fieldset>
   {/if}
 
   {#if n0}
@@ -292,6 +312,8 @@
   .check input { width: auto; }
   .reason { color: var(--accent); }
   .synced { font-size: 0.75rem; color: var(--accent); }
+  .contrib { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.4rem 0.7rem; }
+  .contrib legend { font-size: 0.8rem; color: var(--ink-soft); padding: 0 0.3rem; }
   .hint { font-size: 0.78rem; color: var(--ink-soft); margin: -0.3rem 0 0; }
   .links h3 { font-size: 0.9rem; margin: 0 0 0.3rem; }
   .link-row, .link-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.85rem; padding: 0.15rem 0; }

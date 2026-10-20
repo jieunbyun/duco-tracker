@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LANES, NODE_KINDS, fromMonth, saveLink, deleteLink, saveNode } from "./pathways";
+  import { LANES, NODE_KINDS, staged, fromMonth, saveLink, deleteLink, saveNode } from "./pathways";
   import type { PwNode, PwLink, NodeKind, Lane } from "./pathways";
 
   type Props = {
@@ -14,13 +14,13 @@
   let { shown, all, links, sub, onedit, onadd, onchanged }: Props = $props();
 
   const KIND_ORDER = NODE_KINDS.map((k) => k.key) as string[];
-  const ICON: Record<string, string> = { goal: "◎", objective: "◆", project: "▭", person: "●", gap: "?", grant: "✎" };
+  const ICON: Record<string, string> = { goal: "◎", objective: "◆", project: "▭", person: "●", gap: "?", grant: "✎", award: "★" };
   const kindLabel = (k: string) => NODE_KINDS.find((x) => x.key === k)?.label ?? k;
   const byId = $derived(new Map(all.map((n) => [n.id, n])));
   const titleOf = (id: string) => byId.get(id)?.title ?? "?";
 
   const PLURAL: Record<string, string> = {
-    goal: "Goals", objective: "Objectives", project: "Projects", person: "People", gap: "Knowledge gaps", grant: "Grants",
+    goal: "Goals", objective: "Objectives", project: "Projects", person: "People", gap: "Knowledge gaps", grant: "Grants", award: "Awards",
   };
 
   // Order by start or end date, read the way the map draws them: an item with
@@ -59,13 +59,13 @@
   );
 
   // ---- quick entry ------------------------------------------------------------------
-  let q = $state({ kind: "project" as NodeKind, lane: "research" as Lane, title: "", start: "", end: "" });
+  let q = $state({ kind: "project" as NodeKind, lane: "publications" as Lane, title: "", start: "", end: "" });
   let laneTouched = $state(false);
   let adding = $state(false);
   let error = $state("");
   let titleEl = $state<HTMLInputElement | null>(null);
   function onKind() {
-    if (!laneTouched) q.lane = (NODE_KINDS.find((k) => k.key === q.kind)?.lane ?? "research") as Lane;
+    if (!laneTouched) q.lane = (NODE_KINDS.find((k) => k.key === q.kind)?.lane ?? "goals") as Lane;
   }
   async function add(ev: SubmitEvent) {
     ev.preventDefault();
@@ -108,8 +108,8 @@
   <select bind:value={q.lane} onchange={() => (laneTouched = true)} aria-label="Lane">
     {#each LANES as l (l.key)}<option value={l.key}>{l.label}</option>{/each}
   </select>
-  <label class="q-date">{q.kind === "grant" ? "writing from" : "from"} <input type="month" bind:value={q.start} /></label>
-  <label class="q-date">{q.kind === "grant" ? "deadline" : q.kind === "goal" ? "by" : "to"} <input type="month" bind:value={q.end} min={q.start || undefined} /></label>
+  <label class="q-date">{staged(q.kind) ? "writing from" : "from"} <input type="month" bind:value={q.start} /></label>
+  <label class="q-date">{staged(q.kind) ? "deadline" : q.kind === "goal" ? "by" : "to"} <input type="month" bind:value={q.end} min={q.start || undefined} /></label>
   <button class="primary" type="submit" disabled={adding || !q.title.trim()}>{adding ? "Adding…" : "Add"}</button>
 </form>
 <p class="muted q-hint">
@@ -202,10 +202,11 @@
   .q-date { display: flex; gap: 0.3rem; align-items: center; font-size: 0.78rem; color: var(--ink-soft); }
   .q-hint { font-size: 0.78rem; margin: 0.2rem 0 0.8rem; font-family: var(--font-ui); }
 
-  .grp { margin: 0 0 1rem; font-family: var(--font-ui); border-left: 4px solid var(--lane-research); padding-left: 0.7rem; }
+  .grp { margin: 0 0 1rem; font-family: var(--font-ui); border-left: 4px solid var(--lane-goals); padding-left: 0.7rem; }
+  .grp.lane-awards { border-left-color: var(--lane-awards); }
   .grp.lane-teaching { border-left-color: var(--lane-teaching); }
   .grp.lane-outreach { border-left-color: var(--lane-outreach); }
-  .grp.lane-projects { border-left-color: var(--lane-projects); }
+  .grp.lane-publications { border-left-color: var(--lane-publications); }
   .grp.lane-grants { border-left-color: var(--lane-grants); }
   .grp h2 { font-size: 1rem; margin: 0 0 0.3rem; }
   .grp h2 .muted { font-size: 0.8rem; font-weight: 400; }
