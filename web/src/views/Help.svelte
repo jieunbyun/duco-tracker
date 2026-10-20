@@ -128,14 +128,21 @@
       visible to them. To add a member: invite them in Supabase (<em>Authentication › Users › Invite user</em>; they
       get an email to choose a password), then <em>+ Add a member</em> here: pick them from your Planning projects
       under Research › Supervision (their name then follows Planning) or, for anyone else, type a name.
-      You come first in the list, with the projects you lead. Your own <em>Logbook</em> tab is for those, and for progress notes on your Planning projects: pick one (and, if you like, one of its milestones) in the entry's Project menu. Those notes are yours alone. A logbook entry is a session: pick the project (and milestone) and its open <em>action items</em> appear in the form. Tick off what you finished, add what came up, and add a dated comment or link to any action; the entry remembers what it did (Done / New / Updated). <em>Time spent</em>, if you give it, is logged once, on the project and milestone, as in Week; actions never carry time. Action items are the project's own notes on what to do next, not to-dos: they never appear on Week's lists, but the same action list appears when you log a block in Week. Filter the Logbook to one project to see its action items at a glance. <em>Actions done</em> keeps the history of every action ticked off, by month, with its comments and links. A member's action items show, read-only, in their logbook under Members.
-      Under each member are their projects (several each; you create them and choose who leads, and both of you tick
-      off milestones) and their logbook: dated entries — what they did, results, next, and links to their files on
-      the institution's OneDrive — or an optional weekly update. You read every entry and comment; they reply. Only
-      they write their entries: they can edit any (every earlier version stays in its history) and delete one only
-      on the day it was written. <em>Export logbook</em> saves it as a Markdown file, to keep on OneDrive or take
-      along when they leave. <em>Take out of the group</em> ends their access but keeps their logbook. <em>See what they see</em> shows their tabs exactly as they see them, read-only, until you go back to your view. On the
-      Pathways map, a project can stand for a member's project, and then shows its logbook entries this week.
+      You come first in the list, with the projects you lead.
+      The <em>Logbook</em> is built on actions: each project's actions, milestone by milestone, each with its own dated
+      thread of comments and links. Tick off what is done, add what comes up under a milestone, drag the ⠿ handle to
+      put them in order, click an action to rename it, and use <em>comment / link</em> to add to its thread. Your
+      Logbook covers the projects you lead and your Planning projects; a member's covers their shared projects. Under
+      each member are their projects (several each; you create them and choose who leads, and both of you tick off
+      milestones) and their Logbook, where you read their threads and reply. A comment can be taken back on the day it
+      was written; after that it stays. Actions are not to-dos and never appear on Week's lists, but the same actions
+      appear when you log a block in Week, to tick, add, comment on and reorder there; time is logged there, never per
+      action. <em>Actions done</em> keeps the history of every action ticked off, by month, with its thread.
+      <em>Export logbook</em> saves it as a Markdown file, to keep on OneDrive or take along when they leave; entries
+      written before the Logbook moved to actions stay readable under <em>Earlier entries</em>.
+      <em>Take out of the group</em> ends their access but keeps their logbook. <em>See what they see</em> shows their
+      tabs exactly as they see them, read-only, until you go back to your view. On the Pathways map, a project can
+      stand for a member's project, and then shows how many comments its actions had this week.
     </dd>
 
     <dt>Time</dt>

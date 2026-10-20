@@ -17,8 +17,9 @@
   import FolderLink from "../lib/FolderLink.svelte";
   import { preview } from "../lib/preview.svelte";
   import type { Output, OutputLink } from "../lib/assets";
-  import { loadGroupProjects, loadEntries, loadMembers, myId } from "../lib/group";
-  import type { GroupProject, Entry, Member } from "../lib/group";
+  import { loadGroupProjects, loadMembers, myId } from "../lib/group";
+  import type { GroupProject, Member } from "../lib/group";
+  import { loadProjectActivity } from "../lib/actions";
 
   // A member sees a read-only chart: the items they contribute to, and the goals they lead to.
   let { member = false }: { member?: boolean } = $props();
@@ -35,7 +36,7 @@
   let outputTitles = $state(new Map<string, string>());
   let me = $state("");
   let groupProjects = $state<GroupProject[]>([]);
-  let groupEntries = $state<Entry[]>([]);
+  let groupActivity = $state(new Map<string, number>()); // comments on each shared project's actions this week
   let groupMembers = $state<Member[]>([]);
   let contributors = $state(new Map<string, string[]>());
 
@@ -83,8 +84,9 @@
       ({ outputs, links: outputLinks, titles: outputTitles } = out);
       me = id;
       // students' shared projects and their logbooks (none before 0015, or without a group)
-      [groupProjects, groupEntries, groupMembers, contributors] = await Promise.all([
-        loadGroupProjects().catch(() => [] as GroupProject[]), loadEntries().catch(() => [] as Entry[]),
+      [groupProjects, groupActivity, groupMembers, contributors] = await Promise.all([
+        loadGroupProjects().catch(() => [] as GroupProject[]),
+        loadProjectActivity(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)),
         loadMembers().catch(() => [] as Member[]), loadContributors(),
       ]);
       nodes = pw.nodes;
@@ -497,8 +499,7 @@
     if (n.effort_pm) bits.push(`${n.effort_pm} pm`);
     if (n.fte) bits.push(`${Math.round(n.fte * 100)}%`);
     if (n.group_project_id) {
-      const since = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-      const k = groupEntries.filter((e) => e.project_id === n.group_project_id && e.entry_date >= since).length;
+      const k = groupActivity.get(n.group_project_id) ?? 0;
       bits.push(`logbook ${k} this week`);
     }
     const who = (contributors.get(n.id) ?? []).map((u) => groupMembers.find((m) => m.user_id === u)?.display_name).filter(Boolean);

@@ -1,8 +1,9 @@
 <script lang="ts">
   // The actions ticked off, newest first, by month: when, which project (and
-  // milestone), and the comments and links each gathered on the way.
-  import type { Action } from "./actions";
-  import type { GroupProject, PlanningRef } from "./group";
+  // milestone), and the thread of comments and links each gathered.
+  import { loadActionComments } from "./actions";
+  import type { Action, ActionComment } from "./actions";
+  import type { GroupProject, GroupMilestone, Member, PlanningRef } from "./group";
   import { linkName } from "./group";
   import { fmtDay } from "./dates";
 
@@ -10,24 +11,33 @@
     load: () => Promise<Action[]>; // fetched when first opened
     projects: GroupProject[];
     planning?: PlanningRef[];
+    groupMilestones?: GroupMilestone[];
+    members?: Member[];
+    me?: string;
     filter: string; // "g:<id>", "p:<id>", or "" for all
   };
-  let { load, projects, planning = [], filter }: Props = $props();
+  let { load, projects, planning = [], groupMilestones = [], members = [], me = "", filter }: Props = $props();
 
   let done = $state<Action[] | null>(null);
+  let thread = $state<ActionComment[]>([]);
   let error = $state("");
   async function open(ev: Event) {
     if (!(ev.target as HTMLDetailsElement).open || done) return;
-    try { done = await load(); } catch (e) { error = (e as Error).message; }
+    try {
+      const all = (await load()).filter((a) => a.is_done);
+      thread = await loadActionComments(all.map((a) => a.id));
+      done = all.sort((a, b) => (b.done_at ?? "").localeCompare(a.done_at ?? ""));
+    } catch (e) {
+      error = (e as Error).message;
+    }
   }
 
   const keyOf = (a: Action) => (a.project_id ? `p:${a.project_id}` : a.group_project_id ? `g:${a.group_project_id}` : "");
-  const shown = $derived((done ?? []).filter((a) => a.is_done && (!filter || keyOf(a) === filter)));
+  const shown = $derived((done ?? []).filter((a) => !filter || keyOf(a) === filter));
   const months = $derived.by(() => {
     const out: { label: string; items: Action[] }[] = [];
     for (const a of shown) {
-      const d = a.done_at ?? a.created_at;
-      const label = new Date(d).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+      const label = new Date(a.done_at ?? a.created_at).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
       const m = out.find((x) => x.label === label) ?? (out.push({ label, items: [] }), out[out.length - 1]);
       m.items.push(a);
     }
@@ -39,8 +49,10 @@
       const m = p?.milestones.find((x) => x.id === a.milestone_id);
       return `${p?.name ?? "Planning project"}${m ? ` › ${m.title}` : ""}`;
     }
-    return projects.find((x) => x.id === a.group_project_id)?.title ?? "Shared project";
+    const m = groupMilestones.find((x) => x.id === a.group_milestone_id);
+    return `${projects.find((x) => x.id === a.group_project_id)?.title ?? "Shared project"}${m ? ` › ${m.title}` : ""}`;
   }
+  const nameOf = (uid: string) => (uid === me ? "you" : members.find((m) => m.user_id === uid)?.display_name ?? "—");
 </script>
 
 <details class="history" ontoggle={open}>
@@ -57,11 +69,11 @@
             <span class="when">{a.done_at ? fmtDay(a.done_at.slice(0, 10)) : ""}</span>
             <span class="what">
               <span class="name">{a.title}</span>
-              {#if !filter}<span class="muted small"> · {where(a)}</span>{/if}
-              {#if a.note}<span class="note">{a.note}</span>{/if}
-              {#if a.links.length}
-                <span class="links">{#each a.links as l (l)}<a href={l} target="_blank" rel="noopener noreferrer" title={l}>↗ {linkName(l)}</a>{/each}</span>
-              {/if}
+              {#if !filter}<span class="muted small">{where(a)}</span>{/if}
+              {#each thread.filter((c) => c.action_id === a.id) as c (c.id)}
+                <span class="cmt">{c.created_at.slice(0, 10)}{c.author_id !== me ? ` · ${nameOf(c.author_id)}` : ""}: {c.body ?? ""}
+                  {#each c.links as l (l)}<a href={l} target="_blank" rel="noopener noreferrer" title={l}> ↗ {linkName(l)}</a>{/each}</span>
+              {/each}
             </span>
           </li>
         {/each}
@@ -71,7 +83,7 @@
 </details>
 
 <style>
-  .history { margin: 0.4rem 0 1rem; font-family: var(--font-ui); }
+  .history { margin: 1rem 0; font-family: var(--font-ui); }
   summary { cursor: pointer; font-size: 0.9rem; font-weight: 600; }
   h3 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 0.7rem 0 0.2rem; }
   ul { list-style: none; margin: 0; padding: 0; }
@@ -79,8 +91,6 @@
   .when { color: var(--ink-soft); font-size: 0.8rem; }
   .what { display: grid; gap: 0.1rem; }
   .name { font-weight: 500; }
-  .note { font-size: 0.8rem; color: var(--ink-soft); white-space: pre-wrap; }
-  .links { display: flex; flex-wrap: wrap; gap: 0.3rem; font-size: 0.78rem; }
-  .links a { padding: 0 0.4rem; border: 1px solid var(--rule); border-radius: 999px; text-decoration: none; }
+  .cmt { font-size: 0.8rem; color: var(--ink-soft); }
   .small { font-size: 0.8rem; }
 </style>

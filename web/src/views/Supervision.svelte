@@ -12,9 +12,11 @@
   import { LIVE_STATUSES } from "../lib/plan";
   import { quietly } from "../lib/undo.svelte";
   import Logbook from "../lib/Logbook.svelte";
-  import Actions from "../lib/Actions.svelte";
-  import { loadMemberActions, loadMyActions } from "../lib/actions";
-  import type { Action } from "../lib/actions";
+  import ActionLog from "../lib/ActionLog.svelte";
+  import {
+    loadMemberActions, loadMyActions, loadDoneActions, loadActionComments, loadRecentComments, loadProjectActivity, actionsMarkdown,
+  } from "../lib/actions";
+  import type { Action, ActionComment } from "../lib/actions";
   import GroupProjects from "../lib/GroupProjects.svelte";
   import { preview } from "../lib/preview.svelte";
 
@@ -25,7 +27,10 @@
   let entries = $state<Entry[]>([]);
   let comments = $state<Comment[]>([]);
   let edits = $state(new Map<string, number>());
-  let theirActions = $state<Action[]>([]); // the selected person's action items (read-only here)
+  let theirActions = $state<Action[]>([]); // the selected person's actions
+  let theirThread = $state<ActionComment[]>([]); // and their comments (with your replies)
+  let recent = $state<ActionComment[]>([]); // the last month's comments you can see, for the counts
+  let activity = $state(new Map<string, number>()); // comments on each shared project's actions this week
   let supervision = $state<Project[]>([]); // your Planning projects under Research › Supervision
   let planningRefs = $state<PlanningRef[]>([]); // all your Planning projects, to name your own logbook notes
   let loading = $state(true);
@@ -53,6 +58,8 @@
         for (const x of renames) x.display_name = planning.find((y) => y.id === x.planning_project_id)!.name;
       }
       [me, members, projects, milestones, entries, comments, edits] = [id, m, p, ms, es, cs, ed];
+      [recent, activity] = await Promise.all([loadRecentComments(30), loadProjectActivity(since)]);
+      await loadThread();
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -78,18 +85,27 @@
   let tab = $state<"projects" | "logbook">("projects");
 
   const theirProjects = $derived(current ? projects.filter((p) => p.members.includes(current.user_id) || p.lead_id === current.user_id) : []);
-  $effect(() => {
+  async function loadThread() {
     const c = current;
     if (!c) return;
-    (c.user_id === me ? loadMyActions() : loadMemberActions(c.user_id)).then((x) => { if (current?.user_id === c.user_id) theirActions = x; });
+    const acts = c.user_id === me ? await loadMyActions() : await loadMemberActions(c.user_id);
+    const th = await loadActionComments(acts.map((a) => a.id));
+    if (current?.user_id === c.user_id) [theirActions, theirThread] = [acts, th];
+  }
+  $effect(() => {
+    if (current?.user_id) loadThread();
   });
   const theirEntries = $derived(current ? entries.filter((e) => e.author_id === current.user_id) : []);
   const since = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-  const lastOf = (uid: string) => entries.find((e) => e.author_id === uid)?.entry_date ?? null;
-  const weekOf = (uid: string) => entries.filter((e) => e.author_id === uid && e.entry_date >= since).length;
-  /** A member's entries with no comment from you yet. */
-  const unanswered = (uid: string) =>
-    entries.filter((e) => e.author_id === uid && !comments.some((c) => c.entry_id === e.id && c.author_id === me)).length;
+  // how active each person is, from their comments on actions
+  const lastOf = (uid: string) => recent.find((c) => c.author_id === uid)?.created_at.slice(0, 10) ?? null;
+  const weekOf = (uid: string) => recent.filter((c) => c.author_id === uid && c.created_at.slice(0, 10) >= since).length;
+  /** A member's actions where they wrote last: waiting for you to read (or reply). */
+  const unanswered = (uid: string) => {
+    const latest = new Map<string, ActionComment>();
+    for (const c of recent) if (!latest.has(c.action_id)) latest.set(c.action_id, c); // newest first
+    return [...latest.values()].filter((c) => c.author_id === uid && uid !== me).length;
+  };
   const fromPlanning = (m: Member) => !!m.planning_project_id && supervision.some((p) => p.id === m.planning_project_id);
 
   // ---- adding a member -------------------------------------------------------------------
@@ -130,13 +146,32 @@
   }
 
   // ---- export --------------------------------------------------------------------------------
-  function exportOne(m: Member) {
-    download(`logbook-${m.display_name.replace(/\W+/g, "-").toLowerCase()}.md`,
-      logbookMarkdown(theirEntries, projects, members, comments, edits, `Logbook — ${m.display_name}`, planningRefs, milestones));
+  const whereOf = (a: Action) => {
+    const m = milestones.find((x) => x.id === a.group_milestone_id);
+    if (a.project_id) {
+      const p = planningRefs.find((x) => x.id === a.project_id);
+      const pm = p?.milestones.find((x) => x.id === a.milestone_id);
+      return `${p?.name ?? "Planning project"}${pm ? ` › ${pm.title}` : ""}`;
+    }
+    return `${projects.find((x) => x.id === a.group_project_id)?.title ?? "Shared project"}${m ? ` › ${m.title}` : ""}`;
+  };
+  const nameOf = (uid: string) => members.find((x) => x.user_id === uid)?.display_name ?? "—";
+  /** One person's logbook: their actions (all, done included) with threads, then any earlier entries. */
+  async function logbookOf(m: Member): Promise<string> {
+    const acts = m.user_id === me ? [...(await loadMyActions()).filter((a) => !a.is_done), ...(await loadDoneActions())] : await loadMemberActions(m.user_id);
+    const th = await loadActionComments(acts.map((a) => a.id));
+    let text = actionsMarkdown(acts, th, `Logbook — ${m.display_name}`, whereOf, nameOf);
+    const old = entries.filter((e) => e.author_id === m.user_id);
+    if (old.length) text += "\n\n" + logbookMarkdown(old, projects, members, comments, edits, "Earlier entries", planningRefs, milestones);
+    return text;
   }
-  function exportAll() {
-    download(`logbooks-${new Date().toISOString().slice(0, 10)}.md`,
-      logbookMarkdown(entries, projects, members, comments, edits, "Group logbooks", planningRefs, milestones));
+  async function exportOne(m: Member) {
+    download(`logbook-${m.display_name.replace(/\W+/g, "-").toLowerCase()}.md`, await logbookOf(m));
+  }
+  async function exportAll() {
+    const parts = [];
+    for (const m of people) parts.push(await logbookOf(m));
+    download(`logbooks-${new Date().toISOString().slice(0, 10)}.md`, parts.join("\n\n---\n\n"));
   }
 </script>
 
@@ -153,7 +188,7 @@
           <span class="name">{m.user_id === me ? `You (${m.display_name})` : m.display_name}</span>
           <span class="meta">
             {#if m.user_id === me}
-              {projects.filter((p) => p.lead_id === me).length} led · {weekOf(m.user_id)} entries this week
+              {projects.filter((p) => p.lead_id === me).length} led · {weekOf(m.user_id)} comments this week
             {:else}
               {m.active ? `${weekOf(m.user_id)} this week` : "not in the group"}
               {#if unanswered(m.user_id)} · <strong>{unanswered(m.user_id)} to read</strong>{/if}
@@ -162,7 +197,7 @@
         </button>
       {/each}
       <button class="add" onclick={openAdd}>+ Add a member</button>
-      {#if entries.length}<button class="add" onclick={exportAll}>Export all logbooks</button>{/if}
+      <button class="add" onclick={exportAll}>Export all logbooks</button>
     </nav>
 
     <div class="main">
@@ -191,7 +226,7 @@
         <header class="head">
           <h2>{isMe ? "You" : current.display_name}</h2>
           <span class="muted small">
-            {isMe ? `shown to members as ${current.display_name}` : current.email ?? ""}{lastOf(current.user_id) ? ` · last entry ${lastOf(current.user_id)}` : ""}
+            {isMe ? `shown to members as ${current.display_name}` : current.email ?? ""}{lastOf(current.user_id) ? ` · last comment ${lastOf(current.user_id)}` : ""}
           </span>
           <span class="spacer"></span>
           {#if fromPlanning(current)}
@@ -203,7 +238,7 @@
             <button class="mini" onclick={() => { preview.as = current; location.hash = "#/logbook"; }}
                     title="Their Logbook, Projects and Pathways, exactly as they see them (read-only)">See what they see</button>
           {/if}
-          <button class="mini" onclick={() => exportOne(current)} disabled={!theirEntries.length}>Export logbook</button>
+          <button class="mini" onclick={() => exportOne(current)}>Export logbook</button>
           {#if !isMe}
             {#if current.active}<button class="mini" onclick={() => setActive(current, false)}>Take out of the group</button>
             {:else}<button class="mini" onclick={() => setActive(current, true)}>Bring back</button>{/if}
@@ -211,14 +246,20 @@
         </header>
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected={tab === "projects"} class:on={tab === "projects"} onclick={() => (tab = "projects")}>Projects ({theirProjects.length})</button>
-          <button role="tab" aria-selected={tab === "logbook"} class:on={tab === "logbook"} onclick={() => (tab = "logbook")}>Logbook ({theirEntries.length})</button>
+          <button role="tab" aria-selected={tab === "logbook"} class:on={tab === "logbook"} onclick={() => (tab = "logbook")}>Logbook ({theirActions.filter((a) => !a.is_done).length} open)</button>
         </div>
         {#if tab === "projects"}
-          <GroupProjects projects={theirProjects} {milestones} {members} {entries} supervisor newFor={current.user_id} onchanged={load} />
+          <GroupProjects projects={theirProjects} {milestones} {members} {activity} supervisor newFor={current.user_id} onchanged={load} />
         {:else}
           {#if isMe}<p class="muted small">Write in your <a href="#/logbook">Logbook</a> tab; it's shown here too.</p>{/if}
-          <Actions actions={theirActions} projects={theirProjects} planning={isMe ? planningRefs : []} filter="" canWrite={false} onchanged={load} />
-          <Logbook entries={theirEntries} projects={theirProjects} planning={isMe ? planningRefs : []} groupMilestones={milestones} {members} {comments} {edits} {me} canWrite={false} onchanged={load} />
+          <ActionLog actions={theirActions} comments={theirThread} projects={isMe ? projects : theirProjects} planning={isMe ? planningRefs : []}
+                     groupMilestones={milestones} filter="" {members} {me} canWrite={isMe} canComment onchanged={loadThread} />
+          {#if theirEntries.length}
+            <details class="old">
+              <summary>Earlier entries ({theirEntries.length})</summary>
+              <Logbook entries={theirEntries} projects={theirProjects} planning={isMe ? planningRefs : []} groupMilestones={milestones} {members} {comments} {edits} {me} canWrite={false} onchanged={load} />
+            </details>
+          {/if}
         {/if}
       {:else if !loading}
         <p class="muted">Add your first member: they write their logbook here, and you comment.</p>
@@ -249,5 +290,7 @@
   .actions { display: flex; gap: 0.5rem; }
   .mini { font-size: 0.75rem; padding: 0.15rem 0.55rem; }
   .small { font-size: 0.8rem; }
+  .old { margin: 1rem 0; font-family: var(--font-ui); }
+  .old summary { cursor: pointer; font-size: 0.9rem; color: var(--ink-soft); }
   @media (max-width: 44rem) { .layout { grid-template-columns: 1fr; } .people { position: static; } }
 </style>

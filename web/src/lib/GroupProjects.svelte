@@ -2,7 +2,7 @@
   import {
     saveGroupProject, deleteGroupProject, addProjectMember, removeProjectMember, saveMilestone, deleteMilestone,
   } from "./group";
-  import type { GroupProject, GroupMilestone, Member, Entry } from "./group";
+  import type { GroupProject, GroupMilestone, Member } from "./group";
   import { fromMonth, fmtMonth } from "./pathways";
   import { today } from "./dates";
   import FolderLink from "./FolderLink.svelte";
@@ -11,13 +11,13 @@
     projects: GroupProject[];
     milestones: GroupMilestone[];
     members: Member[];
-    entries: Entry[]; // to show how lively each project is
+    activity?: Map<string, number>; // comments on each project's actions this week
     supervisor: boolean; // creates projects, assigns people
     newFor?: string | null; // when set, "+ Project" puts this person on the new project
     readonly?: boolean; // previewing what a member sees
     onchanged: () => Promise<void>;
   };
-  let { projects, milestones, members, entries, supervisor, newFor = null, readonly = false, onchanged }: Props = $props();
+  let { projects, milestones, members, activity = new Map(), supervisor, newFor = null, readonly = false, onchanged }: Props = $props();
 
   let error = $state("");
   const act = async (f: () => Promise<unknown>) => {
@@ -67,11 +67,6 @@
   }
   const tick = (m: GroupMilestone) => act(() => saveMilestone(m.id, { done: !m.done, done_on: m.done ? null : today() }));
 
-  const recent = (p: GroupProject) => {
-    const since = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
-    return entries.filter((e) => e.project_id === p.id && e.entry_date >= since).length;
-  };
-  const lastEntry = (p: GroupProject) => entries.find((e) => e.project_id === p.id)?.entry_date ?? null;
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
@@ -115,12 +110,12 @@
         <h3>{p.title}<FolderLink url={p.folder_url} /></h3>
         <span class="muted small">
           {p.status}{p.lead_id ? ` · led by ${nameOf(p.lead_id)}` : ""}{p.start_on ? ` · ${fmtMonth(p.start_on)} → ${p.end_on ? fmtMonth(p.end_on) : "…"}` : ""}
-          · {recent(p)} {recent(p) === 1 ? "entry" : "entries"} this week{lastEntry(p) ? ` · last ${lastEntry(p)}` : ""}
+          · {activity.get(p.id) ?? 0} {(activity.get(p.id) ?? 0) === 1 ? "comment" : "comments"} this week
         </span>
         <span class="spacer"></span>
         {#if !readonly}<button class="mini" onclick={() => edit(p)}>Edit</button>{/if}
         {#if supervisor}
-          <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”? Its logbook entries stay, without a project.`) && act(() => deleteGroupProject(p.id))}>Delete</button>
+          <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”? Its members' actions stay, without a project.`) && act(() => deleteGroupProject(p.id))}>Delete</button>
         {/if}
       </header>
       {#if p.aim}<p class="aim">{p.aim}</p>{/if}
