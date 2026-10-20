@@ -11,12 +11,11 @@
   import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
   import { today, fmtDay } from "../lib/dates";
   import PwEditor from "../lib/PwEditor.svelte";
-  import InfoSystem from "../lib/InfoSystem.svelte";
+  import OutputsMap from "../lib/OutputsMap.svelte";
   import PwList from "../lib/PwList.svelte";
-  import AssetEditor from "../lib/AssetEditor.svelte";
-  import { loadAssets } from "../lib/assets";
-  import type { Asset } from "../lib/assets";
-  import { loadGroupProjects, loadEntries, loadMembers } from "../lib/group";
+  import { loadOutputs } from "../lib/assets";
+  import type { Output, OutputLink } from "../lib/assets";
+  import { loadGroupProjects, loadEntries, loadMembers, myId } from "../lib/group";
   import type { GroupProject, Entry, Member } from "../lib/group";
 
   // A member sees a read-only chart: the items they contribute to, and the goals they lead to.
@@ -28,7 +27,11 @@
   let years = $state(5);
   let projects = $state<Project[]>([]);
   let tax = $state<Taxonomy | null>(null);
-  let assets = $state<Asset[]>([]);
+  // the group's outputs (the second view): what has been developed, by whom, linked to publications
+  let outputs = $state<Output[]>([]);
+  let outputLinks = $state<OutputLink[]>([]);
+  let outputTitles = $state(new Map<string, string>());
+  let me = $state("");
   let groupProjects = $state<GroupProject[]>([]);
   let groupEntries = $state<Entry[]>([]);
   let groupMembers = $state<Member[]>([]);
@@ -56,7 +59,10 @@
   async function load() {
     if (member) {
       try {
-        ({ nodes, links } = await loadMemberMap());
+        const [mm, out, gm, id] = await Promise.all([loadMemberMap(), loadOutputs(), loadMembers().catch(() => [] as Member[]), myId()]);
+        ({ nodes, links } = mm);
+        ({ outputs, links: outputLinks, titles: outputTitles } = out);
+        [groupMembers, me] = [gm, id];
         error = "";
       } catch (e) {
         error = (e as Error).message;
@@ -66,12 +72,13 @@
       return;
     }
     try {
-      const [pw, p, r, t, as] = await Promise.all([
+      const [pw, p, r, t, out, id] = await Promise.all([
         loadPathways(), loadProjects(), loadReadings().catch(() => [] as Reading[]), loadTaxonomy(),
-        loadAssets().catch(() => [] as Asset[]), // before 0011 is run there are simply none
+        loadOutputs(), myId(), // no outputs before 0018 is run
       ]);
       tax = t;
-      assets = as;
+      ({ outputs, links: outputLinks, titles: outputTitles } = out);
+      me = id;
       // students' shared projects and their logbooks (none before 0015, or without a group)
       [groupProjects, groupEntries, groupMembers, contributors] = await Promise.all([
         loadGroupProjects().catch(() => [] as GroupProject[]), loadEntries().catch(() => [] as Entry[]),
@@ -354,9 +361,14 @@
   const todayX = $derived(xOf(today()));
 
   // ---- adding and editing ------------------------------------------------------------
-  let panel = $state<{ node: PwNode | null; draft?: Partial<PwNodeFields> } | { importing: true } | { asset: Asset | null } | null>(null);
-  const knownIO = $derived([...new Set(assets.flatMap((a) => [...a.inputs, ...a.outputs]))].sort((a, b) => a.localeCompare(b)));
-  const assetCount = (id: string) => assets.filter((a) => a.status !== "retired" && (a.owner_node_id === id || a.project_node_id === id)).length;
+  let panel = $state<{ node: PwNode | null; draft?: Partial<PwNodeFields> } | { importing: true } | null>(null);
+  /** How many of the group's outputs name this item as their publication. */
+  const outputCount = (id: string) => outputs.filter((o) => o.status !== "retired" && o.publications.includes(id)).length;
+  // what an output can name as its publication: the items in Publications & code/database
+  const publicationOptions = $derived(
+    nodes.map(eff).filter((n) => n.lane === "publications" && n.kind !== "person").map((n) => ({ id: n.id, title: n.title }))
+      .sort((a, b) => a.title.localeCompare(b.title)),
+  );
   let dialog = $state<HTMLDialogElement | null>(null);
   $effect(() => {
     if (!dialog) return;
@@ -487,8 +499,8 @@
     }
     const who = (contributors.get(n.id) ?? []).map((u) => groupMembers.find((m) => m.user_id === u)?.display_name).filter(Boolean);
     if (who.length) bits.push(who.join(", "));
-    const k = assetCount(n.id);
-    if (k) bits.push(`${k} ${k === 1 ? "asset" : "assets"}`);
+    const k = outputCount(n.id);
+    if (k) bits.push(`${k} ${k === 1 ? "output" : "outputs"}`);
     return bits.join(" · ");
   }
 </script>
@@ -501,12 +513,13 @@
     <button role="tab" aria-selected={view === "map"} class:on={view === "map"} onclick={() => setView("map")}>Map</button>
     {#if !member}
       <button role="tab" aria-selected={view === "list"} class:on={view === "list"} onclick={() => setView("list")}>List</button>
-      <button role="tab" aria-selected={view === "system"} class:on={view === "system"} onclick={() => setView("system")}>Information system</button>
     {/if}
+    <button role="tab" aria-selected={view === "system"} class:on={view === "system"} onclick={() => setView("system")}>Outputs</button>
   </div>
 
-  {#if view === "system" && !member}
-    <InfoSystem {assets} {nodes} onadd={() => (panel = { asset: null })} onedit={(a) => (panel = { asset: a })} />
+  {#if view === "system"}
+    <OutputsMap {outputs} links={outputLinks} titles={outputTitles} members={groupMembers} {me} supervisor={!member}
+                publications={publicationOptions} onchanged={load} />
   {:else}
   <div class="toolbar">
     {#if !member}
@@ -634,11 +647,6 @@
       {/if}
       <button onclick={() => (panel = null)}>Cancel</button>
     </div>
-  {:else if panel && "asset" in panel}
-    <h2>{panel.asset ? "Edit asset" : "New asset"}</h2>
-    {#key panel}
-      <AssetEditor asset={panel.asset} {nodes} known={knownIO} onsaved={saved} oncancel={() => (panel = null)} />
-    {/key}
   {:else if panel && "node" in panel}
     <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
     {#key panel}

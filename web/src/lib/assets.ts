@@ -1,111 +1,102 @@
-// The information system: asset cards connected by what they take in and give
-// out. An arrow runs from A to B wherever one of A's outputs is one of B's
-// inputs; inputs nobody produces are the system's open ends ("sources").
+// The group's outputs: what has been developed, by whom, when, for which
+// publications, and where its data or code lives (0011_assets.sql,
+// 0018_outputs.sql). Three categories, joined by drawn links. Every member
+// sees them all; an output is changed by whoever added it, its contributors,
+// and the supervisor.
 import { supabase } from "./supabase";
 import { check } from "./data";
 
-export const ASSET_KINDS = ["algorithm", "model", "dataset", "software", "knowledge", "other"] as const;
-export const ASSET_STATUSES = ["idea", "prototype", "validated", "retired"] as const;
+export const CATEGORIES = [
+  { key: "inference", label: "Inference algorithms" },
+  { key: "data_model", label: "Data, models & simulators" },
+  { key: "other", label: "Others" },
+] as const;
+export type Category = (typeof CATEGORIES)[number]["key"];
+export const OUTPUT_STATUSES = ["idea", "prototype", "validated", "retired"] as const;
 
-export type Asset = {
+export type Output = {
   id: string;
+  user_id: string; // who added it
   name: string;
-  kind: (typeof ASSET_KINDS)[number];
-  status: (typeof ASSET_STATUSES)[number];
+  category: Category;
+  status: (typeof OUTPUT_STATUSES)[number];
   purpose: string | null;
-  inputs: string[];
-  outputs: string[];
-  owner_node_id: string | null;
-  project_node_id: string | null;
-  location: string | null;
+  developed_on: string | null;
+  location: string | null; // where the data or code lives
+  contributors: string[]; // member ids
+  publications: string[]; // Pathways items in Publications & code/database
 };
-export type AssetFields = Omit<Asset, "id">;
+export type OutputFields = Pick<Output, "name" | "category" | "status" | "purpose" | "developed_on" | "location">;
+export type OutputLink = { id: string; from_id: string; to_id: string };
 
-export async function loadAssets(): Promise<Asset[]> {
-  return (await check<Asset[]>(
-    supabase.from("pw_asset").select("id,name,kind,status,purpose,inputs,outputs,owner_node_id,project_node_id,location").order("created_at"),
-  )) ?? [];
+type Row = Omit<Output, "contributors" | "publications"> & {
+  asset_contributor: { user_id: string }[]; asset_publication: { node_id: string }[];
+};
+/** Everything on the map, and the titles of the publications it refers to. Empty before 0018 is run. */
+export async function loadOutputs(): Promise<{ outputs: Output[]; links: OutputLink[]; titles: Map<string, string> }> {
+  const [o, l, t] = await Promise.all([
+    supabase.from("pw_asset")
+      .select("id,user_id,name,category,status,purpose,developed_on,location,asset_contributor(user_id),asset_publication(node_id)")
+      .order("developed_on", { nullsFirst: false }).order("created_at"),
+    supabase.from("asset_link").select("id,from_id,to_id"),
+    supabase.rpc("output_publications"),
+  ]);
+  if (o.error || l.error) return { outputs: [], links: [], titles: new Map() };
+  return {
+    outputs: ((o.data ?? []) as Row[]).map(({ asset_contributor, asset_publication, ...x }) => ({
+      ...x, contributors: asset_contributor.map((c) => c.user_id), publications: asset_publication.map((p) => p.node_id),
+    })),
+    links: (l.data ?? []) as OutputLink[],
+    titles: new Map(((t.data ?? []) as { node_id: string; title: string }[]).map((r) => [r.node_id, r.title])),
+  };
 }
-export async function saveAsset(id: string | null, fields: Partial<AssetFields>): Promise<void> {
-  await check(id ? supabase.from("pw_asset").update(fields).eq("id", id) : supabase.from("pw_asset").insert(fields));
+
+/** Save an output, its contributors and its publications; returns its id. */
+export async function saveOutput(id: string | null, fields: OutputFields, contributors: string[], publications: string[],
+                                 was: Output | null): Promise<string> {
+  let outId = id;
+  if (id) await check(supabase.from("pw_asset").update(fields).eq("id", id));
+  else outId = (await check<{ id: string }>(supabase.from("pw_asset").insert(fields).select("id").single()))!.id;
+  const sync = async (table: string, col: string, want: string[], had: string[]) => {
+    const add = want.filter((x) => !had.includes(x));
+    const drop = had.filter((x) => !want.includes(x));
+    if (add.length) await check(supabase.from(table).insert(add.map((v) => ({ asset_id: outId, [col]: v }))));
+    if (drop.length) await check(supabase.from(table).delete().eq("asset_id", outId!).in(col, drop));
+  };
+  await sync("asset_contributor", "user_id", contributors, was?.contributors ?? []);
+  await sync("asset_publication", "node_id", publications, was?.publications ?? []);
+  return outId!;
 }
-export async function deleteAsset(id: string): Promise<void> {
+export async function deleteOutput(id: string): Promise<void> {
   await check(supabase.from("pw_asset").delete().eq("id", id));
 }
-
-/** "a, b; c" or one per line → ["a", "b", "c"], trimmed, without repeats. */
-export function parseList(text: string): string[] {
-  const seen = new Set<string>();
-  return text.split(/[,;\n]/).map((s) => s.trim()).filter((s) => s && !seen.has(s.toLowerCase()) && seen.add(s.toLowerCase()));
+export async function linkOutputs(from_id: string, to_id: string): Promise<void> {
+  await check(supabase.from("asset_link").upsert({ from_id, to_id }, { onConflict: "from_id,to_id", ignoreDuplicates: true }));
 }
-const key = (t: string) => t.trim().toLowerCase();
-
-// ---- the graph -----------------------------------------------------------------
-export type Edge = { from: string; to: string; types: string[] };
-export type Source = { id: string; type: string; consumers: string[] };
-export type Graph = {
-  edges: Edge[]; // asset → asset
-  sources: Source[]; // inputs nobody produces → their consumers
-  level: Map<string, number>; // column: sources 0, assets from 1
-  unused: Map<string, string[]>; // an asset's outputs nobody takes in
-};
-
-export function assetGraph(assets: Asset[]): Graph {
-  const live = assets.filter((a) => a.status !== "retired");
-  const producers = new Map<string, string[]>();
-  for (const a of live) for (const o of a.outputs) producers.set(key(o), [...(producers.get(key(o)) ?? []), a.id]);
-
-  const pairs = new Map<string, Edge>();
-  const sources = new Map<string, Source>();
-  for (const b of live) {
-    for (const i of b.inputs) {
-      const ps = (producers.get(key(i)) ?? []).filter((p) => p !== b.id);
-      if (!ps.length) {
-        const s = sources.get(key(i)) ?? { id: `src:${key(i)}`, type: i.trim(), consumers: [] };
-        if (!s.consumers.includes(b.id)) s.consumers.push(b.id);
-        sources.set(key(i), s);
-      }
-      for (const a of ps) {
-        const e = pairs.get(`${a}>${b.id}`) ?? { from: a, to: b.id, types: [] };
-        if (!e.types.some((t) => key(t) === key(i))) e.types.push(i.trim());
-        pairs.set(`${a}>${b.id}`, e);
-      }
-    }
-  }
-  const edges = [...pairs.values()];
-
-  // columns by longest path from the sources; a loop stops growing at n
-  const level = new Map<string, number>(live.map((a) => [a.id, 1]));
-  for (let pass = 0; pass < live.length; pass++) {
-    let changed = false;
-    for (const e of edges) {
-      const want = Math.min(live.length, (level.get(e.from) ?? 1) + 1);
-      if (want > (level.get(e.to) ?? 1)) { level.set(e.to, want); changed = true; }
-    }
-    if (!changed) break;
-  }
-  for (const s of sources.values()) level.set(s.id, 0);
-
-  const consumed = new Set(live.flatMap((a) => a.inputs.map(key)));
-  const unused = new Map(live.map((a) => [a.id, a.outputs.filter((o) => !consumed.has(key(o)))]));
-  return { edges, sources: [...sources.values()], level, unused };
+export async function unlinkOutputs(id: string): Promise<void> {
+  await check(supabase.from("asset_link").delete().eq("id", id));
 }
 
-// ---- the catalogue, as plain asset cards ---------------------------------------
+// ---- the catalogue, as plain cards ---------------------------------------------
 const y = (v: string) => (/^[\w .()/-]+$/.test(v) && !/^\s|\s$/.test(v) ? v : JSON.stringify(v));
 const list = (xs: string[]) => `[${xs.map(y).join(", ")}]`;
 
-/** YAML asset cards — the shape a shared repository's catalogue could take. */
-export function catalogueYaml(assets: Asset[], nameOf: (id: string | null) => string | null): string {
-  return assets.map((a) => [
-    `- name: ${y(a.name)}`,
-    `  kind: ${a.kind}`,
-    `  status: ${a.status}`,
-    a.purpose ? `  purpose: ${y(a.purpose)}` : null,
-    `  inputs: ${list(a.inputs)}`,
-    `  outputs: ${list(a.outputs)}`,
-    nameOf(a.owner_node_id) ? `  owner: ${y(nameOf(a.owner_node_id)!)}` : null,
-    nameOf(a.project_node_id) ? `  project: ${y(nameOf(a.project_node_id)!)}` : null,
-    a.location ? `  location: ${y(a.location)}` : null,
+/** YAML cards — the shape a shared repository's catalogue could take. */
+export function catalogueYaml(outputs: Output[], links: OutputLink[], nameOf: (uid: string) => string,
+                              titleOf: (nodeId: string) => string): string {
+  const byId = new Map(outputs.map((o) => [o.id, o]));
+  return outputs.map((o) => [
+    `- name: ${y(o.name)}`,
+    `  category: ${o.category}`,
+    `  status: ${o.status}`,
+    o.developed_on ? `  developed: ${o.developed_on.slice(0, 7)}` : null,
+    o.purpose ? `  purpose: ${y(o.purpose)}` : null,
+    o.contributors.length ? `  contributors: ${list(o.contributors.map(nameOf))}` : null,
+    o.publications.length ? `  publications: ${list(o.publications.map(titleOf))}` : null,
+    o.location ? `  url: ${y(o.location)}` : null,
+    (() => {
+      const to = links.filter((l) => l.from_id === o.id).map((l) => byId.get(l.to_id)?.name).filter((n): n is string => !!n);
+      return to.length ? `  feeds: ${list(to)}` : null;
+    })(),
   ].filter(Boolean).join("\n")).join("\n");
 }

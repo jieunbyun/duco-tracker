@@ -110,17 +110,19 @@
       would fund, in any lane; that item reads “funding pending” until the grant is awarded, then “funded”. Projects under Proposals in Planning arrive here as grants.
       <em>List</em> (the second view) shows every item by lane, with quick entry at the top — kind, title, lane and
       optional dates, Enter to add and straight on to the next — and each item's links, which you can add
-      or remove right there. <em>Information system</em> (the third view) holds asset cards — algorithms, models, datasets, software,
-      knowledge — each with what it takes in and gives out, an owner and the project that produces it. Assets join
-      up wherever one's output has the same name as another's input; inputs nothing produces show on the left as
-      the system's open ends. People and projects on the map count the assets they contribute. “Copy catalogue”
-      gives the cards as YAML, ready to seed a shared group repository. Everything stays in your own database.
+      or remove right there. <em>Outputs</em> (the third view) is the group's map of what it has developed, in three bands —
+      inference algorithms; data, models &amp; simulators; others — with time running left to right by when each
+      was developed. Each output has its contributors, the publications it belongs to (picked from Publications
+      &amp; code/database), and a link to where its data or code lives. Drag an output's ○ onto another to connect
+      them; pick a contributor to bring their outputs forward. Every member sees this map (in their Pathways tab)
+      and adds their own outputs; an output can be changed by whoever added it, its contributors, and you.
+      “Copy catalogue” gives the cards as YAML, ready to seed a shared repository.
     </dd>
 
     <dt>Members</dt>
     <dd>
-      Your group's members (students, collaborators) sign in to this same app and see only two tabs of their own:
-      <em>Logbook</em> and <em>Projects</em>. Nothing else here — your planning, time, targets, Pathways — is
+      Your group's members (students, collaborators) sign in to this same app and see only tabs of their own:
+      <em>Logbook</em>, <em>Projects</em> and <em>Pathways</em> (their own chart, and the group's outputs). Nothing else here — your planning, time, targets, Pathways — is
       visible to them. To add a member: invite them in Supabase (<em>Authentication › Users › Invite user</em>; they
       get an email to choose a password), then <em>+ Add a member</em> here: pick them from your Planning projects
       under Research › Supervision (their name then follows Planning) or, for anyone else, type a name.
