@@ -173,22 +173,38 @@
   }
   const loggedOn = (day: string) => entriesOn(day).reduce((s, e) => s + e.minutes / 60, 0);
 
-  // The week at a glance: planned (the days' figures added up), logged, and the
-  // weekly target (every area's time plus email, as set in Planning).
+  // The week at a glance: planned (the days' figures added up, plus must-dos not
+  // on the calendar yet), the flexible to-dos waiting, logged, and the weekly
+  // target (every area's time plus email, as set in Planning).
   const weekTotals = $derived.by(() => {
-    let planned = 0, unknown = 0;
+    let calendar = 0, unknown = 0;
     for (const d of days) {
       const p = plannedOn(d);
-      planned += p.hours;
+      calendar += p.hours;
       unknown += p.unknown;
     }
+    const must = listHours("must");
+    const flex = listHours("flex");
+    const planned = calendar + must.hours;
+    unknown += must.unknown;
     const logged = entries.reduce((sum, e) => sum + e.minutes / 60, 0);
     const target = (tax?.areas ?? []).reduce((sum, a) => {
       const t = targetOn(tax!.targets, a.id, start);
       return sum + (t ? t.weekly_hours + t.email_weekly_hours : 0);
     }, 0);
-    return { planned, unknown, logged, target };
+    return { planned, calendar, must, flex, unknown, logged, target };
   });
+
+  /** Hours still to do on the to-dos in a list (estimate less what is logged), and how many have no estimate. */
+  function listHours(key: "must" | "flex") {
+    const rows = (groups.find((g) => g.key === key)?.rows ?? []).filter((t) => !t.is_done && !t.is_cancelled);
+    let hours = 0, unknown = 0;
+    for (const t of rows) {
+      if (t.est_hours === null || t.est_hours === undefined) unknown += 1;
+      else hours += Math.max(0, t.est_hours - loggedFor(t));
+    }
+    return { hours, unknown, count: rows.length, carried: rows.filter((t) => carried.has(t.id)).length };
+  }
 
   /** Hours planned on a day: meetings' lengths and duties' hours for that day, leaving
    *  out cancelled cards, finished (done) ones, and anything not yet counted (to
@@ -967,10 +983,19 @@
   {#if error}<p class="error">{error}</p>{/if}
 
   <div class="week-totals" aria-label="Week totals">
-    <div class="wt">
+    <div class="wt" title="On the calendar, plus must-dos not placed on a day yet">
       <span class="wt-label">Planned</span>
       <span class="wt-value">{fmtHours(weekTotals.planned)}</span>
-      {#if weekTotals.unknown}<span class="wt-sub">+{weekTotals.unknown} without hours</span>{/if}
+      <span class="wt-sub">
+        calendar {fmtHours(weekTotals.calendar)} + must-dos {fmtHours(weekTotals.must.hours)}{weekTotals.unknown ? ` · +${weekTotals.unknown} without hours` : ""}
+      </span>
+    </div>
+    <div class="wt" title="Flexible to-dos not on the calendar: not counted as planned">
+      <span class="wt-label">Flexible</span>
+      <span class="wt-value">{fmtHours(weekTotals.flex.hours)}</span>
+      <span class="wt-sub">
+        {weekTotals.flex.count} {weekTotals.flex.count === 1 ? "to-do" : "to-dos"}{weekTotals.flex.carried ? `, ${weekTotals.flex.carried} carried over` : ""}{weekTotals.flex.unknown ? ` · ${weekTotals.flex.unknown} without hours` : ""}
+      </span>
     </div>
     <div class="wt">
       <span class="wt-label">Logged</span>
@@ -1097,8 +1122,9 @@
   {/if}
   {#each groups as g (g.key)}
     {#if g.rows.length}
+      {@const gh = g.key === "done" ? null : listHours(g.key as "must" | "flex")}
       <div class="group" class:muted-group={g.key === "done"}>
-        <h3>{g.title} <span class="muted small">{g.rows.length}</span></h3>
+        <h3>{g.title} <span class="muted small">{g.rows.length}{gh && gh.hours ? ` · ${fmtHours(gh.hours)}` : ""}</span></h3>
         <ul class="todos">
           {#each g.rows as t (t.id)}
             {@const ts = slotsOf(t)}
