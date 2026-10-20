@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { LANES, NODE_KINDS, LINK_KINDS, fromMonth, saveLink, setLinkKind, deleteLink, inferLinkKind } from "./pathways";
-  import type { PwNode, PwLink, LinkKind, NodeKind, Lane } from "./pathways";
+  import { LANES, NODE_KINDS, fromMonth, saveLink, deleteLink } from "./pathways";
+  import type { PwNode, PwLink, NodeKind, Lane } from "./pathways";
 
   type Props = {
     shown: PwNode[]; // the items to list (respecting "show done and retired")
@@ -16,7 +16,6 @@
   const KIND_ORDER = NODE_KINDS.map((k) => k.key) as string[];
   const ICON: Record<string, string> = { goal: "◎", objective: "◆", project: "▭", person: "●", gap: "?", grant: "✎" };
   const kindLabel = (k: string) => NODE_KINDS.find((x) => x.key === k)?.label ?? k;
-  const linkLabel = (k: string) => LINK_KINDS.find((x) => x.key === k)?.label ?? k;
   const byId = $derived(new Map(all.map((n) => [n.id, n])));
   const titleOf = (id: string) => byId.get(id)?.title ?? "?";
 
@@ -86,14 +85,9 @@
   }
 
   // ---- links on each row ----------------------------------------------------------
-  let linking = $state<{ from: string; to: string; kind: LinkKind } | null>(null);
+  let linking = $state<{ from: string; to: string } | null>(null);
   function startLink(n: PwNode) {
-    linking = { from: n.id, to: "", kind: n.kind === "grant" ? "funds" : "feeds" };
-  }
-  function onTarget() {
-    if (!linking) return;
-    const a = byId.get(linking.from), b = byId.get(linking.to);
-    if (a && b) linking.kind = inferLinkKind(a, b);
+    linking = { from: n.id, to: "" };
   }
   async function act(f: () => Promise<void>) {
     try { await f(); await onchanged(); } catch (e) { error = (e as Error).message; }
@@ -101,7 +95,7 @@
   async function link() {
     const l = linking;
     if (!l?.to) return;
-    await act(() => saveLink(l.from, l.to, l.kind));
+    await act(() => saveLink(l.from, l.to));
     linking = null;
   }
 </script>
@@ -158,30 +152,21 @@
           <span class="sub muted">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
           <div class="chips">
             {#each out as l (l.id)}
-              <span class="chip out lk-{l.kind}">
-                <select value={l.kind} aria-label="Link kind" onchange={(ev) => act(() => setLinkKind(l.id, (ev.target as HTMLSelectElement).value as LinkKind))}>
-                  {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
-                </select>
-                <span class="to">{titleOf(l.to_id)}</span>
+              <span class="chip out" title={`this → ${titleOf(l.to_id)}`}>
+                → <span class="to">{titleOf(l.to_id)}</span>
                 <button class="x" aria-label="Remove link" onclick={() => act(() => deleteLink(l.id))}>✕</button>
               </span>
             {/each}
             {#each inc as l (l.id)}
-              <span class="chip in lk-{l.kind}" title={`${titleOf(l.from_id)} ${linkLabel(l.kind)} this`}>
+              <span class="chip in" title={`${titleOf(l.from_id)} → this`}>
                 ← <span class="to">{titleOf(l.from_id)}</span>
-                <select value={l.kind} aria-label="Link kind" onchange={(ev) => act(() => setLinkKind(l.id, (ev.target as HTMLSelectElement).value as LinkKind))}>
-                  {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
-                </select>
-                <span class="muted">this</span>
                 <button class="x" aria-label="Remove link" onclick={() => act(() => deleteLink(l.id))}>✕</button>
               </span>
             {/each}
             {#if linking?.from === n.id}
               <span class="adder">
-                <select bind:value={linking.kind} aria-label="Link kind">
-                  {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
-                </select>
-                <select bind:value={linking.to} onchange={onTarget} aria-label="Link to">
+                <span class="muted">→</span>
+                <select bind:value={linking.to} aria-label="Link to">
                   <option value="">choose an item…</option>
                   {#each LANES as lane (lane.key)}
                     <optgroup label={lane.label}>
@@ -240,14 +225,10 @@
   .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
   .chip {
     display: inline-flex; gap: 0.3rem; align-items: center; font-size: 0.75rem; padding: 0.05rem 0.35rem;
-    border: 1px solid var(--rule); border-left: 3px solid var(--lk-feeds); border-radius: 4px; background: var(--paper);
+    border: 1px solid var(--rule); border-radius: 4px; background: var(--paper);
   }
   .chip select { width: auto; font-size: 0.72rem; padding: 0 0.1rem; border: none; background: transparent; color: var(--ink-soft); }
   .chip.in { border-style: dashed; border-left-style: solid; color: var(--ink-soft); }
-  .chip.lk-advances { border-left-color: var(--lk-advances); }
-  .chip.lk-works_on { border-left-color: var(--lk-works_on); }
-  .chip.lk-learns { border-left-color: var(--lk-learns); }
-  .chip.lk-funds { border-left-color: var(--lk-funds); }
   .to { font-weight: 500; max-width: 22rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .x { background: none; border: none; padding: 0 0.1rem; color: var(--ink-soft); font-size: 0.7rem; cursor: pointer; }
   .x:hover { color: var(--danger); }

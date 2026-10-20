@@ -22,15 +22,6 @@ export const NODE_KINDS = [
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number]["key"];
 
-export const LINK_KINDS = [
-  { key: "feeds", label: "feeds into" },
-  { key: "advances", label: "advances" },
-  { key: "works_on", label: "works on" },
-  { key: "learns", label: "needs to learn" },
-  { key: "funds", label: "would fund" },
-] as const;
-export type LinkKind = (typeof LINK_KINDS)[number]["key"];
-
 // Where a grant application stands. Until it is awarded, what it would fund is uncertain.
 export const GRANT_STAGES = ["drafting", "submitted", "awarded", "declined"] as const;
 export type GrantStage = (typeof GRANT_STAGES)[number];
@@ -54,7 +45,9 @@ export type PwNode = {
   grant_stage: GrantStage | null;
 };
 export type PwNodeFields = Omit<PwNode, "id">;
-export type PwLink = { id: string; from_id: string; to_id: string; kind: LinkKind };
+// A link is one kind of arrow, from one item to another; its direction says it all.
+// (pw_link.kind is still in the table, left at its default.)
+export type PwLink = { id: string; from_id: string; to_id: string };
 export type PwRevision = { id: string; changed_at: string; old_title: string; old_detail: string | null; reason: string | null };
 
 const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage";
@@ -63,7 +56,7 @@ const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {
   const [n, l, s] = await Promise.all([
     supabase.from("pw_node").select(NODE_COLS).order("created_at"),
-    supabase.from("pw_link").select("id,from_id,to_id,kind"),
+    supabase.from("pw_link").select("id,from_id,to_id"),
     supabase.from("user_setting").select("pathway_years").maybeSingle(),
   ]);
   for (const r of [n, l, s]) if (r.error) throw new Error(r.error.message);
@@ -90,12 +83,9 @@ export async function deleteNode(id: string): Promise<void> {
   await check(supabase.from("pw_node").delete().eq("id", id));
 }
 
-/** Link two items (one link per pair; linking again changes its kind). */
-export async function saveLink(from_id: string, to_id: string, kind: LinkKind): Promise<void> {
-  await check(supabase.from("pw_link").upsert({ from_id, to_id, kind }, { onConflict: "from_id,to_id" }));
-}
-export async function setLinkKind(id: string, kind: LinkKind): Promise<void> {
-  await check(supabase.from("pw_link").update({ kind }).eq("id", id));
+/** Link two items (one link per pair; linking them again changes nothing). */
+export async function saveLink(from_id: string, to_id: string): Promise<void> {
+  await check(supabase.from("pw_link").upsert({ from_id, to_id }, { onConflict: "from_id,to_id", ignoreDuplicates: true }));
 }
 export async function deleteLink(id: string): Promise<void> {
   await check(supabase.from("pw_link").delete().eq("id", id));
@@ -111,14 +101,6 @@ export async function addRevision(nodeId: string, oldTitle: string, oldDetail: s
   await check(supabase.from("pw_revision").insert({ node_id: nodeId, old_title: oldTitle, old_detail: oldDetail, reason }));
 }
 
-/** The link kind a drag from one item to another most likely means. */
-export function inferLinkKind(from: PwNode, to: PwNode): LinkKind {
-  if (from.kind === "grant") return "funds";
-  if (from.kind === "gap" || to.kind === "gap") return "learns";
-  if (from.kind === "person") return "works_on";
-  if (to.kind === "goal") return "advances";
-  return "feeds";
-}
 
 // ---- the timeline ----------------------------------------------------------------
 // Dates are "YYYY-MM-DD"; the map starts at the first of this month and runs

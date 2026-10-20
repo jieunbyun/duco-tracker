@@ -5,7 +5,7 @@
   import { loadReadings } from "../lib/reading";
   import type { Reading } from "../lib/reading";
   import {
-    LANES, NODE_KINDS, LINK_KINDS, loadPathways, saveYears, saveNode, saveLink, inferLinkKind,
+    LANES, NODE_KINDS, loadPathways, saveYears, saveNode, saveLink,
     monthStart, monthEnd, fmtMonth, addMonths, fraction, monthAt, monthsBetween, shiftMonths,
   } from "../lib/pathways";
   import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
@@ -225,7 +225,7 @@
         const target = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>("[data-node]");
         const to = target ? nodes.find((x) => x.id === target.dataset.node) : null;
         if (to && to.id !== n.id) {
-          await saveLink(n.id, to.id, inferLinkKind(n, to));
+          await saveLink(n.id, to.id);
           await load();
         }
         return;
@@ -315,7 +315,6 @@
     });
   });
   const nodeTitle = (id: string) => nodes.find((x) => x.id === id)?.title ?? "";
-  const linkLabel = (k: string) => LINK_KINDS.find((x) => x.key === k)?.label ?? k;
 
   // ---- axis ------------------------------------------------------------------------
   const ticks = $derived.by(() => {
@@ -441,12 +440,11 @@
   const nodeById = $derived(new Map(nodes.map((n) => [n.id, n])));
   /** Funding of an item from grants: "funded" once one is awarded, "funding pending" while any is open. */
   function funding(id: string): "funded" | "funding pending" | null {
-    const stages = links.filter((l) => l.kind === "funds" && l.to_id === id).map((l) => nodeById.get(l.from_id)?.grant_stage ?? "drafting");
+    const stages = links.map((l) => (l.to_id === id ? nodeById.get(l.from_id) : undefined))
+      .filter((n) => n?.kind === "grant").map((n) => n!.grant_stage ?? "drafting");
     if (stages.includes("awarded")) return "funded";
     return stages.some((s) => s !== "declined") ? "funding pending" : null;
   }
-  /** A funding link is uncertain until its grant is awarded. */
-  const linkStage = (l: PwLink) => (l.kind === "funds" ? nodeById.get(l.from_id)?.grant_stage ?? "drafting" : null);
   function sub(n: PwNode): string {
     const bits: string[] = [n.potential ? "potential project" : n.kind === "grant" ? `grant · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
     if (n.kind === "grant" && n.end_on) bits.push(`deadline ${fmtMonth(n.end_on)}`);
@@ -498,7 +496,6 @@
     <PwList shown={visible} all={nodes.map(eff)} {links} {sub} onedit={openEdit} onadd={quickAdd} onchanged={load} />
   {:else}
   <div class="legend muted" aria-hidden="true">
-    {#each LINK_KINDS as k (k.key)}<span><i class="lk {k.key}"></i>{k.label}</span>{/each}
     <span class="hint">Drag an item to move it in time or across lanes · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit</span>
   </div>
 
@@ -521,15 +518,13 @@
       <!-- links -->
       <svg class="links" width={mapW} height={mapH} aria-hidden="true">
         <defs>
-          {#each LINK_KINDS as k (k.key)}
-            <marker id={`arrow-${k.key}`} viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
-              <path d="M0,0 L8,4 L0,8 z" class={`ah ${k.key}`} />
-            </marker>
-          {/each}
+          <marker id="arrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L8,4 L0,8 z" class="ah" />
+          </marker>
         </defs>
         {#each drawnLinks as dl (dl.l.id)}
-          <path d={dl.d} class={`lk-path ${dl.l.kind} ${linkStage(dl.l) ?? ""}`} marker-end={`url(#arrow-${dl.l.kind})`}>
-            <title>{nodeTitle(dl.l.from_id)} {linkLabel(dl.l.kind)} {nodeTitle(dl.l.to_id)}</title>
+          <path d={dl.d} class="lk-path" marker-end="url(#arrow)">
+            <title>{nodeTitle(dl.l.from_id)} → {nodeTitle(dl.l.to_id)}</title>
           </path>
         {/each}
         {#if drag?.mode === "link"}
@@ -619,14 +614,10 @@
     --lane-outreach: var(--series-4);
     --lane-supervision: #6250d6;
     --lane-grants: var(--series-3);
-    --lk-funds: var(--series-3);
-    --lk-feeds: var(--ink-soft);
-    --lk-advances: var(--accent);
-    --lk-works_on: #6250d6;
-    --lk-learns: var(--danger);
+    --lk: var(--ink-soft);
   }
   @media (prefers-color-scheme: dark) {
-    .pathways { --lane-supervision: #9085e9; --lk-works_on: #9085e9; }
+    .pathways { --lane-supervision: #9085e9; }
   }
 
   .views { display: flex; gap: 0.25rem; margin-top: 0.6rem; font-family: var(--font-ui); }
@@ -643,12 +634,6 @@
   .legend { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; align-items: center; font-family: var(--font-ui); font-size: 0.78rem; margin-bottom: 0.6rem; }
   .legend span { display: inline-flex; align-items: center; gap: 0.35rem; }
   .legend .hint { flex-basis: 100%; }
-  .lk { display: inline-block; width: 22px; height: 0; border-top: 2px solid; }
-  .lk.feeds { border-color: var(--lk-feeds); }
-  .lk.advances { border-color: var(--lk-advances); }
-  .lk.works_on { border-color: var(--lk-works_on); }
-  .lk.learns { border-color: var(--lk-learns); border-top-style: dashed; }
-  .lk.funds { border-color: var(--lk-funds); border-top-style: dotted; }
 
   .scroller { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); }
   .map { position: relative; font-family: var(--font-ui); user-select: none; touch-action: pan-y; }
@@ -670,17 +655,10 @@
 
   .links { position: absolute; inset: 0; pointer-events: none; overflow: visible; }
   .lk-path { fill: none; stroke-width: 1.6; pointer-events: stroke; }
-  .lk-path.feeds { stroke: var(--lk-feeds); }
-  .lk-path.advances { stroke: var(--lk-advances); }
-  .lk-path.works_on { stroke: var(--lk-works_on); }
-  .lk-path.learns { stroke: var(--lk-learns); stroke-dasharray: 5 4; }
+  .lk-path { stroke: var(--lk); }
   /* funding is dotted while the grant is undecided, solid once awarded, faint if declined */
-  .lk-path.funds { stroke: var(--lk-funds); stroke-dasharray: 2 4; }
-  .lk-path.funds.awarded { stroke-dasharray: none; stroke-width: 2.2; }
-  .lk-path.funds.declined { opacity: 0.3; }
   .lk-path.drawing { stroke: var(--accent); stroke-dasharray: 3 3; }
-  .ah.feeds { fill: var(--lk-feeds); } .ah.advances { fill: var(--lk-advances); }
-  .ah.works_on { fill: var(--lk-works_on); } .ah.learns { fill: var(--lk-learns); } .ah.funds { fill: var(--lk-funds); }
+  .ah { fill: var(--lk); }
 
   .node {
     position: absolute; box-sizing: border-box; display: grid; align-content: center; gap: 1px;

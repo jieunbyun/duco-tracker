@@ -91,8 +91,8 @@
       objectives, projects (linked to a Planning project — + From Planning brings several at once, each into its
       area's lane with its dates — or potential, dashed, with person-months and cost),
       people (with their strengths and share of time) and knowledge gaps (linked to Reading). Drag an item to move
-      it in time or across lanes, drag its right edge to stretch it, drag its ○ onto another item to link them —
-      feeds into, advances, works on, needs to learn, would fund — and click it to edit. A goal without dates sits in the goals column; give it dates (or drag it onto the timeline) and it sits
+      it in time or across lanes, drag its right edge to stretch it, drag its ○ onto another item to link them (an
+      arrow from one to the other), and click it to edit. A goal without dates sits in the goals column; give it dates (or drag it onto the timeline) and it sits
       in its lane over that span — drag it back to the column to clear them. Rewording a goal keeps its earlier
       wording and your reason. An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
@@ -100,10 +100,9 @@
       (a linked Planning project keeps its exact days, but shows months here too).
       The <em>Grant writing</em> lane holds grant applications: writing period up to the deadline, stage
       (drafting, submitted, awarded, declined) and, if you like, the amount sought. Link a grant to whatever it
-      would fund, in any lane. That link stays dotted, and the item reads “funding pending”, until the grant is
-      awarded; then it turns solid and reads “funded”. Projects under Proposals in Planning arrive here as grants.
+      would fund, in any lane; that item reads “funding pending” until the grant is awarded, then “funded”. Projects under Proposals in Planning arrive here as grants.
       <em>List</em> (the second view) shows every item by lane, with quick entry at the top — kind, title, lane and
-      optional dates, Enter to add and straight on to the next — and each item's links, which you can add, change
+      optional dates, Enter to add and straight on to the next — and each item's links, which you can add
       or remove right there. <em>Information system</em> (the third view) holds asset cards — algorithms, models, datasets, software,
       knowledge — each with what it takes in and gives out, an owner and the project that produces it. Assets join
       up wherever one's output has the same name as another's input; inputs nothing produces show on the left as

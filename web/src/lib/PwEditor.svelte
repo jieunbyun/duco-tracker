@@ -1,9 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import {
-    LANES, NODE_KINDS, LINK_KINDS, GRANT_STAGES, fromMonth, saveNode, deleteNode, saveLink, setLinkKind, deleteLink, loadRevisions, addRevision,
+    LANES, NODE_KINDS, GRANT_STAGES, fromMonth, saveNode, deleteNode, saveLink, deleteLink, loadRevisions, addRevision,
   } from "./pathways";
-  import type { PwNode, PwNodeFields, PwLink, PwRevision, LinkKind, NodeKind, Lane, GrantStage } from "./pathways";
+  import type { PwNode, PwNodeFields, PwLink, PwRevision, NodeKind, Lane, GrantStage } from "./pathways";
   import type { Project } from "./data";
   import { setProjectDates } from "./data";
   import type { Reading } from "./reading";
@@ -130,19 +130,15 @@
 
   // ---- links ----------------------------------------------------------------------
   let linkTo = $state("");
-  let linkKind = $state<LinkKind>(n0?.kind === "grant" ? "funds" : "feeds");
   async function addLink() {
     if (!n0 || !linkTo) return;
     try {
-      await saveLink(n0.id, linkTo, linkKind);
+      await saveLink(n0.id, linkTo);
       linkTo = "";
       onsaved();
     } catch (e) {
       error = (e as Error).message;
     }
-  }
-  async function changeKind(l: PwLink, kind: LinkKind) {
-    try { await setLinkKind(l.id, kind); onsaved(); } catch (e) { error = (e as Error).message; }
   }
   async function unlink(l: PwLink) {
     try { await deleteLink(l.id); onsaved(); } catch (e) { error = (e as Error).message; }
@@ -202,7 +198,7 @@
       <select bind:value={f.grant_stage}>{#each GRANT_STAGES as s (s)}<option value={s}>{s}</option>{/each}</select>
     </label>
     <label>Amount sought (optional) <input type="number" min="0" step="1000" bind:value={f.cost} /></label>
-    <p class="hint wide">Link it to what it would fund — projects, people, objectives — with “would fund”. Those links stay dotted until it is awarded.</p>
+    <p class="hint wide">Link it to what it would fund — projects, people, objectives. They read “funding pending” until it is awarded.</p>
   {/if}
   {#if f.kind === "person"}
     <label>Share of time (0–1) <input type="number" min="0" max="1" step="0.05" bind:value={f.fte} /></label>
@@ -229,17 +225,9 @@
       {#each mine as l (l.id)}
         <div class="link-row">
           {#if l.from_id === n0.id}
-            <span class="muted">this</span>
-            <select value={l.kind} onchange={(ev) => changeKind(l, (ev.target as HTMLSelectElement).value as LinkKind)}>
-              {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
-            </select>
-            <strong>{title(l.to_id)}</strong>
+            <span class="muted">this →</span> <strong>{title(l.to_id)}</strong>
           {:else}
-            <strong>{title(l.from_id)}</strong>
-            <select value={l.kind} onchange={(ev) => changeKind(l, (ev.target as HTMLSelectElement).value as LinkKind)}>
-              {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
-            </select>
-            <span class="muted">this</span>
+            <strong>{title(l.from_id)}</strong> <span class="muted">→ this</span>
           {/if}
           <button type="button" class="mini danger" aria-label="Remove link" onclick={() => unlink(l)}>✕</button>
         </div>
@@ -247,10 +235,7 @@
         <p class="muted small">No links yet — drag from an item's ○ to another, or add one here.</p>
       {/each}
       <div class="link-add">
-        <span class="muted">this</span>
-        <select bind:value={linkKind} aria-label="Link kind">
-          {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
-        </select>
+        <span class="muted">this →</span>
         <select bind:value={linkTo} aria-label="Link to">
           <option value="">choose an item…</option>
           {#each LANES as lane (lane.key)}
@@ -295,7 +280,7 @@
   .hint { font-size: 0.78rem; color: var(--ink-soft); margin: -0.3rem 0 0; }
   .links h3 { font-size: 0.9rem; margin: 0 0 0.3rem; }
   .link-row, .link-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.85rem; padding: 0.15rem 0; }
-  .link-row select, .link-add select { width: auto; font-size: 0.8rem; padding: 0.2rem 0.3rem; }
+  .link-add select { width: auto; font-size: 0.8rem; padding: 0.2rem 0.3rem; }
   .link-add { margin-top: 0.3rem; }
   .mini { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
   .small { font-size: 0.8rem; margin: 0; }
