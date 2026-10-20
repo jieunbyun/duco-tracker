@@ -58,7 +58,7 @@
   let revisions = $state<PwRevision[]>([]);
   if (n0?.kind === "goal") loadRevisions(n0.id).then((r) => (revisions = r)).catch(() => {});
 
-  const dated = $derived(f.kind !== "goal");
+  const dated = true; // goals too: without dates a goal sits in the goals column
   const reworded = $derived(!!n0 && n0.kind === "goal" && (f.title.trim() !== n0.title || (f.detail.trim() || null) !== n0.detail));
   const projectOptions = $derived(
     projects.filter((p) => LIVE_STATUSES.has(p.status) || p.id === n0?.project_id).sort((a, b) => a.name.localeCompare(b.name)),
@@ -210,8 +210,11 @@
     </label>
   {/if}
   {#if dated}
-    <label>{f.kind === "grant" ? "Writing from" : "From"} <input type="date" bind:value={f.start_on} /></label>
-    <label>{f.kind === "grant" ? "Deadline" : "To"} <input type="date" bind:value={f.end_on} min={f.start_on || undefined} /></label>
+    <label>{f.kind === "grant" ? "Writing from" : f.kind === "goal" ? "From (optional)" : "From"} <input type="date" bind:value={f.start_on} /></label>
+    <label>{f.kind === "grant" ? "Deadline" : f.kind === "goal" ? "By (optional)" : "To"} <input type="date" bind:value={f.end_on} min={f.start_on || undefined} /></label>
+    {#if f.kind === "goal"}
+      <p class="hint wide">Without dates the goal sits in the goals column at the horizon; with them it sits on the timeline. You can also drag it between the two.</p>
+    {/if}
   {/if}
 
   {#if n0}

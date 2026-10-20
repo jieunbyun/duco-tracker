@@ -84,7 +84,8 @@
       area's lane with its dates — or potential, dashed, with person-months and cost),
       people (with their strengths and share of time) and knowledge gaps (linked to Reading). Drag an item to move
       it in time or across lanes, drag its right edge to stretch it, drag its ○ onto another item to link them —
-      feeds into, advances, works on, needs to learn, would fund — and click it to edit. Rewording a goal keeps its earlier
+      feeds into, advances, works on, needs to learn, would fund — and click it to edit. A goal without dates sits in the goals column; give it dates (or drag it onto the timeline) and it sits
+      in its lane over that span — drag it back to the column to clear them. Rewording a goal keeps its earlier
       wording and your reason. An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
       The <em>Grant writing</em> lane holds grant applications: writing period up to the deadline, stage

@@ -92,10 +92,15 @@
   }
   const visible = $derived(nodes.map(eff).filter((n) => showAll || n.status === "active"));
 
+  // A goal without dates sits in the goals column at the horizon; with dates it
+  // sits on the timeline like anything else (an open-ended one runs to the horizon).
+  const inColumn = (n: PwNode) => n.kind === "goal" && !n.start_on && !n.end_on;
+  const endOf = (n: PwNode, s: string) => n.end_on ?? (n.kind === "goal" ? to : addMonths(monthStart(s), 3));
+
   // ---- dragging (move / stretch / link) -------------------------------------------
   type Drag =
     | { mode: "move" | "resize"; id: string; px: number; py: number; moved: boolean;
-        start: string; end: string; lane: Lane; row: number }
+        dated: boolean; start: string; end: string | null; lane: Lane; row: number }
     | { mode: "link"; id: string; x: number; y: number };
   let drag = $state<Drag | null>(null);
   let mapEl = $state<HTMLDivElement | null>(null);
@@ -103,7 +108,7 @@
   /** A node as it should be drawn: with the drag applied, if it is the one moving. */
   function shown(n: PwNode): PwNode {
     if (drag && drag.mode !== "link" && drag.id === n.id && drag.moved) {
-      return { ...n, start_on: n.kind === "goal" ? null : drag.start, end_on: n.kind === "goal" ? null : drag.end, lane: drag.lane, lane_row: drag.row };
+      return { ...n, start_on: drag.dated ? drag.start : null, end_on: drag.dated ? drag.end : null, lane: drag.lane, lane_row: drag.row };
     }
     return n;
   }
@@ -123,9 +128,9 @@
   type Box = { x: number; y: number; w: number; open: boolean };
   function box(n: PwNode): Box {
     const y = laneTop[n.lane] + PAD + n.lane_row * ROW_H;
-    if (n.kind === "goal") return { x: x1 + GAP, y, w: GOAL_W - 10, open: false };
+    if (inColumn(n)) return { x: x1 + GAP, y, w: GOAL_W - 10, open: false };
     const s = n.start_on ?? today();
-    const e = n.end_on ?? addMonths(monthStart(s), 3);
+    const e = endOf(n, s);
     const left = xOf(s < from ? from : s);
     const right = xOf(e > to ? to : e);
     return { x: left, y, w: Math.max(MIN_W, right - left), open: !n.end_on };
@@ -151,8 +156,8 @@
       drag = { mode, id: n.id, x: p.x, y: p.y };
     } else {
       const s = n.start_on ?? today();
-      drag = { mode, id: n.id, px: p.x, py: p.y, moved: false,
-               start: s, end: n.end_on ?? addMonths(monthStart(s), 3), lane: n.lane, row: n.lane_row };
+      drag = { mode, id: n.id, px: p.x, py: p.y, moved: false, dated: !inColumn(n),
+               start: s, end: n.kind === "goal" ? n.end_on : endOf(n, s), lane: n.lane, row: n.lane_row };
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -172,7 +177,7 @@
     // dates move by whole months and keep their day, so a Planning project's
     // exact dates survive a drag (30 Jun moved 7 months is 30 Jan)
     const s0 = n.start_on ?? today();
-    const e0 = n.end_on ?? addMonths(monthStart(s0), 3);
+    const e0 = endOf(n, s0);
     const f = (x: number) => (x - x0) / (x1 - x0);
     if (drag.mode === "resize") {
       const k = monthsBetween(monthStart(e0), monthAt(f(xOf(e0) + dx), from, to));
@@ -180,9 +185,18 @@
       if (end <= s0) end = shiftMonths(s0, 1);
       drag = { ...drag, moved: true, end };
     } else {
-      const k = n.kind === "goal" ? 0 : monthsBetween(monthStart(s0 < from ? from : s0), monthAt(f(xOf(s0 < from ? from : s0) + dx), from, to));
       const where = laneAt(p.y);
-      drag = { ...drag, moved: true, start: shiftMonths(s0, k), end: shiftMonths(e0, k), lane: where.lane, row: where.row };
+      if (n.kind === "goal" && p.x > x1) {
+        // dropped in the goals column: no dates
+        drag = { ...drag, moved: true, dated: false, lane: where.lane, row: where.row };
+      } else if (inColumn(n)) {
+        // from the goals column onto the timeline: starts where it is dropped, runs on
+        drag = { ...drag, moved: true, dated: true, start: monthAt(f(Math.max(x0, p.x)), from, to), end: null, lane: where.lane, row: where.row };
+      } else {
+        const k = monthsBetween(monthStart(s0 < from ? from : s0), monthAt(f(xOf(s0 < from ? from : s0) + dx), from, to));
+        const end = n.kind === "goal" && !n.end_on ? null : shiftMonths(e0, k);
+        drag = { ...drag, moved: true, dated: true, start: shiftMonths(s0, k), end, lane: where.lane, row: where.row };
+      }
     }
   }
 
@@ -208,12 +222,12 @@
       }
       if (!d.moved) return openEdit(raw!); // a click
       const fields: Partial<PwNodeFields> = { lane: d.lane, lane_row: d.row };
-      if (n.kind !== "goal") Object.assign(fields, { start_on: d.start, end_on: d.end });
+      Object.assign(fields, d.dated ? { start_on: d.start, end_on: d.end } : { start_on: null, end_on: null });
       // show it where it was dropped straight away; the reload confirms
       nodes = nodes.map((x) => (x.id === n.id ? { ...x, ...fields } as PwNode : x));
       if (n.project_id && n.kind !== "goal") {
         projects = projects.map((p) => (p.id === n.project_id ? { ...p, start_on: d.start, end_on: d.end } : p));
-        await setProjectDates(n.project_id, d.start, d.end);
+        await setProjectDates(n.project_id, d.start, d.end ?? n.end_on);
       }
       await saveNode(n.id, fields);
       await load();
@@ -267,10 +281,10 @@
   const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6, grant: 3 };
   /** The first row in a lane free over a span (goals: the first free row in the goals column). */
   function freeRow(lane: Lane, kind: NodeKind, s: string, e: string, also: PwNode[] = []): number {
-    const inLane = [...visible, ...also].filter((n) => n.lane === lane && (kind === "goal") === (n.kind === "goal"));
+    const inLane = [...visible, ...also].filter((n) => n.lane === lane && (kind === "goal") === inColumn(n));
     for (let row = 0; ; row++) {
       const clash = inLane.some((n) => n.lane_row === row && (kind === "goal" ||
-        ((n.start_on ?? today()) <= e && (n.end_on ?? addMonths(n.start_on ?? today(), 3)) >= s)));
+        ((n.start_on ?? today()) <= e && endOf(n, n.start_on ?? today()) >= s)));
       if (!clash) return row;
     }
   }
@@ -358,7 +372,8 @@
   function sub(n: PwNode): string {
     const bits: string[] = [n.potential ? "potential project" : n.kind === "grant" ? `grant · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
     if (n.kind === "grant" && n.end_on) bits.push(`deadline ${fmtDay(n.end_on)}`);
-    else if (n.kind !== "goal" && n.start_on) bits.push(`${n.start_on.slice(0, 7)} → ${n.end_on ? n.end_on.slice(0, 7) : "…"}`);
+    else if (n.start_on) bits.push(`${n.start_on.slice(0, 7)} → ${n.end_on ? n.end_on.slice(0, 7) : "…"}`);
+    else if (n.end_on) bits.push(`by ${n.end_on.slice(0, 7)}`);
     if (n.kind === "grant" && n.cost) bits.push(n.cost.toLocaleString());
     const fu = funding(n.id);
     if (fu) bits.push(fu);
@@ -450,7 +465,7 @@
              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEdit(n); } }}>
           <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{n.title}</span>
           <span class="n-sub">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
-          {#if n.kind !== "goal"}
+          {#if !inColumn(n)}
             <!-- pointer shortcuts; the editor's dates and Links do the same by keyboard -->
             <span class="resize" role="presentation" aria-hidden="true" title="Drag to change the end" onpointerdown={(ev) => begin(ev, n, "resize")}></span>
           {/if}
