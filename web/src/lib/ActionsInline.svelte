@@ -1,7 +1,7 @@
 <script lang="ts">
   // A project's (or milestone's) action items inside a session: tick off what
   // was finished, add what came up, and comment or link on any action. Each
-  // change happens at once (they are to-dos) and is reported to the session.
+  // change is saved at once and reported to the session.
   import { loadMyActions, addAction, setActionDone, addToAction, noteStep, deleteAction } from "./actions";
   import type { Action, ActionStep } from "./actions";
   import { parseLinks, linkName } from "./group";
@@ -60,7 +60,7 @@
   }
 
   async function remove(a: Action) {
-    if (!confirm(`Delete “${a.title}”? It is a to-do, so it goes from Week too.`)) return;
+    if (!confirm(`Delete the action “${a.title}”?`)) return;
     try {
       error = "";
       await deleteAction(a.id);

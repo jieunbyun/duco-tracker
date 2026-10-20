@@ -249,7 +249,7 @@ export async function deleteEntry(id: string): Promise<void> {
 // task. A sitting that has been logged points at its time entry.
 export type Todo = {
   id: string;
-  kind: "task" | "meeting" | "idea"; // idea: "To think about", not tied to a week
+  kind: "task" | "meeting" | "idea" | "action"; // idea: "To think about"; action: a Logbook action item (never on Week's lists)
   title: string;
   due_on: string;
   category_id: string | null;

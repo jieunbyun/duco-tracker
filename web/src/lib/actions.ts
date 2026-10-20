@@ -1,7 +1,8 @@
-// Logbook action items are to-dos (0023_logbook_actions.sql): one list. An
-// action item added in the Logbook is a to-do on your Week list too, and
-// ticking it in either place ticks both. Only to-dos that belong to a project
-// (a Planning one or a shared one) show in the Logbook.
+// Logbook action items: a project's internal notes on what to do next, with
+// comments and links (0023_logbook_actions.sql, 0025_actions_apart.sql). They
+// are kept in the to-do table with a kind of their own, "action", so they never
+// appear on Week's lists; they are worked on in Logbook sessions and in Week's
+// time log.
 import { supabase } from "./supabase";
 import { check } from "./data";
 import { today } from "./dates";
@@ -27,10 +28,19 @@ const RECENT_DAYS = 14;
 export async function loadMyActions(): Promise<Action[]> {
   const since = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
   const { data, error } = await supabase.from("todo").select(COLS)
-    .eq("kind", "task").eq("is_cancelled", false)
+    .eq("kind", "action").eq("is_cancelled", false)
     .or("project_id.not.is.null,group_project_id.not.is.null")
     .or(`is_done.eq.false,done_at.gte.${since}`)
     .order("created_at");
+  if (error) return [];
+  return ((data ?? []) as Action[]).map((a) => ({ ...a, links: a.links ?? [] }));
+}
+
+/** Every action you have ticked off, most recent first: the Logbook's action history. */
+export async function loadDoneActions(): Promise<Action[]> {
+  const { data, error } = await supabase.from("todo").select(COLS)
+    .eq("kind", "action").eq("is_done", true).eq("is_cancelled", false)
+    .order("done_at", { ascending: false }).limit(1000);
   if (error) return [];
   return ((data ?? []) as Action[]).map((a) => ({ ...a, links: a.links ?? [] }));
 }
@@ -45,9 +55,8 @@ export async function loadMemberActions(userId: string): Promise<Action[]> {
 }
 
 export async function addAction(fields: ActionFields): Promise<string> {
-  // a to-do for this week, flexible: it carries over on Week's list until done
   const row = await check<{ id: string }>(
-    supabase.from("todo").insert({ ...fields, kind: "task", due_on: today(), must_this_week: false }).select("id").single());
+    supabase.from("todo").insert({ ...fields, kind: "action", due_on: today(), must_this_week: false }).select("id").single());
   return row!.id;
 }
 export async function saveAction(id: string, fields: Partial<ActionFields>): Promise<void> {
@@ -56,7 +65,7 @@ export async function saveAction(id: string, fields: Partial<ActionFields>): Pro
 export async function setActionDone(id: string, done: boolean): Promise<void> {
   await check(supabase.from("todo").update({ is_done: done, done_at: done ? new Date().toISOString() : null }).eq("id", id));
 }
-/** Delete an action: it is a to-do, so it goes from Week too (Undo brings it back). */
+/** Delete an action (Undo brings it back). */
 export async function deleteAction(id: string): Promise<void> {
   await check(supabase.from("todo").delete().eq("id", id));
 }

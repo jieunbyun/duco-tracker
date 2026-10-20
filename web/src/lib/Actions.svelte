@@ -1,6 +1,6 @@
 <script lang="ts">
   // Action items in the Logbook: tick them off, add the next ones, each with a
-  // note and links. They are to-dos, so they are on Week's list too.
+  // note and links. A project's own notes on what to do next, not to-dos.
   import { addAction, saveAction, setActionDone, deleteAction } from "./actions";
   import type { Action } from "./actions";
   import { parseLinks, linkName, planningGroups } from "./group";
@@ -66,7 +66,7 @@
 <section class="actions-box">
   <header>
     <h2>Action items <span class="muted">{open.length}</span></h2>
-    <span class="muted small">They are to-dos too: they show on Week's list until done.</span>
+    <span class="muted small">The project's own notes on what to do next; not on Week's lists.</span>
     <span class="spacer"></span>
     {#if canWrite && !draft}<button class="mini" onclick={() => (draft = fresh())}>+ Action item</button>{/if}
   </header>
@@ -120,7 +120,7 @@
           {#if canWrite}
             <button class="link" onclick={() => edit(a)}>edit</button>
             <button class="x" title="Delete this action" aria-label={`Delete ${a.title}`}
-                    onclick={() => confirm(`Delete “${a.title}”? It is a to-do, so it goes from Week too.`) && act(() => deleteAction(a.id))}>✕</button>
+                    onclick={() => confirm(`Delete the action “${a.title}”?`) && act(() => deleteAction(a.id))}>✕</button>
           {/if}
           {#if a.note}<p class="a-note">{a.note}</p>{/if}
           {#if a.links.length}

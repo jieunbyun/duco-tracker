@@ -11,7 +11,8 @@
   import { LIVE_STATUSES } from "../lib/plan";
   import Logbook from "../lib/Logbook.svelte";
   import Actions from "../lib/Actions.svelte";
-  import { loadMyActions, loadMemberActions } from "../lib/actions";
+  import { loadMyActions, loadMemberActions, loadDoneActions } from "../lib/actions";
+  import ActionHistory from "../lib/ActionHistory.svelte";
   import type { Action } from "../lib/actions";
   import { preview } from "../lib/preview.svelte";
 
@@ -101,6 +102,8 @@
     </div>
     <!-- a project's action items at a glance; in a session, they are in the entry form -->
     {#if filter || preview.as}<Actions {actions} projects={ordered} {planning} {filter} canWrite={!preview.as} onchanged={load} />{/if}
+    <ActionHistory load={() => (preview.as ? loadMemberActions(preview.as.user_id) : loadDoneActions())}
+                   projects={ordered} {planning} {filter} />
     <Logbook entries={shown} projects={ordered} {planning} {groupMilestones} {members} {comments} {edits} {me} canWrite={!preview.as} onchanged={load} />
   {/if}
 </section>
