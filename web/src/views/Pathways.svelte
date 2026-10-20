@@ -1,6 +1,7 @@
 <script lang="ts">
-  import { loadProjects } from "../lib/data";
-  import type { Project } from "../lib/data";
+  import { loadProjects, loadTaxonomy } from "../lib/data";
+  import type { Project, Taxonomy } from "../lib/data";
+  import { LIVE_STATUSES } from "../lib/plan";
   import { loadReadings } from "../lib/reading";
   import type { Reading } from "../lib/reading";
   import {
@@ -16,6 +17,7 @@
   let links = $state<PwLink[]>([]);
   let years = $state(5);
   let projects = $state<Project[]>([]);
+  let tax = $state<Taxonomy | null>(null);
   let readings = $state<Reading[]>([]);
   let loading = $state(true);
   let error = $state("");
@@ -23,7 +25,10 @@
 
   async function load() {
     try {
-      const [pw, p, r] = await Promise.all([loadPathways(), loadProjects(), loadReadings().catch(() => [] as Reading[])]);
+      const [pw, p, r, t] = await Promise.all([
+        loadPathways(), loadProjects(), loadReadings().catch(() => [] as Reading[]), loadTaxonomy(),
+      ]);
+      tax = t;
       nodes = pw.nodes;
       links = pw.links;
       years = pw.years;
@@ -208,7 +213,7 @@
   const todayX = $derived(xOf(today()));
 
   // ---- adding and editing ------------------------------------------------------------
-  let panel = $state<{ node: PwNode | null; draft?: Partial<PwNodeFields> } | null>(null);
+  let panel = $state<{ node: PwNode | null; draft?: Partial<PwNodeFields> } | { importing: true } | null>(null);
   let dialog = $state<HTMLDialogElement | null>(null);
   $effect(() => {
     if (!dialog) return;
@@ -220,8 +225,8 @@
 
   const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6 };
   /** The first row in a lane free over a span (goals: the first free row in the goals column). */
-  function freeRow(lane: Lane, kind: NodeKind, s: string, e: string): number {
-    const inLane = visible.filter((n) => n.lane === lane && (kind === "goal") === (n.kind === "goal"));
+  function freeRow(lane: Lane, kind: NodeKind, s: string, e: string, also: PwNode[] = []): number {
+    const inLane = [...visible, ...also].filter((n) => n.lane === lane && (kind === "goal") === (n.kind === "goal"));
     for (let row = 0; ; row++) {
       const clash = inLane.some((n) => n.lane_row === row && (kind === "goal" ||
         ((n.start_on ?? today()) <= e && (n.end_on ?? addMonths(n.start_on ?? today(), 3)) >= s)));
@@ -241,6 +246,57 @@
       },
     };
   }
+  // ---- bring existing Planning projects onto the map ------------------------------------
+  // Each lands in its area's lane (student projects under Supervision go to the
+  // Supervision lane), keeps the project's dates, and stays linked to it.
+  type ImportRow = { p: Project; group: string; lane: Lane; already: boolean; pick: boolean };
+  let importRows = $state<ImportRow[]>([]);
+  let importing = $state(false);
+
+  function laneFor(p: Project): { lane: Lane; group: string } {
+    const c = tax?.allCategories.find((x) => x.id === p.category_id);
+    const a = tax?.areas.find((x) => x.id === c?.area_id);
+    const group = `${a?.label ?? "Other"} › ${c?.label ?? "—"}`;
+    if (c?.code === "RES_SUP") return { lane: "supervision", group };
+    if (a?.code === "TEA") return { lane: "teaching", group };
+    if (a?.code === "OUT") return { lane: "outreach", group };
+    return { lane: "research", group };
+  }
+  function openImport() {
+    const onMap = new Set(nodes.map((n) => n.project_id).filter(Boolean));
+    importRows = projects
+      .filter((p) => LIVE_STATUSES.has(p.status))
+      .map((p) => ({ p, ...laneFor(p), already: onMap.has(p.id), pick: false }))
+      .sort((a, b) => a.group.localeCompare(b.group) || a.p.name.localeCompare(b.p.name));
+    panel = { importing: true };
+  }
+  const importGroups = $derived(
+    [...new Set(importRows.map((r) => r.group))].map((g) => ({ group: g, rows: importRows.filter((r) => r.group === g) })),
+  );
+  async function addImported() {
+    importing = true;
+    const placed: PwNode[] = [];
+    try {
+      for (const r of importRows.filter((x) => x.pick && !x.already)) {
+        const s = r.p.start_on ? monthStart(r.p.start_on) : monthStart(today());
+        const e = r.p.end_on ?? null;
+        const row = freeRow(r.lane, "project", s, e ?? addMonths(s, 3), placed);
+        const fields: Partial<PwNodeFields> = {
+          kind: "project", lane: r.lane, title: r.p.name, project_id: r.p.id, potential: false,
+          start_on: s, end_on: e, lane_row: row,
+        };
+        const id = await saveNode(null, fields);
+        placed.push({ ...(fields as PwNode), id });
+      }
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      importing = false;
+    }
+    panel = null;
+    await load();
+  }
+
   async function saved() {
     panel = null;
     await load();
@@ -264,6 +320,7 @@
     {#each NODE_KINDS as k (k.key)}
       <button class:primary={k.key === "project"} onclick={() => openNew(k.key)}>+ {k.label}</button>
     {/each}
+    <button onclick={openImport} title="Put existing Planning projects on the map, linked to them">+ From Planning</button>
     <span class="spacer"></span>
     <div class="years" role="group" aria-label="How far ahead">
       {#each [3, 5, 10, 15, 20] as y (y)}
@@ -343,7 +400,39 @@
 </section>
 
 <dialog bind:this={dialog} onclose={() => (panel = null)}>
-  {#if panel}
+  {#if panel && "importing" in panel}
+    <h2>Projects from Planning</h2>
+    <p class="muted small">Tick the projects to put on the map. Each lands in its area's lane with its dates, linked to the Planning project.</p>
+    {#if !importRows.length}
+      <p class="muted">No live projects in Planning.</p>
+    {/if}
+    <div class="imp">
+      {#each importGroups as g (g.group)}
+        <details class="imp-group" open={g.rows.some((r) => !r.already)}>
+          <summary><strong>{g.group}</strong> <span class="muted">{g.rows.length}</span></summary>
+          {#each g.rows as r (r.p.id)}
+            <label class="imp-row" class:off={r.already}>
+              <input type="checkbox" bind:checked={r.pick} disabled={r.already} />
+              <span class="imp-name">{r.p.name}</span>
+              <span class="muted">
+                {r.p.start_on || r.p.end_on ? `${r.p.start_on ?? "…"} → ${r.p.end_on ?? "…"}` : "no dates"}
+                · {LANES.find((l) => l.key === r.lane)?.label} lane{r.already ? " · already on the map" : ""}
+              </span>
+            </label>
+          {/each}
+        </details>
+      {/each}
+    </div>
+    <div class="imp-actions">
+      {#if importRows.some((r) => r.pick && !r.already)}
+        {@const n = importRows.filter((r) => r.pick && !r.already).length}
+        <button class="primary" disabled={importing} onclick={addImported}>{importing ? "Adding…" : `Add ${n} to the map`}</button>
+      {:else}
+        <button class="primary" disabled>Tick projects to add</button>
+      {/if}
+      <button onclick={() => (panel = null)}>Cancel</button>
+    </div>
+  {:else if panel}
     <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
     {#key panel}
       <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} onsaved={saved} oncancel={() => (panel = null)} />
@@ -444,5 +533,15 @@
     border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); color: var(--ink); padding: 1.1rem 1.2rem;
   }
   dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+  .small { font-size: 0.82rem; font-family: var(--font-ui); }
+  .imp { display: grid; gap: 0.4rem; max-height: 55vh; overflow-y: auto; font-family: var(--font-ui); margin: 0.6rem 0; }
+  .imp-group { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.3rem 0.6rem; }
+  .imp-group summary { cursor: pointer; font-size: 0.88rem; padding: 0.2rem 0; }
+  .imp-row { display: flex; flex-wrap: wrap; gap: 0.2rem 0.6rem; align-items: baseline; padding: 0.3rem 0.2rem; font-size: 0.85rem; cursor: pointer; }
+  .imp-row input { width: auto; }
+  .imp-row.off { opacity: 0.55; cursor: default; }
+  .imp-name { font-weight: 600; }
+  .imp-row .muted { font-size: 0.78rem; }
+  .imp-actions { display: flex; gap: 0.5rem; font-family: var(--font-ui); }
   dialog h2 { margin: 0 0 0.8rem; font-size: 1.1rem; }
 </style>
