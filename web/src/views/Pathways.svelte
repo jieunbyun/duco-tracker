@@ -255,17 +255,21 @@
       .map(({ l, a, b }) => {
         const ax = a.x + a.w, ay = a.y + NODE_H / 2;
         const gap = b.x - ax;
-        if (gap >= -4 && gap < 40) {
-          // One starts where (or just after) the other ends: an arrow from end
-          // to start would vanish between them, so it runs under the cards (same
-          // row) or across from one's bottom/top edge to the other's.
-          const x1 = ax - 14, x2 = b.x + 14, bend = 15;
-          const d = b.y > a.y
-            ? `M ${x1} ${a.y + NODE_H} C ${x1} ${a.y + NODE_H + bend}, ${x2} ${b.y - bend}, ${x2} ${b.y}`
-            : b.y < a.y
-              ? `M ${x1} ${a.y} C ${x1} ${a.y - bend}, ${x2} ${b.y + NODE_H + bend}, ${x2} ${b.y + NODE_H}`
-              : `M ${x1} ${a.y + NODE_H} C ${x1} ${a.y + NODE_H + bend}, ${x2} ${b.y + NODE_H + bend}, ${x2} ${b.y + NODE_H}`;
-          return { l, d };
+        const bothGoalsColumn = a.x === x1 + GAP && b.x === x1 + GAP; // these loop round the column's right
+        if (gap < 40 && b.y !== a.y && !bothGoalsColumn) {
+          // In different rows and meeting or overlapping in time, an arrow from
+          // end to start would have no room: it runs from the middle of one
+          // card's bottom (or top) edge to the middle of the other's top (or bottom).
+          const mx1 = a.x + a.w / 2, mx2 = b.x + b.w / 2;
+          const down = b.y > a.y;
+          const y1 = down ? a.y + NODE_H : a.y, y2 = down ? b.y : b.y + NODE_H;
+          const bend = Math.max(12, Math.abs(y2 - y1) / 2) * (down ? 1 : -1);
+          return { l, d: `M ${mx1} ${y1} C ${mx1} ${y1 + bend}, ${mx2} ${y2 - bend}, ${mx2} ${y2}` };
+        }
+        if (gap >= -4 && gap < 40 && b.y === a.y) {
+          // Same row, one starting where the other ends: a hook under the join.
+          const hx1 = ax - 14, hx2 = b.x + 14, by0 = a.y + NODE_H, bend = 15;
+          return { l, d: `M ${hx1} ${by0} C ${hx1} ${by0 + bend}, ${hx2} ${by0 + bend}, ${hx2} ${by0}` };
         }
         const forward = b.x >= ax - 4;
         const bx = forward ? b.x : b.x + b.w, by = b.y + NODE_H / 2;
