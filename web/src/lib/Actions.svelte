@@ -1,7 +1,7 @@
 <script lang="ts">
   // Action items in the Logbook: tick them off, add the next ones, each with a
   // note and links. They are to-dos, so they are on Week's list too.
-  import { addAction, saveAction, setActionDone } from "./actions";
+  import { addAction, saveAction, setActionDone, deleteAction } from "./actions";
   import type { Action } from "./actions";
   import { parseLinks, linkName, planningGroups } from "./group";
   import type { GroupProject, PlanningRef } from "./group";
@@ -117,7 +117,11 @@
               {#if !filter}<span class="muted small"> · {where(a)}</span>{/if}
             </span>
           </label>
-          {#if canWrite}<button class="link" onclick={() => edit(a)}>edit</button>{/if}
+          {#if canWrite}
+            <button class="link" onclick={() => edit(a)}>edit</button>
+            <button class="x" title="Delete this action" aria-label={`Delete ${a.title}`}
+                    onclick={() => confirm(`Delete “${a.title}”? It is a to-do, so it goes from Week too.`) && act(() => deleteAction(a.id))}>✕</button>
+          {/if}
           {#if a.note}<p class="a-note">{a.note}</p>{/if}
           {#if a.links.length}
             <div class="a-links">{#each a.links as l (l)}<a href={l} target="_blank" rel="noopener noreferrer" title={l}>↗ {linkName(l)}</a>{/each}</div>
@@ -167,5 +171,7 @@
   .a-done .a-row { display: flex; padding: 0.15rem 0; }
   .mini { font-size: 0.78rem; padding: 0.2rem 0.6rem; }
   .small { font-size: 0.8rem; }
+  .x { background: none; border: none; color: var(--ink-soft); font-size: 0.75rem; padding: 0 0.3rem; }
+  .x:hover { color: var(--danger); }
   .link { background: none; border: none; color: var(--accent); text-decoration: underline; padding: 0 0.3rem; font-size: 0.78rem; }
 </style>

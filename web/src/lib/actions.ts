@@ -56,6 +56,10 @@ export async function saveAction(id: string, fields: Partial<ActionFields>): Pro
 export async function setActionDone(id: string, done: boolean): Promise<void> {
   await check(supabase.from("todo").update({ is_done: done, done_at: done ? new Date().toISOString() : null }).eq("id", id));
 }
+/** Delete an action: it is a to-do, so it goes from Week too (Undo brings it back). */
+export async function deleteAction(id: string): Promise<void> {
+  await check(supabase.from("todo").delete().eq("id", id));
+}
 /** Add a dated comment and/or links to an action: they accumulate over sessions. */
 export async function addToAction(a: Action, comment: string, links: string[]): Promise<void> {
   const line = comment.trim() ? `${today()}: ${comment.trim()}` : "";

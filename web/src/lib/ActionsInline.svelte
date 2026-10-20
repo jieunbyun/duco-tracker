@@ -2,7 +2,7 @@
   // A project's (or milestone's) action items inside a session: tick off what
   // was finished, add what came up, and comment or link on any action. Each
   // change happens at once (they are to-dos) and is reported to the session.
-  import { loadMyActions, addAction, setActionDone, addToAction, noteStep } from "./actions";
+  import { loadMyActions, addAction, setActionDone, addToAction, noteStep, deleteAction } from "./actions";
   import type { Action, ActionStep } from "./actions";
   import { parseLinks, linkName } from "./group";
 
@@ -59,6 +59,18 @@
     }
   }
 
+  async function remove(a: Action) {
+    if (!confirm(`Delete “${a.title}”? It is a to-do, so it goes from Week too.`)) return;
+    try {
+      error = "";
+      await deleteAction(a.id);
+      onlog(log.filter((s) => s.id !== a.id)); // no longer part of this session
+      await refresh();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+
   let open = $state<string | null>(null); // the action being commented on
   let comment = $state("");
   let links = $state("");
@@ -87,6 +99,7 @@
           <span class="links">{#each a.links as l (l)}<a href={l} target="_blank" rel="noopener noreferrer" title={l}>↗ {linkName(l)}</a>{/each}</span>
         {/if}
         <button type="button" class="link" onclick={() => (open === a.id ? (open = null) : startComment(a))}>comment / link</button>
+        <button type="button" class="x" title="Delete this action" aria-label={`Delete ${a.title}`} onclick={() => remove(a)}>✕</button>
         {#if a.note}<p class="note">{a.note}</p>{/if}
         {#if open === a.id}
           <div class="cmt">
@@ -129,5 +142,7 @@
   .new { display: flex; gap: 0.35rem; }
   .new input { flex: 1; font-size: 0.85rem; padding: 0.25rem 0.45rem; }
   .mini { font-size: 0.75rem; padding: 0.15rem 0.55rem; }
+  .x { background: none; border: none; color: var(--ink-soft); font-size: 0.75rem; padding: 0 0.3rem; }
+  .x:hover { color: var(--danger); }
   .link { background: none; border: none; color: var(--accent); text-decoration: underline; padding: 0 0.3rem; font-size: 0.75rem; }
 </style>
