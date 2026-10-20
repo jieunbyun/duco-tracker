@@ -1,15 +1,19 @@
-// The group: students (later, collaborators) who sign in to the same app and
-// see only their projects and logbook (0015_group.sql). The supervisor reads
-// every logbook and comments; only an entry's author writes it, and every
-// edit keeps the version before it.
+// The group: members (students, collaborators) who sign in to the same app and
+// see only their projects and logbook (0015_group.sql, 0016_members.sql). The
+// supervisor reads every logbook and comments, and keeps a logbook of their
+// own; only an entry's author writes it, and every edit keeps the version
+// before it.
 import { supabase } from "./supabase";
 import { check } from "./data";
 
-export type Role = "supervisor" | "student" | "collaborator";
-export type Member = { user_id: string; role: Role; display_name: string; email: string | null; active: boolean; joined_on: string };
+export type Role = "supervisor" | "member";
+export type Member = {
+  user_id: string; role: Role; display_name: string; email: string | null; active: boolean; joined_on: string;
+  planning_project_id: string | null; // their project under Research › Supervision in your Planning, which names them
+};
 export type GroupProject = {
   id: string; title: string; aim: string | null; status: "active" | "paused" | "done";
-  start_on: string | null; end_on: string | null; members: string[]; // user ids
+  start_on: string | null; end_on: string | null; lead_id: string | null; members: string[]; // user ids
 };
 export type GroupMilestone = { id: string; project_id: string; title: string; due_on: string | null; done: boolean; done_on: string | null; sort_order: number };
 export type EntryKind = "entry" | "weekly";
@@ -43,7 +47,7 @@ export async function myRole(): Promise<Role | "none" | null> {
     const { count } = await supabase.from("area").select("id", { count: "exact", head: true });
     return count ? null : "none";
   }
-  return data.role as Role;
+  return (data.role === "supervisor" ? "supervisor" : "member") as Role; // (student, collaborator: before 0016)
 }
 export async function myId(): Promise<string> {
   const { data } = await supabase.auth.getUser();
@@ -53,11 +57,12 @@ export async function myId(): Promise<string> {
 // ---- members ---------------------------------------------------------------------
 export async function loadMembers(): Promise<Member[]> {
   return (await check<Member[]>(
-    supabase.from("group_member").select("user_id,role,display_name,email,active,joined_on").order("display_name"),
+    supabase.from("group_member").select("user_id,role,display_name,email,active,joined_on,planning_project_id").order("display_name"),
   )) ?? [];
 }
-export async function addMember(email: string, name: string, role: "student" | "collaborator" = "student"): Promise<void> {
-  await check(supabase.rpc("add_group_member", { p_email: email, p_name: name, p_role: role }));
+/** Add someone already invited in Supabase, by email; named after their Planning Supervision project when there is one. */
+export async function addMember(email: string, name: string, planningProjectId: string | null): Promise<void> {
+  await check(supabase.rpc("add_group_member", { p_email: email, p_name: name, p_planning_project: planningProjectId }));
 }
 export async function saveMember(userId: string, fields: Partial<Pick<Member, "display_name" | "active">>): Promise<void> {
   await check(supabase.from("group_member").update(fields).eq("user_id", userId));
@@ -66,7 +71,7 @@ export async function saveMember(userId: string, fields: Partial<Pick<Member, "d
 // ---- projects and milestones -------------------------------------------------------
 export async function loadGroupProjects(): Promise<GroupProject[]> {
   const rows = (await check<(Omit<GroupProject, "members"> & { group_project_member: { user_id: string }[] })[]>(
-    supabase.from("group_project").select("id,title,aim,status,start_on,end_on,group_project_member(user_id)").order("created_at"),
+    supabase.from("group_project").select("id,title,aim,status,start_on,end_on,lead_id,group_project_member(user_id)").order("created_at"),
   )) ?? [];
   return rows.map(({ group_project_member, ...p }) => ({ ...p, members: group_project_member.map((m) => m.user_id) }));
 }
@@ -102,7 +107,7 @@ export async function deleteMilestone(id: string): Promise<void> {
 
 // ---- the logbook ---------------------------------------------------------------------
 const ENTRY_COLS = "id,author_id,project_id,entry_date,kind,did,results,next,links,created_at,updated_at";
-/** Entries you can see: your own (a student), or everyone's (the supervisor); newest first. */
+/** Entries you can see: your own (a member), or everyone's (the supervisor); newest first. */
 export async function loadEntries(authorId?: string): Promise<Entry[]> {
   let q = supabase.from("logbook_entry").select(ENTRY_COLS);
   if (authorId) q = q.eq("author_id", authorId);

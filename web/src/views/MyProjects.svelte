@@ -1,5 +1,5 @@
 <script lang="ts">
-  // A student's projects (they can have several), with milestones they tick off.
+  // A member's projects (they can have several), with milestones they tick off.
   import { loadMembers, loadGroupProjects, loadMilestones, loadEntries, myId } from "../lib/group";
   import type { Member, GroupProject, GroupMilestone, Entry } from "../lib/group";
   import GroupProjects from "../lib/GroupProjects.svelte";

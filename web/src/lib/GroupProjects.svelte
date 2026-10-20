@@ -22,15 +22,16 @@
     try { error = ""; await f(); await onchanged(); } catch (e) { error = (e as Error).message; }
   };
   const nameOf = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "—";
-  const students = $derived(members.filter((m) => m.role !== "supervisor" && m.active));
+  const assignable = $derived(members.filter((m) => m.active));
+  const leads = $derived(members.filter((m) => m.active));
 
   // ---- a project's details (new or edited) ------------------------------------------
-  type Draft = { id: string | null; title: string; aim: string; status: GroupProject["status"]; start: string; end: string };
+  type Draft = { id: string | null; title: string; aim: string; status: GroupProject["status"]; start: string; end: string; lead: string };
   let draft = $state<Draft | null>(null);
   function edit(p: GroupProject | null) {
     draft = p
-      ? { id: p.id, title: p.title, aim: p.aim ?? "", status: p.status, start: (p.start_on ?? "").slice(0, 7), end: (p.end_on ?? "").slice(0, 7) }
-      : { id: null, title: "", aim: "", status: "active", start: today().slice(0, 7), end: "" };
+      ? { id: p.id, title: p.title, aim: p.aim ?? "", status: p.status, start: (p.start_on ?? "").slice(0, 7), end: (p.end_on ?? "").slice(0, 7), lead: p.lead_id ?? "" }
+      : { id: null, title: "", aim: "", status: "active", start: today().slice(0, 7), end: "", lead: newFor ?? "" };
   }
   async function saveDraft(ev: SubmitEvent) {
     ev.preventDefault();
@@ -41,8 +42,11 @@
       const id = await saveGroupProject(d.id, {
         title: d.title.trim(), aim: d.aim.trim() || null, status: d.status,
         start_on: fromMonth(d.start, false, was?.start_on ?? null), end_on: fromMonth(d.end, true, was?.end_on ?? null),
+        ...(supervisor ? { lead_id: d.lead || null } : {}),
       });
       if (!d.id && newFor) await addProjectMember(id, newFor);
+      // whoever leads it is on it
+      if (supervisor && d.lead && d.lead !== newFor && !was?.members.includes(d.lead)) await addProjectMember(id, d.lead);
       draft = null;
     });
   }
@@ -80,6 +84,14 @@
       </label>
       <label>From <input type="month" bind:value={draft.start} /></label>
       <label>To <input type="month" bind:value={draft.end} min={draft.start || undefined} /></label>
+      {#if supervisor}
+        <label>Lead
+          <select bind:value={draft.lead}>
+            <option value="">—</option>
+            {#each leads as m (m.user_id)}<option value={m.user_id}>{m.display_name}</option>{/each}
+          </select>
+        </label>
+      {/if}
       <div class="wide actions">
         <button class="primary" type="submit">{draft.id ? "Save" : "Add project"}</button>
         <button type="button" onclick={() => (draft = null)}>Cancel</button>
@@ -98,7 +110,7 @@
       <header>
         <h3>{p.title}</h3>
         <span class="muted small">
-          {p.status}{p.start_on ? ` · ${fmtMonth(p.start_on)} → ${p.end_on ? fmtMonth(p.end_on) : "…"}` : ""}
+          {p.status}{p.lead_id ? ` · led by ${nameOf(p.lead_id)}` : ""}{p.start_on ? ` · ${fmtMonth(p.start_on)} → ${p.end_on ? fmtMonth(p.end_on) : "…"}` : ""}
           · {recent(p)} {recent(p) === 1 ? "entry" : "entries"} this week{lastEntry(p) ? ` · last ${lastEntry(p)}` : ""}
         </span>
         <span class="spacer"></span>
@@ -116,7 +128,7 @@
         <span class="person">{nameOf(uid)}{#if supervisor}<button class="x" aria-label="Take off the project" onclick={() => act(() => removeProjectMember(p.id, uid))}>✕</button>{/if}</span>
       {:else}<span class="muted">nobody yet</span>{/each}
       {#if supervisor}
-        {@const others = students.filter((s) => !p.members.includes(s.user_id))}
+        {@const others = assignable.filter((s) => !p.members.includes(s.user_id))}
         {#if others.length}
           <select aria-label="Add someone" onchange={(ev) => { const v = (ev.target as HTMLSelectElement).value; if (v) act(() => addProjectMember(p.id, v)); }}>
             <option value="">+ add someone…</option>
@@ -143,7 +155,7 @@
     </form>
   </section>
 {:else}
-  <p class="muted">{supervisor ? "No projects yet." : "No projects yet — your supervisor adds them."}</p>
+  <p class="muted">{supervisor ? "No projects yet." : "No projects yet: your supervisor adds them."}</p>
 {/each}
 
 <style>

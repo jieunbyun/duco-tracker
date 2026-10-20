@@ -24,22 +24,22 @@
     projects: () => import("./views/MyProjects.svelte"),
   };
   const labels: Record<keyof typeof views, string> = {
-    week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Supervision", time: "Time", reading: "Reading",
+    week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Members", time: "Time", reading: "Reading",
     cv: "CV", help: "Help", logbook: "Logbook", projects: "Projects",
   };
   type Route = keyof typeof views;
 
-  // Who sees which tabs: the planner is yours alone; a student (or
-  // collaborator) sees only their logbook and projects.
+  // Who sees which tabs: the planner is yours alone; a member sees only their
+  // logbook and projects. You keep a logbook too, for the projects you lead.
   const OWNER: Route[] = ["week", "planning", "pathways", "time", "reading", "cv", "help"];
-  const SUPERVISOR: Route[] = ["week", "planning", "pathways", "supervision", "time", "reading", "cv", "help"];
+  const SUPERVISOR: Route[] = ["week", "planning", "pathways", "supervision", "logbook", "time", "reading", "cv", "help"];
   const MEMBER: Route[] = ["logbook", "projects"];
 
   let session = $state<Session | null>(null);
   let ready = $state(false);
   let role = $state<Role | "none" | null | undefined>(undefined); // undefined: not known yet; null: the planner's owner, no group
   let needsPassword = $state(arrival === "invite" || arrival === "recovery");
-  const member = $derived(role === "student" || role === "collaborator");
+  const member = $derived(role === "member");
   const tabs = $derived(member ? MEMBER : role === "supervisor" ? SUPERVISOR : OWNER);
 
   // Hash routing (#/week): no server rewrites needed, and the browser's

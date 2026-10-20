@@ -18,7 +18,7 @@
     links: PwLink[];
     projects: Project[];
     readings: Reading[];
-    groupProjects?: GroupProject[]; // students' shared projects (Supervision)
+    groupProjects?: GroupProject[]; // members' shared projects (Members tab)
     onsaved: () => void;
     oncancel: () => void;
   };
@@ -189,7 +189,7 @@
     </label>
     <label class="check wide"><input type="checkbox" bind:checked={f.hands_on} /> Hands-on — my own research time goes into it substantially</label>
     {#if groupProjects.length}
-      <label class="wide">A student's project (Supervision)
+      <label class="wide">A member's project (Members tab)
         <select bind:value={f.group_project_id}>
           <option value="">— none —</option>
           {#each groupProjects as g (g.id)}<option value={g.id}>{g.title}</option>{/each}
