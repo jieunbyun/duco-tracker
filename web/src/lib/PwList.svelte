@@ -168,7 +168,12 @@
             {/each}
             {#each inc as l (l.id)}
               <span class="chip in lk-{l.kind}" title={`${titleOf(l.from_id)} ${linkLabel(l.kind)} this`}>
-                ← {titleOf(l.from_id)} <span class="muted">{linkLabel(l.kind)} this</span>
+                ← <span class="to">{titleOf(l.from_id)}</span>
+                <select value={l.kind} aria-label="Link kind" onchange={(ev) => act(() => setLinkKind(l.id, (ev.target as HTMLSelectElement).value as LinkKind))}>
+                  {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
+                </select>
+                <span class="muted">this</span>
+                <button class="x" aria-label="Remove link" onclick={() => act(() => deleteLink(l.id))}>✕</button>
               </span>
             {/each}
             {#if linking?.from === n.id}
