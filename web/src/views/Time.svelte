@@ -1,7 +1,7 @@
 <script lang="ts">
-  import { loadTaxonomy, loadEntryHours, targetOn, fmtHours } from "../lib/data";
+  import { loadTaxonomy, loadEntryHours, targetOn, fmtHours, loadCoreTarget } from "../lib/data";
   import type { Taxonomy, EntryHours } from "../lib/data";
-  import { PRESETS, presetRange, addDays, today, daysIn, fmtDay } from "../lib/dates";
+  import { PRESETS, presetRange, addDays, today, daysIn, fmtDay, weekStart } from "../lib/dates";
   import type { Preset, Range } from "../lib/dates";
   import { shareEmail } from "../lib/email";
 
@@ -31,6 +31,8 @@
   let request = 0;
 
   loadTaxonomy().then((t) => (tax = t)).catch((e) => (error = e.message));
+  let coreWeekly = $state<number | null>(null); // your weekly target for core hours
+  loadCoreTarget().then((v) => (coreWeekly = v ?? null));
 
   $effect(() => {
     const { from, to } = range;
@@ -94,8 +96,26 @@
     const logged = entries.reduce((s, e) => s + e.hours, 0);
     const core = entries.filter((e) => e.is_core).reduce((s, e) => s + e.hours, 0);
     const target = plan.reduce((s, p) => s + p.target, 0);
-    return { logged, core, target, perWeek: elapsed ? (logged / elapsed) * 7 : 0 };
+    return { logged, core, target, perWeek: elapsed ? (logged / elapsed) * 7 : 0, corePerWeek: elapsed ? (core / elapsed) * 7 : 0 };
   });
+
+  // ---- core hours: against a weekly target, spread over every day of the week ----
+  const coreTarget = $derived(coreWeekly ? (coreWeekly / 7) * elapsed : 0);
+  /** Each week of the period (up to today): core hours, and the target for its days so far. */
+  const coreWeeks = $derived.by(() => {
+    const out: { start: string; label: string; hours: number; target: number; partial: boolean }[] = [];
+    if (elapsed <= 0) return out;
+    for (let ws = weekStart(range.from); ws <= targetEnd; ws = addDays(ws, 7)) {
+      const from = ws < range.from ? range.from : ws;
+      const we = addDays(ws, 6);
+      const to = we > targetEnd ? targetEnd : we;
+      const days = daysIn({ from, to });
+      const hours = entries.filter((e) => e.is_core && e.entry_date >= from && e.entry_date <= to).reduce((s, e) => s + e.hours, 0);
+      out.push({ start: ws, label: fmtDay(ws), hours, target: coreWeekly ? (coreWeekly / 7) * days : 0, partial: days < 7 });
+    }
+    return out;
+  });
+  const coreMax = $derived(Math.max(1, coreWeekly ?? 0, ...coreWeeks.map((w) => w.hours)));
 
   // ---- composition drill-down -------------------------------------------
   // all work > area > category > project > milestone
@@ -220,10 +240,48 @@
       </div>
       <div class="kpi">
         <span class="kpi-label">Core</span>
-        <span class="kpi-value">{pct(totals.core, totals.logged)}</span>
-        <span class="kpi-sub">{fmtHours(totals.core)} flagged core</span>
+        <span class="kpi-value">{fmtHours(totals.core)}</span>
+        <span class="kpi-sub">
+          {coreWeekly ? `${pct(totals.core, coreTarget)} of core target to date · ` : ""}{pct(totals.core, totals.logged)} of logged
+        </span>
       </div>
     </div>
+
+    <!-- Core hours -->
+    <h2>Core hours</h2>
+    {#if coreWeekly}
+      <p class="muted note">Hours flagged core, against {fmtHours(coreWeekly)} a week spread over every day. Each bar is a week; the tick is its target (a part week's, for the days so far).</p>
+      <div class="plan">
+        <div class="plan-row" title={`Core: ${fmtHours(totals.core)} logged, target ${fmtHours(coreTarget)}`}>
+          <span class="name">Core</span>
+          <div class="track" aria-hidden="true">
+            <div class="bar core-bar" style:width={`${(100 * totals.core) / Math.max(1, totals.core, coreTarget)}%`}></div>
+            {#if coreTarget > 0}<div class="tick" style:left={`${(100 * coreTarget) / Math.max(1, totals.core, coreTarget)}%`}></div>{/if}
+          </div>
+          <span class="value">
+            <strong>{fmtHours(totals.core)}</strong> of {fmtHours(coreTarget)}
+            <span class="muted">· {pct(totals.core, coreTarget)}</span>
+          </span>
+          <span class="email muted">{fmtHours(totals.corePerWeek)} a week on average</span>
+        </div>
+      </div>
+    {:else}
+      <p class="muted note">{fmtHours(totals.core)} flagged core in this period, {fmtHours(totals.corePerWeek)} a week. Set a weekly core target under Planning › Edit targets and settings to track it here.</p>
+    {/if}
+    {#if coreWeeks.length > 1}
+      <div class="weeks" role="img" aria-label="Core hours per week">
+        {#each coreWeeks as w (w.start)}
+          <div class="wk" title={`Week of ${w.label}: ${fmtHours(w.hours)} core${w.target ? ` of ${fmtHours(w.target)}` : ""}${w.partial ? " (part week)" : ""}`}>
+            <div class="wk-col">
+              <div class="wk-bar" class:met={w.target > 0 && w.hours >= w.target} style:height={`${(100 * w.hours) / coreMax}%`}></div>
+              {#if w.target > 0}<div class="wk-tick" style:bottom={`${(100 * w.target) / coreMax}%`}></div>{/if}
+            </div>
+            <span class="wk-h">{w.hours ? Math.round(w.hours) : ""}</span>
+            <span class="wk-label">{w.label.replace(/ \d{4}$/, "")}</span>
+          </div>
+        {/each}
+      </div>
+    {/if}
 
     <!-- Plan vs actual -->
     <h2>Plan vs actual</h2>
@@ -322,6 +380,15 @@
   .period { font-family: var(--font-ui); font-size: 0.88rem; margin: 0.6rem 0 0; }
   .note { font-family: var(--font-ui); font-size: 0.85rem; margin: -0.2rem 0 0.8rem; }
 
+  .core-bar { background: var(--accent); }
+  .weeks { display: flex; gap: 4px; align-items: flex-end; overflow-x: auto; padding: 0.4rem 0 0.2rem; font-family: var(--font-ui); }
+  .wk { flex: 1 0 1.6rem; max-width: 3.2rem; display: grid; justify-items: center; gap: 2px; }
+  .wk-col { position: relative; width: 100%; height: 6rem; background: color-mix(in srgb, var(--panel) 60%, transparent); border-radius: 3px; }
+  .wk-bar { position: absolute; left: 15%; right: 15%; bottom: 0; background: color-mix(in srgb, var(--accent) 55%, var(--paper)); border-radius: 3px 3px 0 0; }
+  .wk-bar.met { background: var(--accent); }
+  .wk-tick { position: absolute; left: 0; right: 0; border-top: 2px solid var(--ink); }
+  .wk-h { font-size: 0.7rem; color: var(--ink); min-height: 0.9rem; }
+  .wk-label { font-size: 0.62rem; color: var(--ink-soft); white-space: nowrap; }
   .kpis {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));

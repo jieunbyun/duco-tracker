@@ -469,6 +469,17 @@ export async function saveCategory(id: string, fields: { label: string; kind: st
   await loadTaxonomy(true);
 }
 
+/** Your weekly target for core hours; null when none is set, undefined before 0020 is run. */
+export async function loadCoreTarget(): Promise<number | null | undefined> {
+  const { data, error } = await supabase.from("user_setting").select("core_weekly_hours").maybeSingle();
+  if (error) return undefined;
+  const v = (data as { core_weekly_hours: number | string | null } | null)?.core_weekly_hours;
+  return v === null || v === undefined ? null : Number(v);
+}
+export async function saveCoreTarget(hours: number | null): Promise<void> {
+  await check(supabase.from("user_setting").update({ core_weekly_hours: hours }).not("user_id", "is", null));
+}
+
 export async function saveSettings(fields: Settings): Promise<void> {
   await check(supabase.from("user_setting").upsert(fields));
   await loadTaxonomy(true);

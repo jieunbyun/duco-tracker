@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { saveSettings, saveTargets, targetOn } from "./data";
+  import { saveSettings, saveTargets, targetOn, loadCoreTarget, saveCoreTarget } from "./data";
   import type { Taxonomy } from "./data";
   import { today, weekStart } from "./dates";
 
@@ -23,6 +23,11 @@
   let busy = $state(false);
   let error = $state("");
 
+  // the weekly core-hours target (undefined: not available before 0020 is run)
+  let core = $state<number | null | undefined>(undefined);
+  let core0: number | null | undefined = undefined;
+  loadCoreTarget().then((v) => (core = core0 = v));
+
   const changed = $derived(
     targets.some((r) => {
       const t = targetOn(t0.targets, r.area.id, today());
@@ -36,6 +41,10 @@
     error = "";
     try {
       await saveSettings({ week_starts_on, weeks_per_year, horizon_months });
+      if (core !== undefined && core0 !== undefined) {
+        const v = core === null || Number.isNaN(core) ? null : core;
+        if (v !== core0) await saveCoreTarget(v);
+      }
       if (changed) {
         await saveTargets(targets.map((r) => ({
           area_id: r.area.id, effective_from: from, weekly_hours: r.weekly || 0, email_weekly_hours: r.email || 0,
@@ -58,6 +67,11 @@
       </select>
     </label>
     <label>Working weeks per year <input type="number" min="1" max="52" step="1" bind:value={weeks_per_year} /></label>
+    {#if core !== undefined}
+      <label title="Hours flagged core, counted over every day of the week">Core hours per week (target)
+        <input type="number" min="0" max="168" step="0.5" bind:value={core} />
+      </label>
+    {/if}
   </div>
 
   <table>
