@@ -1,0 +1,262 @@
+<script lang="ts">
+  import { untrack } from "svelte";
+  import {
+    LANES, NODE_KINDS, LINK_KINDS, saveNode, deleteNode, saveLink, setLinkKind, deleteLink, loadRevisions, addRevision,
+  } from "./pathways";
+  import type { PwNode, PwNodeFields, PwLink, PwRevision, LinkKind, NodeKind, Lane } from "./pathways";
+  import type { Project } from "./data";
+  import type { Reading } from "./reading";
+  import { LIVE_STATUSES } from "./plan";
+  import { fmtDay } from "./dates";
+
+  type Props = {
+    node: PwNode | null; // null = new
+    draft?: Partial<PwNodeFields>; // defaults for a new item
+    nodes: PwNode[];
+    links: PwLink[];
+    projects: Project[];
+    readings: Reading[];
+    onsaved: () => void;
+    oncancel: () => void;
+  };
+  let { node, draft, nodes, links, projects, readings, onsaved, oncancel }: Props = $props();
+
+  const n0 = untrack(() => node);
+  const d0 = untrack(() => draft) ?? {};
+  let f = $state({
+    kind: (n0?.kind ?? d0.kind ?? "project") as NodeKind,
+    lane: (n0?.lane ?? d0.lane ?? "research") as Lane,
+    title: n0?.title ?? "",
+    detail: n0?.detail ?? "",
+    status: n0?.status ?? "active",
+    potential: n0?.potential ?? d0.potential ?? false,
+    project_id: n0?.project_id ?? "",
+    reading_id: n0?.reading_id ?? "",
+    start_on: n0?.start_on ?? d0.start_on ?? "",
+    end_on: n0?.end_on ?? d0.end_on ?? "",
+    effort_pm: n0?.effort_pm ?? (null as number | null),
+    cost: n0?.cost ?? (null as number | null),
+    fte: n0?.fte ?? (null as number | null),
+  });
+  let reason = $state("");
+  let busy = $state(false);
+  let error = $state("");
+  let revisions = $state<PwRevision[]>([]);
+  if (n0?.kind === "goal") loadRevisions(n0.id).then((r) => (revisions = r)).catch(() => {});
+
+  const dated = $derived(f.kind !== "goal");
+  const reworded = $derived(!!n0 && n0.kind === "goal" && (f.title.trim() !== n0.title || (f.detail.trim() || null) !== n0.detail));
+  const projectOptions = $derived(
+    projects.filter((p) => LIVE_STATUSES.has(p.status) || p.id === n0?.project_id).sort((a, b) => a.name.localeCompare(b.name)),
+  );
+  const title = (id: string) => nodes.find((x) => x.id === id)?.title ?? "?";
+  const mine = $derived(n0 ? links.filter((l) => l.from_id === n0.id || l.to_id === n0.id) : []);
+
+  // a linked Planning project lends its dates when they are empty
+  function onProject() {
+    const p = projects.find((x) => x.id === f.project_id);
+    if (!p) return;
+    if (!f.title.trim()) f.title = p.name;
+    if (!f.start_on && p.start_on) f.start_on = p.start_on;
+    if (!f.end_on && p.end_on) f.end_on = p.end_on;
+    f.potential = false;
+  }
+
+  const n = (v: number | null) => (v === null || Number.isNaN(v) ? null : v);
+  async function save(event: SubmitEvent) {
+    event.preventDefault();
+    if (!f.title.trim()) return (error = "Give it a title.");
+    if (f.start_on && f.end_on && f.end_on < f.start_on) return (error = "It ends before it starts.");
+    busy = true;
+    error = "";
+    try {
+      const fields: Partial<PwNodeFields> = {
+        kind: f.kind, lane: f.lane, title: f.title.trim(), detail: f.detail.trim() || null, status: f.status as PwNode["status"],
+        potential: f.kind === "project" ? f.potential : false,
+        project_id: f.kind === "project" ? f.project_id || null : null,
+        reading_id: f.kind === "gap" ? f.reading_id || null : null,
+        start_on: dated ? f.start_on || null : null, end_on: dated ? f.end_on || null : null,
+        effort_pm: f.kind === "project" ? n(f.effort_pm) : null,
+        cost: f.kind === "project" ? n(f.cost) : null,
+        fte: f.kind === "person" ? n(f.fte) : null,
+      };
+      if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
+      if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
+      await saveNode(n0?.id ?? null, fields);
+      onsaved();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function remove() {
+    if (!n0 || !confirm(`Delete “${n0.title}” and its links?`)) return;
+    busy = true;
+    try {
+      await deleteNode(n0.id);
+      onsaved();
+    } catch (e) {
+      error = (e as Error).message;
+      busy = false;
+    }
+  }
+
+  // ---- links ----------------------------------------------------------------------
+  let linkTo = $state("");
+  let linkKind = $state<LinkKind>("feeds");
+  async function addLink() {
+    if (!n0 || !linkTo) return;
+    try {
+      await saveLink(n0.id, linkTo, linkKind);
+      linkTo = "";
+      onsaved();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  async function changeKind(l: PwLink, kind: LinkKind) {
+    try { await setLinkKind(l.id, kind); onsaved(); } catch (e) { error = (e as Error).message; }
+  }
+  async function unlink(l: PwLink) {
+    try { await deleteLink(l.id); onsaved(); } catch (e) { error = (e as Error).message; }
+  }
+</script>
+
+<form class="pw-form" onsubmit={save}>
+  <label>Kind
+    <select bind:value={f.kind} disabled={!!n0}>
+      {#each NODE_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
+    </select>
+  </label>
+  <label>Lane
+    <select bind:value={f.lane}>{#each LANES as l (l.key)}<option value={l.key}>{l.label}</option>{/each}</select>
+  </label>
+  <label>Status
+    <select bind:value={f.status}>
+      <option value="active">active</option><option value="done">done</option><option value="retired">retired</option>
+    </select>
+  </label>
+
+  <label class="wide">{f.kind === "person" ? "Name and role" : "Title"} <input bind:value={f.title} required /></label>
+  <label class="wide">{f.kind === "person" ? "Original strengths, and the legacy they will leave" : "Description"}
+    <textarea rows="3" bind:value={f.detail}></textarea>
+  </label>
+
+  {#if reworded}
+    <label class="wide reason">Why the change? (kept in the goal's history)
+      <input bind:value={reason} placeholder="e.g. narrowed after the funding call" />
+    </label>
+  {/if}
+
+  {#if f.kind === "project"}
+    <label class="wide">Planning project (if it exists)
+      <select bind:value={f.project_id} onchange={onProject}>
+        <option value="">— none: a potential project —</option>
+        {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+      </select>
+    </label>
+    {#if !f.project_id}
+      <label class="check"><input type="checkbox" bind:checked={f.potential} /> Potential (not started)</label>
+    {/if}
+    <label>Effort (person-months) <input type="number" min="0" step="0.5" bind:value={f.effort_pm} /></label>
+    <label>Cost <input type="number" min="0" step="100" bind:value={f.cost} /></label>
+  {/if}
+  {#if f.kind === "person"}
+    <label>Share of time (0–1) <input type="number" min="0" max="1" step="0.05" bind:value={f.fte} /></label>
+  {/if}
+  {#if f.kind === "gap"}
+    <label class="wide">Reading on it
+      <select bind:value={f.reading_id}>
+        <option value="">— none —</option>
+        {#each readings as r (r.id)}<option value={r.id}>{r.title}</option>{/each}
+      </select>
+    </label>
+  {/if}
+  {#if dated}
+    <label>From <input type="date" bind:value={f.start_on} /></label>
+    <label>To <input type="date" bind:value={f.end_on} min={f.start_on || undefined} /></label>
+  {/if}
+
+  {#if n0}
+    <div class="wide links">
+      <h3>Links</h3>
+      {#each mine as l (l.id)}
+        <div class="link-row">
+          {#if l.from_id === n0.id}
+            <span class="muted">this</span>
+            <select value={l.kind} onchange={(ev) => changeKind(l, (ev.target as HTMLSelectElement).value as LinkKind)}>
+              {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
+            </select>
+            <strong>{title(l.to_id)}</strong>
+          {:else}
+            <strong>{title(l.from_id)}</strong>
+            <select value={l.kind} onchange={(ev) => changeKind(l, (ev.target as HTMLSelectElement).value as LinkKind)}>
+              {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
+            </select>
+            <span class="muted">this</span>
+          {/if}
+          <button type="button" class="mini danger" aria-label="Remove link" onclick={() => unlink(l)}>✕</button>
+        </div>
+      {:else}
+        <p class="muted small">No links yet — drag from an item's ○ to another, or add one here.</p>
+      {/each}
+      <div class="link-add">
+        <span class="muted">this</span>
+        <select bind:value={linkKind} aria-label="Link kind">
+          {#each LINK_KINDS as k (k.key)}<option value={k.key}>{k.label}</option>{/each}
+        </select>
+        <select bind:value={linkTo} aria-label="Link to">
+          <option value="">choose an item…</option>
+          {#each LANES as lane (lane.key)}
+            <optgroup label={lane.label}>
+              {#each nodes.filter((x) => x.lane === lane.key && x.id !== n0.id) as x (x.id)}<option value={x.id}>{x.title}</option>{/each}
+            </optgroup>
+          {/each}
+        </select>
+        <button type="button" class="mini" disabled={!linkTo} onclick={addLink}>Link</button>
+      </div>
+    </div>
+  {/if}
+
+  {#if revisions.length}
+    <details class="wide history">
+      <summary class="muted">Earlier wording ({revisions.length})</summary>
+      {#each revisions as r (r.id)}
+        <div class="rev">
+          <span class="muted small">until {fmtDay(r.changed_at.slice(0, 10))}{r.reason ? ` — ${r.reason}` : ""}</span>
+          <p>{r.old_title}{r.old_detail ? ` — ${r.old_detail}` : ""}</p>
+        </div>
+      {/each}
+    </details>
+  {/if}
+
+  {#if error}<p class="error wide">{error}</p>{/if}
+  <div class="actions wide">
+    <button class="primary" type="submit" disabled={busy}>{n0 ? "Save" : "Add"}</button>
+    <button type="button" onclick={oncancel} disabled={busy}>Cancel</button>
+    {#if n0}<button type="button" class="danger push" onclick={remove} disabled={busy}>Delete</button>{/if}
+  </div>
+</form>
+
+<style>
+  .pw-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.65rem 1rem; font-family: var(--font-ui); }
+  label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
+  .wide { grid-column: 1 / -1; }
+  .check { display: flex; align-items: center; gap: 0.45rem; align-self: end; padding-bottom: 0.5rem; color: var(--ink); }
+  .check input { width: auto; }
+  .reason { color: var(--accent); }
+  .links h3 { font-size: 0.9rem; margin: 0 0 0.3rem; }
+  .link-row, .link-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.85rem; padding: 0.15rem 0; }
+  .link-row select, .link-add select { width: auto; font-size: 0.8rem; padding: 0.2rem 0.3rem; }
+  .link-add { margin-top: 0.3rem; }
+  .mini { font-size: 0.75rem; padding: 0.15rem 0.5rem; }
+  .small { font-size: 0.8rem; margin: 0; }
+  .history summary { cursor: pointer; font-size: 0.85rem; }
+  .rev p { margin: 0.1rem 0 0.4rem; font-size: 0.88rem; }
+  .actions { display: flex; gap: 0.5rem; }
+  .danger { color: var(--danger); }
+  .push { margin-left: auto; }
+  @media (max-width: 40rem) { .pw-form { grid-template-columns: 1fr; } }
+</style>

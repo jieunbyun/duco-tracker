@@ -76,6 +76,17 @@
       settings.
     </dd>
 
+    <dt>Pathways</dt>
+    <dd>
+      A map of where your work is heading: lanes for Research, Teaching, Outreach and Supervision, time running
+      from now to a horizon you choose (3–20 years), and long-term goals on the right. Add goals, near-term
+      objectives, projects (linked to a Planning project, or potential — dashed — with person-months and cost),
+      people (with their strengths and share of time) and knowledge gaps (linked to Reading). Drag an item to move
+      it in time or across lanes, drag its right edge to stretch it, drag its ○ onto another item to link them —
+      feeds into, advances, works on, needs to learn — and click it to edit. Rewording a goal keeps its earlier
+      wording and your reason. Everything stays in your own database.
+    </dd>
+
     <dt>Time</dt>
     <dd>
       Where the time went over a period: hours against target per area, and a breakdown you can click into — all

@@ -8,11 +8,12 @@
   import Time from "./views/Time.svelte";
   import CV from "./views/CV.svelte";
   import Reading from "./views/Reading.svelte";
+  import Pathways from "./views/Pathways.svelte";
   import Help from "./views/Help.svelte";
 
-  const views = { week: Week, planning: Planning, time: Time, reading: Reading, cv: CV, help: Help };
+  const views = { week: Week, planning: Planning, pathways: Pathways, time: Time, reading: Reading, cv: CV, help: Help };
   const labels: Record<keyof typeof views, string> = {
-    week: "Week", planning: "Planning", time: "Time", reading: "Reading", cv: "CV", help: "Help",
+    week: "Week", planning: "Planning", pathways: "Pathways", time: "Time", reading: "Reading", cv: "CV", help: "Help",
   };
   type Route = keyof typeof views;
 
