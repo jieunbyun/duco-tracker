@@ -85,7 +85,13 @@
       people (with their strengths and share of time) and knowledge gaps (linked to Reading). Drag an item to move
       it in time or across lanes, drag its right edge to stretch it, drag its ○ onto another item to link them —
       feeds into, advances, works on, needs to learn — and click it to edit. Rewording a goal keeps its earlier
-      wording and your reason. Everything stays in your own database.
+      wording and your reason. An item linked to a Planning project shows that project's name and dates, and
+      moving it on the map moves the project too.
+      <em>Information system</em> (the second view) holds asset cards — algorithms, models, datasets, software,
+      knowledge — each with what it takes in and gives out, an owner and the project that produces it. Assets join
+      up wherever one's output has the same name as another's input; inputs nothing produces show on the left as
+      the system's open ends. People and projects on the map count the assets they contribute. “Copy catalogue”
+      gives the cards as YAML, ready to seed a shared group repository. Everything stays in your own database.
     </dd>
 
     <dt>Time</dt>

@@ -11,6 +11,10 @@
   import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
   import { today, fmtDay } from "../lib/dates";
   import PwEditor from "../lib/PwEditor.svelte";
+  import InfoSystem from "../lib/InfoSystem.svelte";
+  import AssetEditor from "../lib/AssetEditor.svelte";
+  import { loadAssets } from "../lib/assets";
+  import type { Asset } from "../lib/assets";
 
   // ---- data -----------------------------------------------------------------------
   let nodes = $state<PwNode[]>([]);
@@ -18,6 +22,18 @@
   let years = $state(5);
   let projects = $state<Project[]>([]);
   let tax = $state<Taxonomy | null>(null);
+  let assets = $state<Asset[]>([]);
+
+  // two views of the same pathways: the map, and the information system
+  const VIEW_KEY = "pathways.view";
+  function savedView(): "map" | "system" {
+    try { return localStorage.getItem(VIEW_KEY) === "system" ? "system" : "map"; } catch { return "map"; }
+  }
+  let view = $state<"map" | "system">(savedView());
+  function setView(v: "map" | "system") {
+    view = v;
+    try { localStorage.setItem(VIEW_KEY, v); } catch {}
+  }
   let readings = $state<Reading[]>([]);
   let loading = $state(true);
   let error = $state("");
@@ -25,10 +41,12 @@
 
   async function load() {
     try {
-      const [pw, p, r, t] = await Promise.all([
+      const [pw, p, r, t, as] = await Promise.all([
         loadPathways(), loadProjects(), loadReadings().catch(() => [] as Reading[]), loadTaxonomy(),
+        loadAssets().catch(() => [] as Asset[]), // before 0011 is run there are simply none
       ]);
       tax = t;
+      assets = as;
       nodes = pw.nodes;
       links = pw.links;
       years = pw.years;
@@ -234,7 +252,9 @@
   const todayX = $derived(xOf(today()));
 
   // ---- adding and editing ------------------------------------------------------------
-  let panel = $state<{ node: PwNode | null; draft?: Partial<PwNodeFields> } | { importing: true } | null>(null);
+  let panel = $state<{ node: PwNode | null; draft?: Partial<PwNodeFields> } | { importing: true } | { asset: Asset | null } | null>(null);
+  const knownIO = $derived([...new Set(assets.flatMap((a) => [...a.inputs, ...a.outputs]))].sort((a, b) => a.localeCompare(b)));
+  const assetCount = (id: string) => assets.filter((a) => a.status !== "retired" && (a.owner_node_id === id || a.project_node_id === id)).length;
   let dialog = $state<HTMLDialogElement | null>(null);
   $effect(() => {
     if (!dialog) return;
@@ -329,6 +349,8 @@
     if (n.kind !== "goal" && n.start_on) bits.push(`${n.start_on.slice(0, 7)} → ${n.end_on ? n.end_on.slice(0, 7) : "…"}`);
     if (n.effort_pm) bits.push(`${n.effort_pm} pm`);
     if (n.fte) bits.push(`${Math.round(n.fte * 100)}%`);
+    const k = assetCount(n.id);
+    if (k) bits.push(`${k} ${k === 1 ? "asset" : "assets"}`);
     return bits.join(" · ");
   }
 </script>
@@ -337,6 +359,14 @@
   <span class="eyebrow">Pathways</span>
   <h1>Pathways</h1>
 
+  <div class="views" role="tablist" aria-label="Pathways view">
+    <button role="tab" aria-selected={view === "map"} class:on={view === "map"} onclick={() => setView("map")}>Map</button>
+    <button role="tab" aria-selected={view === "system"} class:on={view === "system"} onclick={() => setView("system")}>Information system</button>
+  </div>
+
+  {#if view === "system"}
+    <InfoSystem {assets} {nodes} onadd={() => (panel = { asset: null })} onedit={(a) => (panel = { asset: a })} />
+  {:else}
   <div class="toolbar">
     {#each NODE_KINDS as k (k.key)}
       <button class:primary={k.key === "project"} onclick={() => openNew(k.key)}>+ {k.label}</button>
@@ -418,6 +448,7 @@
   {#if !loading && !nodes.length}
     <p class="muted">Nothing on the map yet. Start with a goal on the right, then add projects and link them towards it.</p>
   {/if}
+  {/if}
 </section>
 
 <dialog bind:this={dialog} onclose={() => (panel = null)}>
@@ -453,7 +484,12 @@
       {/if}
       <button onclick={() => (panel = null)}>Cancel</button>
     </div>
-  {:else if panel}
+  {:else if panel && "asset" in panel}
+    <h2>{panel.asset ? "Edit asset" : "New asset"}</h2>
+    {#key panel}
+      <AssetEditor asset={panel.asset} {nodes} known={knownIO} onsaved={saved} oncancel={() => (panel = null)} />
+    {/key}
+  {:else if panel && "node" in panel}
     <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
     {#key panel}
       <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} onsaved={saved} oncancel={() => (panel = null)} />
@@ -476,6 +512,9 @@
     .pathways { --lane-supervision: #9085e9; --lk-works_on: #9085e9; }
   }
 
+  .views { display: flex; gap: 0.25rem; margin-top: 0.6rem; font-family: var(--font-ui); }
+  .views button { font-size: 0.88rem; padding: 0.35rem 0.85rem; }
+  .views button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
   .toolbar { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.8rem 0 0.4rem; font-family: var(--font-ui); }
   .toolbar button { font-size: 0.85rem; padding: 0.35rem 0.7rem; }
   .spacer { flex: 1; }
