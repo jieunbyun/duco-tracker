@@ -2,16 +2,20 @@
   import type { Session } from "@supabase/supabase-js";
   import { supabase } from "./lib/supabase";
   import { loadTaxonomy } from "./lib/data";
+  import type { Component } from "svelte";
   import Login from "./lib/Login.svelte";
-  import Week from "./views/Week.svelte";
-  import Planning from "./views/Planning.svelte";
-  import Time from "./views/Time.svelte";
-  import CV from "./views/CV.svelte";
-  import Reading from "./views/Reading.svelte";
-  import Pathways from "./views/Pathways.svelte";
-  import Help from "./views/Help.svelte";
 
-  const views = { week: Week, planning: Planning, pathways: Pathways, time: Time, reading: Reading, cv: CV, help: Help };
+  // Each tab's code is fetched when the tab is first opened, so the app starts
+  // with only what the opening tab needs.
+  const views = {
+    week: () => import("./views/Week.svelte"),
+    planning: () => import("./views/Planning.svelte"),
+    pathways: () => import("./views/Pathways.svelte"),
+    time: () => import("./views/Time.svelte"),
+    reading: () => import("./views/Reading.svelte"),
+    cv: () => import("./views/CV.svelte"),
+    help: () => import("./views/Help.svelte"),
+  };
   const labels: Record<keyof typeof views, string> = {
     week: "Week", planning: "Planning", pathways: "Pathways", time: "Time", reading: "Reading", cv: "CV", help: "Help",
   };
@@ -53,7 +57,15 @@
       .catch((e) => (settingsError = e.message));
   });
 
-  const View = $derived(views[route]);
+  let View = $state<Component | null>(null);
+  let viewError = $state("");
+  $effect(() => {
+    const r = route;
+    viewError = "";
+    views[r]()
+      .then((m) => { if (route === r) View = m.default as Component; })
+      .catch((e) => (viewError = `Could not load this tab: ${(e as Error).message}`));
+  });
 </script>
 
 {#if !ready}
@@ -75,7 +87,13 @@
     {:else if !settingsReady}
       <p class="muted">Loading…</p>
     {:else}
-      <View />
+      {#if viewError}
+        <p class="error">{viewError}</p>
+      {:else if View}
+        <View />
+      {:else}
+        <p class="muted">Loading…</p>
+      {/if}
     {/if}
   </main>
 {/if}
