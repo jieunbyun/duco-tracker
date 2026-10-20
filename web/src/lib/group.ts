@@ -29,7 +29,17 @@ export type Entry = {
 export type EntryFields = Pick<Entry, "project_id" | "planning_project_id" | "planning_milestone_id" | "group_milestone_id"
   | "entry_date" | "kind" | "did" | "results" | "next" | "links">;
 /** A Planning project an entry can be about (yours only), with its milestones. */
-export type PlanningRef = { id: string; name: string; milestones: { id: string; title: string }[] };
+export type PlanningRef = { id: string; name: string; milestones: { id: string; title: string; active?: boolean }[]; group?: string };
+/** Planning projects by their area and category ("Research › Supervision"), in the order given. */
+export function planningGroups(planning: PlanningRef[]): { label: string; items: PlanningRef[] }[] {
+  const out: { label: string; items: PlanningRef[] }[] = [];
+  for (const p of planning) {
+    const label = p.group ?? "My projects (Planning)";
+    const g = out.find((x) => x.label === label) ?? (out.push({ label, items: [] }), out[out.length - 1]);
+    g.items.push(p);
+  }
+  return out;
+}
 export type Revision = { id: string; entry_id: string; changed_at: string; old_row: Entry };
 export type Comment = { id: string; entry_id: string; author_id: string; body: string; created_at: string };
 

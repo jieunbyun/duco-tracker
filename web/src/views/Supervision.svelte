@@ -36,7 +36,7 @@
       const [cs, ed] = await Promise.all([loadComments(ids), revisionCounts(ids)]);
       const supCats = new Set(tax.allCategories.filter((c) => c.code === "RES_SUP").map((c) => c.id));
       supervision = planning.filter((x) => supCats.has(x.category_id));
-      planningRefs = planning.map((x) => ({ id: x.id, name: x.name, milestones: x.milestone.map((m) => ({ id: m.id, title: m.title })) }));
+      planningRefs = planning.map((x) => ({ id: x.id, name: x.name, milestones: x.milestone.map((m) => ({ id: m.id, title: m.title, active: m.status === "active" })) }));
       // names follow Planning: rename a member there and it shows here (and to them)
       const renames = m.filter((x) => {
         const pp = x.planning_project_id ? planning.find((y) => y.id === x.planning_project_id) : null;

@@ -4,9 +4,10 @@
   // supervisor's own is for the projects they lead.
   import {
     loadMembers, loadGroupProjects, loadEntries, loadComments, revisionCounts, logbookMarkdown, download, myId, loadMilestones,
+    planningGroups,
   } from "../lib/group";
   import type { Member, GroupProject, GroupMilestone, Entry, Comment, PlanningRef } from "../lib/group";
-  import { loadProjects } from "../lib/data";
+  import { loadProjects, loadTaxonomy } from "../lib/data";
   import { LIVE_STATUSES } from "../lib/plan";
   import Logbook from "../lib/Logbook.svelte";
   import { preview } from "../lib/preview.svelte";
@@ -34,9 +35,18 @@
       // your own Planning projects can have logbook notes too (only the planner's owner has any)
       if (!preview.as && m.find((x) => x.user_id === id)?.role === "supervisor") {
         const used = new Set(es.map((e) => e.planning_project_id).filter(Boolean));
-        planning = (await loadProjects())
+        const [all, tax] = await Promise.all([loadProjects(), loadTaxonomy()]);
+        // listed by area and category, in Planning's order, so a project is easy to find
+        const cat = new Map(tax.allCategories.map((c) => [c.id, c]));
+        const area = new Map(tax.areas.map((a) => [a.id, a]));
+        const where = (x: { category_id: string }) => {
+          const c = cat.get(x.category_id), a = c ? area.get(c.area_id) : undefined;
+          return { label: `${a?.label ?? "Other"} › ${c?.label ?? "—"}`, order: [a?.sort_order ?? 999, c?.sort_order ?? 999] };
+        };
+        planning = all
           .filter((x) => LIVE_STATUSES.has(x.status) || used.has(x.id))
-          .map((x) => ({ id: x.id, name: x.name, milestones: x.milestone.map((m) => ({ id: m.id, title: m.title })) }));
+          .sort((x, y) => where(x).order[0] - where(y).order[0] || where(x).order[1] - where(y).order[1] || x.name.localeCompare(y.name))
+          .map((x) => ({ id: x.id, name: x.name, group: where(x).label, milestones: x.milestone.map((m) => ({ id: m.id, title: m.title, active: m.status === "active" })) }));
       }
       error = "";
     } catch (e) {
@@ -78,7 +88,7 @@
           <option value="">all projects</option>
           {#if planning.length && ordered.length}<optgroup label="Shared projects">{#each ordered as p (p.id)}<option value={`g:${p.id}`}>{p.title}</option>{/each}</optgroup>
           {:else}{#each ordered as p (p.id)}<option value={`g:${p.id}`}>{p.title}</option>{/each}{/if}
-          {#if planning.length}<optgroup label="My projects (Planning)">{#each planning as p (p.id)}<option value={`p:${p.id}`}>{p.name}</option>{/each}</optgroup>{/if}
+          {#each planningGroups(planning) as g (g.label)}<optgroup label={g.label}>{#each g.items as p (p.id)}<option value={`p:${p.id}`}>{p.name}</option>{/each}</optgroup>{/each}
         </select>
       </label>
       <span class="spacer"></span>

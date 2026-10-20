@@ -3,6 +3,7 @@
     FIELDS, saveEntry, deleteEntry, deletable, loadRevisions, addComment, deleteComment, parseLinks, linkName,
   } from "./group";
   import type { Entry, EntryKind, GroupProject, GroupMilestone, Member, Comment, Revision, PlanningRef } from "./group";
+  import { planningGroups } from "./group";
   import { today, fmtDay } from "./dates";
 
   type Props = {
@@ -25,11 +26,14 @@
   const milestoneOf = (e: Entry) => e.planning_milestone_id
     ? planning.flatMap((p) => p.milestones).find((m) => m.id === e.planning_milestone_id)?.title
     : e.group_milestone_id ? groupMilestones.find((m) => m.id === e.group_milestone_id)?.title : undefined;
-  /** The chosen project's existing milestones, to pick one from. */
-  const milestonesFor = (pick: string): { id: string; title: string }[] =>
+  /** The chosen project's milestones: its active ones (and the one already chosen), or all when asked. */
+  let allMilestones = $state(false);
+  const milestonesOf = (pick: string): { id: string; title: string; active?: boolean }[] =>
     pick.startsWith("p:") ? planning.find((p) => p.id === pick.slice(2))?.milestones ?? []
-    : pick.startsWith("g:") ? groupMilestones.filter((m) => m.project_id === pick.slice(2)).map((m) => ({ id: m.id, title: m.title }))
+    : pick.startsWith("g:") ? groupMilestones.filter((m) => m.project_id === pick.slice(2)).map((m) => ({ id: m.id, title: m.title, active: !m.done }))
     : [];
+  const milestonesFor = (pick: string, chosen: string) =>
+    milestonesOf(pick).filter((m) => allMilestones || m.active !== false || m.id === chosen);
   // the Project menu holds both kinds: "g:<id>" a shared project, "p:<id>" a Planning one
   const pick = (e: Pick<Entry, "project_id" | "planning_project_id">) =>
     e.planning_project_id ? `p:${e.planning_project_id}` : e.project_id ? `g:${e.project_id}` : "";
@@ -122,19 +126,24 @@
             {#if projects.length}
               <optgroup label="Shared projects">{#each projects as p (p.id)}<option value={`g:${p.id}`}>{p.title}</option>{/each}</optgroup>
             {/if}
-            <optgroup label="My projects (Planning)">{#each planning as p (p.id)}<option value={`p:${p.id}`}>{p.name}</option>{/each}</optgroup>
+            {#each planningGroups(planning) as g (g.label)}
+              <optgroup label={g.label}>{#each g.items as p (p.id)}<option value={`p:${p.id}`}>{p.name}</option>{/each}</optgroup>
+            {/each}
           {:else}
             {#each projects as p (p.id)}<option value={`g:${p.id}`}>{p.title}</option>{/each}
           {/if}
         </select>
       </label>
-      {#if milestonesFor(draft.project_id).length}
+      {#if milestonesOf(draft.project_id).length}
         <label class="small grow">Milestone
           <select bind:value={draft.milestone}>
             <option value="">—</option>
-            {#each milestonesFor(draft.project_id) as m (m.id)}<option value={m.id}>{m.title}</option>{/each}
+            {#each milestonesFor(draft.project_id, draft.milestone) as m (m.id)}<option value={m.id}>{m.title}{m.active === false ? " (not active)" : ""}</option>{/each}
           </select>
         </label>
+        {#if milestonesOf(draft.project_id).some((m) => m.active === false)}
+          <label class="small check"><input type="checkbox" bind:checked={allMilestones} /> show all milestones</label>
+        {/if}
       {/if}
     </div>
     <label>{FIELDS[draft.kind].did} <textarea rows="3" bind:value={draft.did}></textarea></label>
@@ -229,6 +238,8 @@
   .lb-row input, .lb-row select { width: auto; }
   .grow { flex: 1; min-width: 12rem; }
   .grow select { width: 100%; }
+  .lb-row .check { display: inline-flex; gap: 0.3rem; align-items: center; align-self: center; }
+  .lb-row .check input { width: auto; }
   .seg { display: inline-flex; }
   .seg button { font-size: 0.82rem; padding: 0.35rem 0.7rem; border-radius: 0; }
   .seg button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
