@@ -76,7 +76,19 @@
       return { area: a, actual, target, email, emailTarget };
     });
   });
-  const planMax = $derived(Math.max(1, ...plan.map((p) => Math.max(p.actual, p.target))));
+  // Teaching and Admin also shown together: a combined row of the two, stacked.
+  const COMBINED = ["TEA", "ADM"];
+  const combo = $derived.by(() => {
+    const parts = COMBINED.map((code) => plan.find((p) => p.area.code === code)).filter((p) => !!p);
+    if (parts.length < 2) return null;
+    return {
+      parts,
+      label: parts.map((p) => p!.area.label).join(" + "),
+      actual: parts.reduce((s, p) => s + p!.actual, 0),
+      target: parts.reduce((s, p) => s + p!.target, 0),
+    };
+  });
+  const planMax = $derived(Math.max(1, ...plan.map((p) => Math.max(p.actual, p.target)), combo?.actual ?? 0, combo?.target ?? 0));
 
   const totals = $derived.by(() => {
     const logged = entries.reduce((s, e) => s + e.hours, 0);
@@ -233,6 +245,26 @@
           {/if}
         </div>
       {/each}
+      {#if combo}
+        <div class="plan-row combo" title={`${combo.label}: ${fmtHours(combo.actual)} logged, target ${fmtHours(combo.target)}`}>
+          <span class="name"><em>{combo.label}</em> <small class="tag">combined</small></span>
+          <div class="track thin" aria-hidden="true">
+            <div class="stack">
+              {#each combo.parts as part (part!.area.id)}
+                <span class="seg" style:width={`${(100 * part!.actual) / planMax}%`} style:background={areaColor(part!.area.id)}></span>
+              {/each}
+            </div>
+            {#if combo.target > 0}<div class="tick" style:left={`${(100 * combo.target) / planMax}%`}></div>{/if}
+          </div>
+          <span class="value">
+            <strong>{fmtHours(combo.actual)}</strong> of {fmtHours(combo.target)}
+            <span class="muted">· {pct(combo.actual, combo.target)}</span>
+          </span>
+          <span class="email muted">
+            {combo.parts.map((part) => `${part!.area.label} ${fmtHours(part!.actual)}`).join(" + ")}
+          </span>
+        </div>
+      {/if}
     </div>
 
     <!-- Composition -->
@@ -313,6 +345,15 @@
   .bar { position: absolute; inset: 0 auto 0 0; display: block; border-radius: 0 4px 4px 0; min-width: 2px; }
 
   .plan { display: grid; gap: 0.9rem; font-family: var(--font-ui); font-size: 0.92rem; }
+  /* the combined row: set apart, thinner, stacked from its areas' own colours */
+  .plan-row.combo { border-top: 1px dashed var(--rule); padding-top: 0.8rem; }
+  .plan-row.combo .name { font-weight: 400; }
+  .plan-row.combo .tag { font-size: 0.68rem; color: var(--ink-soft); border: 1px solid var(--rule); border-radius: 999px; padding: 0 0.35rem; font-style: normal; }
+  .track.thin { height: 6px; }
+  .track.thin .tick { top: -5px; bottom: -5px; }
+  .stack { position: absolute; inset: 0; display: flex; gap: 2px; }
+  .stack .seg { display: block; height: 100%; min-width: 0; }
+  .stack .seg:last-child { border-radius: 0 4px 4px 0; }
   .plan-row {
     display: grid;
     grid-template-columns: 7rem 1fr 11rem;
