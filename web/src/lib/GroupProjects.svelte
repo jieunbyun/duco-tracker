@@ -14,9 +14,10 @@
     entries: Entry[]; // to show how lively each project is
     supervisor: boolean; // creates projects, assigns people
     newFor?: string | null; // when set, "+ Project" puts this person on the new project
+    readonly?: boolean; // previewing what a member sees
     onchanged: () => Promise<void>;
   };
-  let { projects, milestones, members, entries, supervisor, newFor = null, onchanged }: Props = $props();
+  let { projects, milestones, members, entries, supervisor, newFor = null, readonly = false, onchanged }: Props = $props();
 
   let error = $state("");
   const act = async (f: () => Promise<unknown>) => {
@@ -117,7 +118,7 @@
           · {recent(p)} {recent(p) === 1 ? "entry" : "entries"} this week{lastEntry(p) ? ` · last ${lastEntry(p)}` : ""}
         </span>
         <span class="spacer"></span>
-        <button class="mini" onclick={() => edit(p)}>Edit</button>
+        {#if !readonly}<button class="mini" onclick={() => edit(p)}>Edit</button>{/if}
         {#if supervisor}
           <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”? Its logbook entries stay, without a project.`) && act(() => deleteGroupProject(p.id))}>Delete</button>
         {/if}
@@ -144,14 +145,14 @@
     <ul class="ms">
       {#each ms as m (m.id)}
         <li class:done={m.done}>
-          <label><input type="checkbox" checked={m.done} onchange={() => tick(m)} /> {m.title}</label>
+          <label><input type="checkbox" checked={m.done} disabled={readonly} onchange={() => tick(m)} /> {m.title}</label>
           {#if m.due_on}<span class="muted small">by {fmtMonth(m.due_on)}</span>{/if}
           {#if m.done && m.done_on}<span class="muted small">· done {m.done_on}</span>{/if}
-          <button class="x" aria-label="Delete milestone" onclick={() => confirm(`Delete the milestone “${m.title}”?`) && act(() => deleteMilestone(m.id))}>✕</button>
+          <button class="x" aria-label="Delete milestone" hidden={readonly} onclick={() => confirm(`Delete the milestone “${m.title}”?`) && act(() => deleteMilestone(m.id))}>✕</button>
         </li>
       {/each}
     </ul>
-    <form class="ms-add" onsubmit={(ev) => { ev.preventDefault(); addMs(p); }}>
+    <form class="ms-add" hidden={readonly} onsubmit={(ev) => { ev.preventDefault(); addMs(p); }}>
       <input bind:value={msText[p.id]} placeholder="New milestone…" aria-label="New milestone" />
       <input type="month" bind:value={msDue[p.id]} aria-label="Due by" title="Due by (optional)" />
       <button class="mini" type="submit" disabled={!(msText[p.id] ?? "").trim()}>Add</button>

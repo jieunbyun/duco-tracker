@@ -2,27 +2,6 @@
   import { loadTaxonomy } from "../lib/data";
   import type { Taxonomy } from "../lib/data";
   import { PACE_DAYS } from "../lib/horizon";
-  import { exportEverything, rowCount } from "../lib/backup";
-  import { download } from "../lib/group";
-
-  // ---- your data: everything, as one file for OneDrive ------------------------------
-  let exporting = $state<string | null>(null);
-  let exported = $state("");
-  async function exportAll() {
-    exporting = "Reading…";
-    exported = "";
-    try {
-      const b = await exportEverything((done, total) => (exporting = `Reading ${done} of ${total} tables…`));
-      const day = b.exported_at.slice(0, 10);
-      download(`duco-backup-${day}.json`, JSON.stringify(b, null, 1));
-      exported = `Saved ${rowCount(b).toLocaleString()} records from ${Object.keys(b.tables).length} tables` +
-        (b.missing.length ? ` (not yet set up: ${b.missing.join(", ")})` : "") + ". Put the file in OneDrive › Me › Backups.";
-    } catch (e) {
-      exported = `Could not export: ${(e as Error).message}`;
-    } finally {
-      exporting = null;
-    }
-  }
 
   let tax = $state<Taxonomy | null>(null);
   loadTaxonomy().then((t) => (tax = t)).catch(() => {});
@@ -33,16 +12,7 @@
   <span class="eyebrow">Help</span>
   <h1>How the tracker works</h1>
 
-  <div class="data">
-    <h2>Your data</h2>
-    <p>
-      Files live on OneDrive; the app keeps the links — each project and Pathways item can point to its OneDrive
-      folder (📁), a reading to its PDF, a logbook entry to its files. For a copy of everything in the app itself,
-      export it now and then (monthly, say) and keep the file in OneDrive › Me › Backups.
-    </p>
-    <button class="primary" onclick={exportAll} disabled={!!exporting}>{exporting ?? "Export everything (JSON)"}</button>
-    {#if exported}<p class="muted small">{exported}</p>{/if}
-  </div>
+  <p class="muted">Your data: <em>Planning › Your data</em> exports everything in the app as one file for OneDrive.</p>
 
   <p class="lede">
     Time is organised the way the yearly allocation is:
@@ -164,7 +134,7 @@
       the institution's OneDrive — or an optional weekly update. You read every entry and comment; they reply. Only
       they write their entries: they can edit any (every earlier version stays in its history) and delete one only
       on the day it was written. <em>Export logbook</em> saves it as a Markdown file, to keep on OneDrive or take
-      along when they leave. <em>Take out of the group</em> ends their access but keeps their logbook. On the
+      along when they leave. <em>Take out of the group</em> ends their access but keeps their logbook. <em>See what they see</em> shows their tabs exactly as they see them, read-only, until you go back to your view. On the
       Pathways map, a project can stand for a member's project, and then shows its logbook entries this week.
     </dd>
 
@@ -258,9 +228,6 @@
   .help { max-width: 46rem; }
   .lede { font-size: 1.02rem; }
   .help h2 { margin-top: 2rem; }
-  .data { border: 1px solid var(--rule); border-radius: var(--radius); background: var(--panel); padding: 0.2rem 1rem 0.9rem; margin: 1rem 0; }
-  .data h2 { margin-top: 0.6rem; }
-  .small { font-size: 0.85rem; }
   dl { margin: 0; }
   dt { font-weight: 600; margin-top: 1rem; }
   dd { margin: 0.2rem 0 0; color: var(--ink); white-space: pre-line; }

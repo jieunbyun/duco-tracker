@@ -7,6 +7,7 @@
   } from "../lib/group";
   import type { Member, GroupProject, Entry, Comment } from "../lib/group";
   import Logbook from "../lib/Logbook.svelte";
+  import { preview } from "../lib/preview.svelte";
 
   let me = $state("");
   let members = $state<Member[]>([]);
@@ -20,7 +21,7 @@
 
   async function load() {
     try {
-      const id = await myId();
+      const id = preview.as?.user_id ?? (await myId()); // previewing: their logbook
       const [m, p, es] = await Promise.all([loadMembers(), loadGroupProjects(), loadEntries(id)]);
       const ids = es.map((e) => e.id);
       const [cs, ed] = await Promise.all([loadComments(ids), revisionCounts(ids)]);
@@ -65,7 +66,7 @@
       <span class="spacer"></span>
       <button class="mini" onclick={exportMine} disabled={!entries.length} title="As a Markdown file, to keep on OneDrive">Export my logbook</button>
     </div>
-    <Logbook entries={shown} projects={ordered} {members} {comments} {edits} {me} canWrite onchanged={load} />
+    <Logbook entries={shown} projects={ordered} {members} {comments} {edits} {me} canWrite={!preview.as} onchanged={load} />
   {/if}
 </section>
 

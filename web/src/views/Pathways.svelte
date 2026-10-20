@@ -15,6 +15,7 @@
   import PwList from "../lib/PwList.svelte";
   import { loadOutputs } from "../lib/assets";
   import FolderLink from "../lib/FolderLink.svelte";
+  import { preview } from "../lib/preview.svelte";
   import type { Output, OutputLink } from "../lib/assets";
   import { loadGroupProjects, loadEntries, loadMembers, myId } from "../lib/group";
   import type { GroupProject, Entry, Member } from "../lib/group";
@@ -60,10 +61,11 @@
   async function load() {
     if (member) {
       try {
-        const [mm, out, gm, id] = await Promise.all([loadMemberMap(), loadOutputs(), loadMembers().catch(() => [] as Member[]), myId()]);
+        const as = preview.as?.user_id;
+        const [mm, out, gm, id] = await Promise.all([loadMemberMap(as), loadOutputs(), loadMembers().catch(() => [] as Member[]), myId()]);
         ({ nodes, links } = mm);
         ({ outputs, links: outputLinks, titles: outputTitles } = out);
-        [groupMembers, me] = [gm, id];
+        [groupMembers, me] = [gm, as ?? id];
         error = "";
       } catch (e) {
         error = (e as Error).message;
@@ -520,7 +522,7 @@
   </div>
 
   {#if view === "system"}
-    <OutputsMap {outputs} links={outputLinks} titles={outputTitles} members={groupMembers} {me} supervisor={!member}
+    <OutputsMap {outputs} links={outputLinks} titles={outputTitles} members={groupMembers} {me} supervisor={!member} readonly={!!preview.as}
                 publications={publicationOptions} onchanged={load} />
   {:else}
   <div class="toolbar">

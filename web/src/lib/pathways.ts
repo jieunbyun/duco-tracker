@@ -90,8 +90,11 @@ export async function setContributors(nodeId: string, want: string[], had: strin
   if (drop.length) await check(supabase.from("pw_contributor").delete().eq("node_id", nodeId).in("user_id", drop));
 }
 /** A member's chart: the items they contribute to and the goals those lead to — titles, dates and stages only. */
-export async function loadMemberMap(): Promise<{ nodes: PwNode[]; links: PwLink[] }> {
-  const [n, l] = await Promise.all([supabase.rpc("member_map"), supabase.rpc("member_map_links")]);
+export async function loadMemberMap(as?: string): Promise<{ nodes: PwNode[]; links: PwLink[] }> {
+  // as: a member whose chart the supervisor is looking at ("See what they see")
+  const [n, l] = await Promise.all(as
+    ? [supabase.rpc("member_map_for", { p: as }), supabase.rpc("member_map_links_for", { p: as })]
+    : [supabase.rpc("member_map"), supabase.rpc("member_map_links")]);
   for (const r of [n, l]) if (r.error) throw new Error(r.error.message);
   const nodes = ((n.data ?? []) as Pick<PwNode, "id" | "kind" | "lane" | "title" | "start_on" | "end_on" | "status" | "grant_stage" | "lane_row">[])
     .map((x) => ({

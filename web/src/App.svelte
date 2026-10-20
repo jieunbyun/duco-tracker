@@ -8,6 +8,7 @@
   import Login from "./lib/Login.svelte";
   import SetPassword from "./lib/SetPassword.svelte";
   import { undo, undoLast } from "./lib/undo.svelte";
+  import { preview } from "./lib/preview.svelte";
 
   // Each tab's code is fetched when the tab is first opened, so the app starts
   // with only what the opening tab needs.
@@ -33,8 +34,8 @@
   // Who sees which tabs: the planner is yours alone; a member sees only their
   // logbook, projects and Pathways chart. You keep a logbook too, for the
   // projects you lead.
-  const OWNER: Route[] = ["week", "planning", "pathways", "time", "reading", "cv", "help"];
-  const SUPERVISOR: Route[] = ["week", "planning", "pathways", "supervision", "logbook", "time", "reading", "cv", "help"];
+  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv"];
+  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "supervision", "logbook"];
   const MEMBER: Route[] = ["logbook", "projects", "chart"];
 
   let session = $state<Session | null>(null);
@@ -42,14 +43,18 @@
   let role = $state<Role | "none" | null | undefined>(undefined); // undefined: not known yet; null: the planner's owner, no group
   let needsPassword = $state(arrival === "invite" || arrival === "recovery");
   const member = $derived(role === "member");
-  const tabs = $derived(member ? MEMBER : role === "supervisor" ? SUPERVISOR : OWNER);
+  // while you preview a member ("See what they see"), their tabs
+  const tabs = $derived(member || preview.as ? MEMBER : role === "supervisor" ? SUPERVISOR : OWNER);
 
   // Hash routing (#/week): no server rewrites needed, and the browser's
   // back button moves between views. Anything else (including the old #/log)
   // opens the first tab.
   const fromHash = () => location.hash.replace(/^#\/?/, "");
   let hash = $state(fromHash());
-  const route = $derived<Route>(tabs.includes(hash as Route) ? (hash as Route) : tabs[0]);
+  // Help is not a tab; it opens from the ? in the header
+  const route = $derived<Route>(
+    tabs.includes(hash as Route) || (hash === "help" && !member && !preview.as) ? (hash as Route) : tabs[0],
+  );
 
   $effect(() => {
     const onHash = () => (hash = fromHash());
@@ -125,12 +130,19 @@
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
   </main>
 {:else}
+  {#if preview.as}
+    <div class="previewing" role="status">
+      <span>Seeing what <strong>{preview.as.display_name}</strong> sees · read-only</span>
+      <button onclick={() => { preview.as = null; location.hash = "#/supervision"; }}>Back to your view</button>
+    </div>
+  {/if}
   <header>
     <nav>
       {#each tabs as key (key)}
         <a href={`#/${key}`} class:active={route === key}>{labels[key]}</a>
       {/each}
     </nav>
+    {#if !member && !preview.as}<a class="help" href="#/help" class:active={route === "help"} title="How the tracker works">?</a>{/if}
     <button class="undo" onclick={undoLast} disabled={!lastAction}
             title={lastAction ? `Undo: ${lastAction.label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
@@ -193,6 +205,16 @@
     font-weight: 600;
   }
   .undo { white-space: nowrap; }
+  .help {
+    display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; border: 1px solid var(--rule);
+    color: var(--ink-soft); text-decoration: none; font-family: var(--font-ui); font-weight: 600;
+  }
+  .help.active, .help:hover { color: var(--ink); border-color: var(--ink-soft); }
+  .previewing {
+    display: flex; flex-wrap: wrap; gap: 0.8rem; align-items: center; justify-content: center; padding: 0.45rem 16px;
+    background: var(--accent); color: var(--accent-ink); font-family: var(--font-ui); font-size: 0.88rem;
+  }
+  .previewing button { font-size: 0.8rem; padding: 0.2rem 0.7rem; }
   .undo-toast {
     position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 30;
     display: flex; gap: 0.7rem; align-items: center; max-width: calc(100vw - 32px);

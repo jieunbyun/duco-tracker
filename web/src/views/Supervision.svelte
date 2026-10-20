@@ -13,6 +13,7 @@
   import { quietly } from "../lib/undo.svelte";
   import Logbook from "../lib/Logbook.svelte";
   import GroupProjects from "../lib/GroupProjects.svelte";
+  import { preview } from "../lib/preview.svelte";
 
   let me = $state("");
   let members = $state<Member[]>([]);
@@ -186,6 +187,10 @@
             <span class="muted small" title="Their name comes from their project under Research › Supervision in Planning; rename it there.">name from Planning</span>
           {:else}
             <button class="mini" onclick={() => rename(current)}>Rename</button>
+          {/if}
+          {#if !isMe && current.active}
+            <button class="mini" onclick={() => { preview.as = current; location.hash = "#/logbook"; }}
+                    title="Their Logbook, Projects and Pathways, exactly as they see them (read-only)">See what they see</button>
           {/if}
           <button class="mini" onclick={() => exportOne(current)} disabled={!theirEntries.length}>Export logbook</button>
           {#if !isMe}

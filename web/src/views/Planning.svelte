@@ -1,5 +1,6 @@
 <script lang="ts">
   import FolderLink from "../lib/FolderLink.svelte";
+  import ExportData from "../lib/ExportData.svelte";
   import { undoable, undoLast } from "../lib/undo.svelte";
   import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus } from "../lib/data";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
@@ -401,6 +402,8 @@
       </table>
     </div>
   {/if}
+
+  <ExportData />
 </section>
 
 {#if flash}

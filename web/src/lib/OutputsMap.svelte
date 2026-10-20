@@ -16,11 +16,12 @@
     me: string;
     supervisor: boolean;
     publications: { id: string; title: string }[]; // what can be linked as a publication
+    readonly?: boolean; // previewing what a member sees
     onchanged: () => Promise<void>;
   };
-  let { outputs, links, titles, members, me, supervisor, publications, onchanged }: Props = $props();
+  let { outputs, links, titles, members, me, supervisor, publications, readonly = false, onchanged }: Props = $props();
 
-  const canEdit = (o: Output) => supervisor || o.user_id === me || o.contributors.includes(me);
+  const canEdit = (o: Output) => !readonly && (supervisor || o.user_id === me || o.contributors.includes(me));
   const nameOf = (uid: string) => members.find((m) => m.user_id === uid)?.display_name ?? "—";
   let error = $state("");
   let showRetired = $state(false);
@@ -153,7 +154,7 @@
 
 <div class="om">
   <div class="om-bar">
-    <button class="primary" onclick={() => (panel = { output: null })}>+ Output</button>
+    {#if !readonly}<button class="primary" onclick={() => (panel = { output: null })}>+ Output</button>{/if}
     <label class="small">Contributor
       <select bind:value={who}>
         <option value="">everyone</option>
@@ -172,7 +173,7 @@
       {#each layout.bands as band, i (band.key)}
         <div class="band" class:alt={i % 2 === 1} style:top={`${band.top}px`} style:height={`${band.height}px`}>
           <span class="band-label">{band.label}</span>
-          <button class="band-add" title={`Add to ${band.label}`} onclick={() => (panel = { output: null, category: band.key })}>+</button>
+          {#if !readonly}<button class="band-add" title={`Add to ${band.label}`} onclick={() => (panel = { output: null, category: band.key })}>+</button>{/if}
         </div>
       {/each}
       {#each ticks as t (t.x)}
