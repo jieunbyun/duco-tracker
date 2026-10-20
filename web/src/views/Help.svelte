@@ -86,7 +86,8 @@
 
     <dt>Pathways</dt>
     <dd>
-      A map of where your work is heading: lanes for Research, Teaching, Outreach, Supervision & collaboration, and Grant writing, time running
+      A map of where your work is heading: lanes for Research, Projects (the smaller projects — yours, your students', your collaborators' — that
+      feed into an objective or a goal), Teaching, Outreach and Grant writing, time running
       from now to a horizon you choose (3–20 years), and long-term goals on the right. Add goals, near-term
       objectives, projects (linked to a Planning project — + From Planning brings several at once, each into its
       area's lane with its dates — or potential, dashed, with person-months and cost),
@@ -96,6 +97,8 @@
       in its lane over that span — drag it back to the column to clear them. Rewording a goal keeps its earlier
       wording and your reason. An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
+      Mark a project <em>hands-on</em> (✋, in its editor or on its row in the List) when your own research time
+      goes into it substantially; it stands out on the map, bolder and shaded.
       Dates on Pathways are months: an item runs from the start of its first month to the end of its last
       (a linked Planning project keeps its exact days, but shows months here too).
       The <em>Grant writing</em> lane holds grant applications: writing period up to the deadline, stage

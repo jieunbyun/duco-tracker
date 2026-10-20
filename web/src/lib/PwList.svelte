@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LANES, NODE_KINDS, fromMonth, saveLink, deleteLink } from "./pathways";
+  import { LANES, NODE_KINDS, fromMonth, saveLink, deleteLink, saveNode } from "./pathways";
   import type { PwNode, PwLink, NodeKind, Lane } from "./pathways";
 
   type Props = {
@@ -148,7 +148,14 @@
       <div class="row" class:inactive={n.status !== "active"}>
         <span class="icon kind-{n.kind}" title={kindLabel(n.kind)}>{ICON[n.kind] ?? "·"}</span>
         <div class="main">
-          <button class="name" onclick={() => onedit(n)}>{n.title}</button>
+          <span class="head">
+            <button class="name" onclick={() => onedit(n)}>{n.title}</button>
+            {#if n.kind === "project"}
+              <button class="hands" class:on={n.hands_on} aria-pressed={n.hands_on}
+                      title={n.hands_on ? "Hands-on: your own research time goes into it — click to unmark" : "Mark as hands-on: your own research time goes into it"}
+                      onclick={() => act(async () => { await saveNode(n.id, { hands_on: !n.hands_on }); })}>✋ hands-on</button>
+            {/if}
+          </span>
           <span class="sub muted">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
           <div class="chips">
             {#each out as l (l.id)}
@@ -198,7 +205,7 @@
   .grp { margin: 0 0 1rem; font-family: var(--font-ui); border-left: 4px solid var(--lane-research); padding-left: 0.7rem; }
   .grp.lane-teaching { border-left-color: var(--lane-teaching); }
   .grp.lane-outreach { border-left-color: var(--lane-outreach); }
-  .grp.lane-supervision { border-left-color: var(--lane-supervision); }
+  .grp.lane-projects { border-left-color: var(--lane-projects); }
   .grp.lane-grants { border-left-color: var(--lane-grants); }
   .grp h2 { font-size: 1rem; margin: 0 0 0.3rem; }
   .grp h2 .muted { font-size: 0.8rem; font-weight: 400; }
@@ -221,6 +228,13 @@
   .main { display: grid; gap: 0.15rem; min-width: 0; flex: 1; }
   .name { background: none; border: none; padding: 0; text-align: left; font-size: 0.92rem; font-weight: 600; color: var(--ink); cursor: pointer; }
   .name:hover { text-decoration: underline; }
+  .head { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+  .hands {
+    font-size: 0.7rem; padding: 0.05rem 0.45rem; border-radius: 999px; color: var(--ink-soft);
+    background: transparent; border: 1px dashed var(--rule); opacity: 0.75;
+  }
+  .hands:hover { opacity: 1; }
+  .hands.on { opacity: 1; color: var(--accent-ink); background: var(--accent); border: 1px solid var(--accent); font-weight: 600; }
   .sub { font-size: 0.75rem; }
   .chips { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
   .chip {

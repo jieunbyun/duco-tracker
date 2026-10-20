@@ -39,6 +39,7 @@
     cost: n0?.cost ?? (null as number | null),
     fte: n0?.fte ?? (null as number | null),
     grant_stage: (n0?.grant_stage ?? d0.grant_stage ?? "drafting") as GrantStage,
+    hands_on: n0?.hands_on ?? false,
   });
   // projects and grants can each be a Planning project (a grant: one under Proposals)
   const plannable = $derived(f.kind === "project" || f.kind === "grant");
@@ -100,6 +101,7 @@
         cost: plannable ? n(f.cost) : null,
         fte: f.kind === "person" ? n(f.fte) : null,
         grant_stage: f.kind === "grant" ? f.grant_stage : null,
+        hands_on: f.kind === "project" ? f.hands_on : false,
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
@@ -181,6 +183,7 @@
         {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
       </select>
     </label>
+    <label class="check wide"><input type="checkbox" bind:checked={f.hands_on} /> Hands-on — my own research time goes into it substantially</label>
     {#if !f.project_id}
       <label class="check"><input type="checkbox" bind:checked={f.potential} /> Potential (not started)</label>
     {/if}

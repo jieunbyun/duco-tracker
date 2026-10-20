@@ -379,8 +379,8 @@
   }
 
   // ---- bring existing Planning projects onto the map ------------------------------------
-  // Each lands in its area's lane (student projects under Supervision go to the
-  // Supervision & collaboration lane), keeps the project's dates, and stays linked to it.
+  // Each lands in its area's lane (research projects, students' included, go to
+  // the Projects lane), keeps the project's dates, and stays linked to it.
   type ImportRow = { p: Project; group: string; lane: Lane; kind: "project" | "grant"; already: boolean; pick: boolean };
   let importRows = $state<ImportRow[]>([]);
   let importing = $state(false);
@@ -390,10 +390,9 @@
     const a = tax?.areas.find((x) => x.id === c?.area_id);
     const group = `${a?.label ?? "Other"} › ${c?.label ?? "—"}`;
     if (c?.code === "RES_PROP") return { lane: "grants", kind: "grant", group };
-    if (c?.code === "RES_SUP") return { lane: "supervision", kind: "project", group };
     if (a?.code === "TEA") return { lane: "teaching", kind: "project", group };
     if (a?.code === "OUT") return { lane: "outreach", kind: "project", group };
-    return { lane: "research", kind: "project", group };
+    return { lane: "projects", kind: "project", group };
   }
   function openImport() {
     const onMap = new Set(nodes.map((n) => n.project_id).filter(Boolean));
@@ -447,6 +446,7 @@
   }
   function sub(n: PwNode): string {
     const bits: string[] = [n.potential ? "potential project" : n.kind === "grant" ? `grant · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
+    if (n.kind === "project" && n.hands_on) bits.unshift("hands-on");
     if (n.kind === "grant" && n.end_on) bits.push(`deadline ${fmtMonth(n.end_on)}`);
     else if (n.start_on) bits.push(`${fmtMonth(n.start_on)} → ${n.end_on ? fmtMonth(n.end_on) : "…"}`);
     else if (n.end_on) bits.push(`by ${fmtMonth(n.end_on)}`);
@@ -536,13 +536,13 @@
       <!-- items -->
       {#each drawn as n (n.id)}
         {@const b = boxes.get(n.id)!}
-        <div class="node kind-{n.kind} lane-{n.lane} {n.kind === "grant" ? `gs-${n.grant_stage ?? "drafting"}` : ""}" class:potential={n.potential} class:open-end={b.open}
+        <div class="node kind-{n.kind} lane-{n.lane} {n.kind === "grant" ? `gs-${n.grant_stage ?? "drafting"}` : ""}" class:potential={n.potential} class:hands-on={n.kind === "project" && n.hands_on} class:open-end={b.open}
              class:inactive={n.status !== "active"} class:moving={drag?.id === n.id}
              data-node={n.id} role="button" tabindex="0" title={`${n.title}${n.detail ? `\n${n.detail}` : ""}`}
              style:left={`${b.x}px`} style:top={`${b.y}px`} style:width={`${b.w}px`} style:height={`${NODE_H}px`}
              onpointerdown={(ev) => begin(ev, n, "move")}
              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEdit(n); } }}>
-          <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{n.title}</span>
+          <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}</span>
           <span class="n-sub">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
           {#if !inColumn(n)}
             <!-- pointer shortcuts; the editor's dates and Links do the same by keyboard -->
@@ -612,12 +612,12 @@
     --lane-research: var(--series-1);
     --lane-teaching: var(--series-2);
     --lane-outreach: var(--series-4);
-    --lane-supervision: #6250d6;
+    --lane-projects: #6250d6;
     --lane-grants: var(--series-3);
     --lk: var(--ink-soft);
   }
   @media (prefers-color-scheme: dark) {
-    .pathways { --lane-supervision: #9085e9; }
+    .pathways { --lane-projects: #9085e9; }
   }
 
   .views { display: flex; gap: 0.25rem; margin-top: 0.6rem; font-family: var(--font-ui); }
@@ -644,7 +644,7 @@
   .lane-research .lane-label { color: var(--lane-research); }
   .lane-teaching .lane-label { color: var(--lane-teaching); }
   .lane-outreach .lane-label { color: var(--lane-outreach); }
-  .lane-supervision .lane-label { color: var(--lane-supervision); }
+  .lane-projects .lane-label { color: var(--lane-projects); }
   .lane-grants .lane-label { color: var(--lane-grants); }
   .tick { position: absolute; top: 4px; border-left: 1px dotted var(--rule); pointer-events: none; }
   .tick.major { border-left-style: solid; }
@@ -671,7 +671,11 @@
   .node.moving { opacity: 0.85; z-index: 5; box-shadow: 0 6px 16px rgb(0 0 0 / 0.2); }
   .node.lane-teaching { border-left-color: var(--lane-teaching); }
   .node.lane-outreach { border-left-color: var(--lane-outreach); }
-  .node.lane-supervision { border-left-color: var(--lane-supervision); }
+  .node.lane-projects { border-left-color: var(--lane-projects); }
+  /* hands-on: your own research time goes into it */
+  .node.hands-on { border-width: 2px; border-left-width: 7px; background: color-mix(in srgb, var(--accent) 9%, var(--paper)); }
+  .node.hands-on .n-title { font-weight: 700; }
+  .hand { margin-right: 0.25rem; }
   .node.lane-grants { border-left-color: var(--lane-grants); }
   .node.gs-drafting { border-style: dashed; border-left-style: solid; }
   .node.gs-awarded { border-width: 2px; border-left-width: 6px; background: color-mix(in srgb, var(--lane-grants) 10%, var(--paper)); }

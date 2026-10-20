@@ -5,9 +5,9 @@ import { check } from "./data";
 
 export const LANES = [
   { key: "research", label: "Research" },
+  { key: "projects", label: "Projects" }, // the smaller projects feeding objectives and goals
   { key: "teaching", label: "Teaching" },
   { key: "outreach", label: "Outreach" },
-  { key: "supervision", label: "Supervision & collaboration" },
   { key: "grants", label: "Grant writing" },
 ] as const;
 export type Lane = (typeof LANES)[number]["key"];
@@ -15,8 +15,8 @@ export type Lane = (typeof LANES)[number]["key"];
 export const NODE_KINDS = [
   { key: "goal", label: "Goal", lane: "research" },
   { key: "objective", label: "Objective", lane: "research" },
-  { key: "project", label: "Project", lane: "research" },
-  { key: "person", label: "Person", lane: "supervision" },
+  { key: "project", label: "Project", lane: "projects" },
+  { key: "person", label: "Person", lane: "projects" },
   { key: "gap", label: "Knowledge gap", lane: "research" },
   { key: "grant", label: "Grant", lane: "grants" },
 ] as const;
@@ -43,6 +43,7 @@ export type PwNode = {
   fte: number | null;
   lane_row: number;
   grant_stage: GrantStage | null;
+  hands_on: boolean; // a project your own research time goes into substantially
 };
 export type PwNodeFields = Omit<PwNode, "id">;
 // A link is one kind of arrow, from one item to another; its direction says it all.
@@ -50,7 +51,7 @@ export type PwNodeFields = Omit<PwNode, "id">;
 export type PwLink = { id: string; from_id: string; to_id: string };
 export type PwRevision = { id: string; changed_at: string; old_title: string; old_detail: string | null; reason: string | null };
 
-const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage";
+const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage,hands_on";
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {
