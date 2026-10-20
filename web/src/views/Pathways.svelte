@@ -264,7 +264,7 @@
 
   function openEdit(n: PwNode) { panel = { node: n }; }
 
-  const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6 };
+  const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6, grant: 3 };
   /** The first row in a lane free over a span (goals: the first free row in the goals column). */
   function freeRow(lane: Lane, kind: NodeKind, s: string, e: string, also: PwNode[] = []): number {
     const inLane = [...visible, ...also].filter((n) => n.lane === lane && (kind === "goal") === (n.kind === "goal"));
@@ -281,7 +281,7 @@
     panel = {
       node: null,
       draft: {
-        kind, lane, potential: kind === "project",
+        kind, lane, potential: kind === "project", grant_stage: kind === "grant" ? "drafting" : null,
         start_on: kind === "goal" ? null : s, end_on: kind === "goal" ? null : e,
         lane_row: freeRow(lane, kind, s, e),
       },
@@ -290,18 +290,19 @@
   // ---- bring existing Planning projects onto the map ------------------------------------
   // Each lands in its area's lane (student projects under Supervision go to the
   // Supervision lane), keeps the project's dates, and stays linked to it.
-  type ImportRow = { p: Project; group: string; lane: Lane; already: boolean; pick: boolean };
+  type ImportRow = { p: Project; group: string; lane: Lane; kind: "project" | "grant"; already: boolean; pick: boolean };
   let importRows = $state<ImportRow[]>([]);
   let importing = $state(false);
 
-  function laneFor(p: Project): { lane: Lane; group: string } {
+  function laneFor(p: Project): { lane: Lane; kind: "project" | "grant"; group: string } {
     const c = tax?.allCategories.find((x) => x.id === p.category_id);
     const a = tax?.areas.find((x) => x.id === c?.area_id);
     const group = `${a?.label ?? "Other"} › ${c?.label ?? "—"}`;
-    if (c?.code === "RES_SUP") return { lane: "supervision", group };
-    if (a?.code === "TEA") return { lane: "teaching", group };
-    if (a?.code === "OUT") return { lane: "outreach", group };
-    return { lane: "research", group };
+    if (c?.code === "RES_PROP") return { lane: "grants", kind: "grant", group };
+    if (c?.code === "RES_SUP") return { lane: "supervision", kind: "project", group };
+    if (a?.code === "TEA") return { lane: "teaching", kind: "project", group };
+    if (a?.code === "OUT") return { lane: "outreach", kind: "project", group };
+    return { lane: "research", kind: "project", group };
   }
   function openImport() {
     const onMap = new Set(nodes.map((n) => n.project_id).filter(Boolean));
@@ -321,9 +322,10 @@
       for (const r of importRows.filter((x) => x.pick && !x.already)) {
         const s = r.p.start_on ? monthStart(r.p.start_on) : monthStart(today());
         const e = r.p.end_on ?? null;
-        const row = freeRow(r.lane, "project", s, e ?? addMonths(s, 3), placed);
+        const row = freeRow(r.lane, r.kind, s, e ?? addMonths(s, 3), placed);
         const fields: Partial<PwNodeFields> = {
-          kind: "project", lane: r.lane, title: r.p.name, project_id: r.p.id, potential: false,
+          kind: r.kind, lane: r.lane, title: r.p.name, project_id: r.p.id, potential: false,
+          grant_stage: r.kind === "grant" ? "drafting" : null,
           start_on: s, end_on: e, lane_row: row,
         };
         const id = await saveNode(null, fields);
@@ -344,9 +346,22 @@
   }
 
   const kindLabel = (k: string) => NODE_KINDS.find((x) => x.key === k)?.label ?? k;
+  const nodeById = $derived(new Map(nodes.map((n) => [n.id, n])));
+  /** Funding of an item from grants: "funded" once one is awarded, "funding pending" while any is open. */
+  function funding(id: string): "funded" | "funding pending" | null {
+    const stages = links.filter((l) => l.kind === "funds" && l.to_id === id).map((l) => nodeById.get(l.from_id)?.grant_stage ?? "drafting");
+    if (stages.includes("awarded")) return "funded";
+    return stages.some((s) => s !== "declined") ? "funding pending" : null;
+  }
+  /** A funding link is uncertain until its grant is awarded. */
+  const linkStage = (l: PwLink) => (l.kind === "funds" ? nodeById.get(l.from_id)?.grant_stage ?? "drafting" : null);
   function sub(n: PwNode): string {
-    const bits: string[] = [n.potential ? "potential project" : kindLabel(n.kind).toLowerCase()];
-    if (n.kind !== "goal" && n.start_on) bits.push(`${n.start_on.slice(0, 7)} → ${n.end_on ? n.end_on.slice(0, 7) : "…"}`);
+    const bits: string[] = [n.potential ? "potential project" : n.kind === "grant" ? `grant · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
+    if (n.kind === "grant" && n.end_on) bits.push(`deadline ${fmtDay(n.end_on)}`);
+    else if (n.kind !== "goal" && n.start_on) bits.push(`${n.start_on.slice(0, 7)} → ${n.end_on ? n.end_on.slice(0, 7) : "…"}`);
+    if (n.kind === "grant" && n.cost) bits.push(n.cost.toLocaleString());
+    const fu = funding(n.id);
+    if (fu) bits.push(fu);
     if (n.effort_pm) bits.push(`${n.effort_pm} pm`);
     if (n.fte) bits.push(`${Math.round(n.fte * 100)}%`);
     const k = assetCount(n.id);
@@ -414,7 +429,7 @@
           {/each}
         </defs>
         {#each drawnLinks as dl (dl.l.id)}
-          <path d={dl.d} class={`lk-path ${dl.l.kind}`} marker-end={`url(#arrow-${dl.l.kind})`}>
+          <path d={dl.d} class={`lk-path ${dl.l.kind} ${linkStage(dl.l) ?? ""}`} marker-end={`url(#arrow-${dl.l.kind})`}>
             <title>{nodeTitle(dl.l.from_id)} {linkLabel(dl.l.kind)} {nodeTitle(dl.l.to_id)}</title>
           </path>
         {/each}
@@ -427,7 +442,7 @@
       <!-- items -->
       {#each drawn as n (n.id)}
         {@const b = boxes.get(n.id)!}
-        <div class="node kind-{n.kind} lane-{n.lane}" class:potential={n.potential} class:open-end={b.open}
+        <div class="node kind-{n.kind} lane-{n.lane} {n.kind === "grant" ? `gs-${n.grant_stage ?? "drafting"}` : ""}" class:potential={n.potential} class:open-end={b.open}
              class:inactive={n.status !== "active"} class:moving={drag?.id === n.id}
              data-node={n.id} role="button" tabindex="0" title={`${n.title}${n.detail ? `\n${n.detail}` : ""}`}
              style:left={`${b.x}px`} style:top={`${b.y}px`} style:width={`${b.w}px`} style:height={`${NODE_H}px`}
@@ -503,6 +518,8 @@
     --lane-teaching: var(--series-2);
     --lane-outreach: var(--series-4);
     --lane-supervision: #6250d6;
+    --lane-grants: var(--series-3);
+    --lk-funds: var(--series-3);
     --lk-feeds: var(--ink-soft);
     --lk-advances: var(--accent);
     --lk-works_on: #6250d6;
@@ -531,6 +548,7 @@
   .lk.advances { border-color: var(--lk-advances); }
   .lk.works_on { border-color: var(--lk-works_on); }
   .lk.learns { border-color: var(--lk-learns); border-top-style: dashed; }
+  .lk.funds { border-color: var(--lk-funds); border-top-style: dotted; }
 
   .scroller { overflow-x: auto; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); }
   .map { position: relative; font-family: var(--font-ui); user-select: none; touch-action: pan-y; }
@@ -542,6 +560,7 @@
   .lane-teaching .lane-label { color: var(--lane-teaching); }
   .lane-outreach .lane-label { color: var(--lane-outreach); }
   .lane-supervision .lane-label { color: var(--lane-supervision); }
+  .lane-grants .lane-label { color: var(--lane-grants); }
   .tick { position: absolute; top: 4px; border-left: 1px dotted var(--rule); pointer-events: none; }
   .tick.major { border-left-style: solid; }
   .tick span { position: absolute; left: 4px; top: 0; font-size: 0.72rem; color: var(--ink-soft); white-space: nowrap; }
@@ -555,9 +574,13 @@
   .lk-path.advances { stroke: var(--lk-advances); }
   .lk-path.works_on { stroke: var(--lk-works_on); }
   .lk-path.learns { stroke: var(--lk-learns); stroke-dasharray: 5 4; }
+  /* funding is dotted while the grant is undecided, solid once awarded, faint if declined */
+  .lk-path.funds { stroke: var(--lk-funds); stroke-dasharray: 2 4; }
+  .lk-path.funds.awarded { stroke-dasharray: none; stroke-width: 2.2; }
+  .lk-path.funds.declined { opacity: 0.3; }
   .lk-path.drawing { stroke: var(--accent); stroke-dasharray: 3 3; }
   .ah.feeds { fill: var(--lk-feeds); } .ah.advances { fill: var(--lk-advances); }
-  .ah.works_on { fill: var(--lk-works_on); } .ah.learns { fill: var(--lk-learns); }
+  .ah.works_on { fill: var(--lk-works_on); } .ah.learns { fill: var(--lk-learns); } .ah.funds { fill: var(--lk-funds); }
 
   .node {
     position: absolute; box-sizing: border-box; display: grid; align-content: center; gap: 1px;
@@ -571,6 +594,11 @@
   .node.lane-teaching { border-left-color: var(--lane-teaching); }
   .node.lane-outreach { border-left-color: var(--lane-outreach); }
   .node.lane-supervision { border-left-color: var(--lane-supervision); }
+  .node.lane-grants { border-left-color: var(--lane-grants); }
+  .node.gs-drafting { border-style: dashed; border-left-style: solid; }
+  .node.gs-awarded { border-width: 2px; border-left-width: 6px; background: color-mix(in srgb, var(--lane-grants) 10%, var(--paper)); }
+  .node.gs-declined { opacity: 0.5; }
+  .node.gs-declined .n-title { text-decoration: line-through; }
   .node.kind-goal { border-radius: 22px; border-width: 2px; border-left-width: 6px; font-weight: 600; }
   .node.kind-objective { background: color-mix(in srgb, var(--panel) 70%, var(--paper)); border-width: 2px; border-left-width: 6px; }
   .node.potential { border-style: dashed; border-left-style: dashed; background: transparent; }

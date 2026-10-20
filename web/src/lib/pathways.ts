@@ -8,6 +8,7 @@ export const LANES = [
   { key: "teaching", label: "Teaching" },
   { key: "outreach", label: "Outreach" },
   { key: "supervision", label: "Supervision" },
+  { key: "grants", label: "Grant writing" },
 ] as const;
 export type Lane = (typeof LANES)[number]["key"];
 
@@ -17,6 +18,7 @@ export const NODE_KINDS = [
   { key: "project", label: "Project", lane: "research" },
   { key: "person", label: "Person", lane: "supervision" },
   { key: "gap", label: "Knowledge gap", lane: "research" },
+  { key: "grant", label: "Grant", lane: "grants" },
 ] as const;
 export type NodeKind = (typeof NODE_KINDS)[number]["key"];
 
@@ -25,8 +27,13 @@ export const LINK_KINDS = [
   { key: "advances", label: "advances" },
   { key: "works_on", label: "works on" },
   { key: "learns", label: "needs to learn" },
+  { key: "funds", label: "would fund" },
 ] as const;
 export type LinkKind = (typeof LINK_KINDS)[number]["key"];
+
+// Where a grant application stands. Until it is awarded, what it would fund is uncertain.
+export const GRANT_STAGES = ["drafting", "submitted", "awarded", "declined"] as const;
+export type GrantStage = (typeof GRANT_STAGES)[number];
 
 export type PwNode = {
   id: string;
@@ -44,12 +51,13 @@ export type PwNode = {
   cost: number | null;
   fte: number | null;
   lane_row: number;
+  grant_stage: GrantStage | null;
 };
 export type PwNodeFields = Omit<PwNode, "id">;
 export type PwLink = { id: string; from_id: string; to_id: string; kind: LinkKind };
 export type PwRevision = { id: string; changed_at: string; old_title: string; old_detail: string | null; reason: string | null };
 
-const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row";
+const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage";
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {
@@ -105,6 +113,7 @@ export async function addRevision(nodeId: string, oldTitle: string, oldDetail: s
 
 /** The link kind a drag from one item to another most likely means. */
 export function inferLinkKind(from: PwNode, to: PwNode): LinkKind {
+  if (from.kind === "grant") return "funds";
   if (from.kind === "gap" || to.kind === "gap") return "learns";
   if (from.kind === "person") return "works_on";
   if (to.kind === "goal") return "advances";

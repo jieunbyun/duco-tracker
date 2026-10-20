@@ -78,15 +78,19 @@
 
     <dt>Pathways</dt>
     <dd>
-      A map of where your work is heading: lanes for Research, Teaching, Outreach and Supervision, time running
+      A map of where your work is heading: lanes for Research, Teaching, Outreach, Supervision and Grant writing, time running
       from now to a horizon you choose (3–20 years), and long-term goals on the right. Add goals, near-term
       objectives, projects (linked to a Planning project — + From Planning brings several at once, each into its
       area's lane with its dates — or potential, dashed, with person-months and cost),
       people (with their strengths and share of time) and knowledge gaps (linked to Reading). Drag an item to move
       it in time or across lanes, drag its right edge to stretch it, drag its ○ onto another item to link them —
-      feeds into, advances, works on, needs to learn — and click it to edit. Rewording a goal keeps its earlier
+      feeds into, advances, works on, needs to learn, would fund — and click it to edit. Rewording a goal keeps its earlier
       wording and your reason. An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
+      The <em>Grant writing</em> lane holds grant applications: writing period up to the deadline, stage
+      (drafting, submitted, awarded, declined) and, if you like, the amount sought. Link a grant to whatever it
+      would fund, in any lane. That link stays dotted, and the item reads “funding pending”, until the grant is
+      awarded; then it turns solid and reads “funded”. Projects under Proposals in Planning arrive here as grants.
       <em>Information system</em> (the second view) holds asset cards — algorithms, models, datasets, software,
       knowledge — each with what it takes in and gives out, an owner and the project that produces it. Assets join
       up wherever one's output has the same name as another's input; inputs nothing produces show on the left as

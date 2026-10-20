@@ -1,9 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import {
-    LANES, NODE_KINDS, LINK_KINDS, saveNode, deleteNode, saveLink, setLinkKind, deleteLink, loadRevisions, addRevision,
+    LANES, NODE_KINDS, LINK_KINDS, GRANT_STAGES, saveNode, deleteNode, saveLink, setLinkKind, deleteLink, loadRevisions, addRevision,
   } from "./pathways";
-  import type { PwNode, PwNodeFields, PwLink, PwRevision, LinkKind, NodeKind, Lane } from "./pathways";
+  import type { PwNode, PwNodeFields, PwLink, PwRevision, LinkKind, NodeKind, Lane, GrantStage } from "./pathways";
   import type { Project } from "./data";
   import { setProjectDates } from "./data";
   import type { Reading } from "./reading";
@@ -38,7 +38,10 @@
     effort_pm: n0?.effort_pm ?? (null as number | null),
     cost: n0?.cost ?? (null as number | null),
     fte: n0?.fte ?? (null as number | null),
+    grant_stage: (n0?.grant_stage ?? d0.grant_stage ?? "drafting") as GrantStage,
   });
+  // projects and grants can each be a Planning project (a grant: one under Proposals)
+  const plannable = $derived(f.kind === "project" || f.kind === "grant");
   // a linked Planning project lends its current name and dates
   {
     const p = n0?.project_id ? untrack(() => projects).find((x) => x.id === n0.project_id) : undefined;
@@ -48,7 +51,7 @@
       f.end_on = p.end_on ?? f.end_on;
     }
   }
-  const linkedProject = $derived(f.kind === "project" && f.project_id ? projects.find((x) => x.id === f.project_id) ?? null : null);
+  const linkedProject = $derived(plannable && f.project_id ? projects.find((x) => x.id === f.project_id) ?? null : null);
   let reason = $state("");
   let busy = $state(false);
   let error = $state("");
@@ -84,12 +87,13 @@
       const fields: Partial<PwNodeFields> = {
         kind: f.kind, lane: f.lane, title: f.title.trim(), detail: f.detail.trim() || null, status: f.status as PwNode["status"],
         potential: f.kind === "project" ? f.potential : false,
-        project_id: f.kind === "project" ? f.project_id || null : null,
+        project_id: plannable ? f.project_id || null : null,
         reading_id: f.kind === "gap" ? f.reading_id || null : null,
         start_on: dated ? f.start_on || null : null, end_on: dated ? f.end_on || null : null,
         effort_pm: f.kind === "project" ? n(f.effort_pm) : null,
-        cost: f.kind === "project" ? n(f.cost) : null,
+        cost: plannable ? n(f.cost) : null,
         fte: f.kind === "person" ? n(f.fte) : null,
+        grant_stage: f.kind === "grant" ? f.grant_stage : null,
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
@@ -120,7 +124,7 @@
 
   // ---- links ----------------------------------------------------------------------
   let linkTo = $state("");
-  let linkKind = $state<LinkKind>("feeds");
+  let linkKind = $state<LinkKind>(n0?.kind === "grant" ? "funds" : "feeds");
   async function addLink() {
     if (!n0 || !linkTo) return;
     try {
@@ -181,6 +185,19 @@
     <label>Effort (person-months) <input type="number" min="0" step="0.5" bind:value={f.effort_pm} /></label>
     <label>Cost <input type="number" min="0" step="100" bind:value={f.cost} /></label>
   {/if}
+  {#if f.kind === "grant"}
+    <label class="wide">Planning project (if you track the writing there)
+      <select bind:value={f.project_id} onchange={onProject}>
+        <option value="">— none —</option>
+        {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+      </select>
+    </label>
+    <label>Stage
+      <select bind:value={f.grant_stage}>{#each GRANT_STAGES as s (s)}<option value={s}>{s}</option>{/each}</select>
+    </label>
+    <label>Amount sought (optional) <input type="number" min="0" step="1000" bind:value={f.cost} /></label>
+    <p class="hint wide">Link it to what it would fund — projects, people, objectives — with “would fund”. Those links stay dotted until it is awarded.</p>
+  {/if}
   {#if f.kind === "person"}
     <label>Share of time (0–1) <input type="number" min="0" max="1" step="0.05" bind:value={f.fte} /></label>
   {/if}
@@ -193,8 +210,8 @@
     </label>
   {/if}
   {#if dated}
-    <label>From <input type="date" bind:value={f.start_on} /></label>
-    <label>To <input type="date" bind:value={f.end_on} min={f.start_on || undefined} /></label>
+    <label>{f.kind === "grant" ? "Writing from" : "From"} <input type="date" bind:value={f.start_on} /></label>
+    <label>{f.kind === "grant" ? "Deadline" : "To"} <input type="date" bind:value={f.end_on} min={f.start_on || undefined} /></label>
   {/if}
 
   {#if n0}
@@ -266,6 +283,7 @@
   .check input { width: auto; }
   .reason { color: var(--accent); }
   .synced { font-size: 0.75rem; color: var(--accent); }
+  .hint { font-size: 0.78rem; color: var(--ink-soft); margin: -0.3rem 0 0; }
   .links h3 { font-size: 0.9rem; margin: 0 0 0.3rem; }
   .link-row, .link-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.85rem; padding: 0.15rem 0; }
   .link-row select, .link-add select { width: auto; font-size: 0.8rem; padding: 0.2rem 0.3rem; }
