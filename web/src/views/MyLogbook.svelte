@@ -10,6 +10,9 @@
   import { loadProjects, loadTaxonomy } from "../lib/data";
   import { LIVE_STATUSES } from "../lib/plan";
   import Logbook from "../lib/Logbook.svelte";
+  import Actions from "../lib/Actions.svelte";
+  import { loadMyActions, loadMemberActions } from "../lib/actions";
+  import type { Action } from "../lib/actions";
   import { preview } from "../lib/preview.svelte";
 
   let me = $state("");
@@ -23,6 +26,7 @@
   let filter = $state(""); // "g:<id>" a shared project, "p:<id>" a Planning one, or "" for all
   let planning = $state<PlanningRef[]>([]); // your own Planning projects, when the logbook is yours
   let groupMilestones = $state<GroupMilestone[]>([]);
+  let actions = $state<Action[]>([]); // action items: your to-dos that belong to a project
 
   async function load() {
     try {
@@ -32,6 +36,7 @@
       const [cs, ed] = await Promise.all([loadComments(ids), revisionCounts(ids)]);
       [me, members, projects, entries, comments, edits] = [id, m, p, es, cs, ed];
       groupMilestones = await loadMilestones().catch(() => []);
+      actions = preview.as ? await loadMemberActions(id) : await loadMyActions();
       // your own Planning projects can have logbook notes too (only the planner's owner has any)
       if (!preview.as && m.find((x) => x.user_id === id)?.role === "supervisor") {
         const used = new Set(es.map((e) => e.planning_project_id).filter(Boolean));
@@ -94,6 +99,7 @@
       <span class="spacer"></span>
       <button class="mini" onclick={exportMine} disabled={!entries.length} title="As a Markdown file, to keep on OneDrive">Export my logbook</button>
     </div>
+    <Actions {actions} projects={ordered} {planning} {filter} canWrite={!preview.as} onchanged={load} />
     <Logbook entries={shown} projects={ordered} {planning} {groupMilestones} {members} {comments} {edits} {me} canWrite={!preview.as} onchanged={load} />
   {/if}
 </section>

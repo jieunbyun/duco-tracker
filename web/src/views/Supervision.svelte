@@ -12,6 +12,9 @@
   import { LIVE_STATUSES } from "../lib/plan";
   import { quietly } from "../lib/undo.svelte";
   import Logbook from "../lib/Logbook.svelte";
+  import Actions from "../lib/Actions.svelte";
+  import { loadMemberActions, loadMyActions } from "../lib/actions";
+  import type { Action } from "../lib/actions";
   import GroupProjects from "../lib/GroupProjects.svelte";
   import { preview } from "../lib/preview.svelte";
 
@@ -22,6 +25,7 @@
   let entries = $state<Entry[]>([]);
   let comments = $state<Comment[]>([]);
   let edits = $state(new Map<string, number>());
+  let theirActions = $state<Action[]>([]); // the selected person's action items (read-only here)
   let supervision = $state<Project[]>([]); // your Planning projects under Research › Supervision
   let planningRefs = $state<PlanningRef[]>([]); // all your Planning projects, to name your own logbook notes
   let loading = $state(true);
@@ -74,6 +78,11 @@
   let tab = $state<"projects" | "logbook">("projects");
 
   const theirProjects = $derived(current ? projects.filter((p) => p.members.includes(current.user_id) || p.lead_id === current.user_id) : []);
+  $effect(() => {
+    const c = current;
+    if (!c) return;
+    (c.user_id === me ? loadMyActions() : loadMemberActions(c.user_id)).then((x) => { if (current?.user_id === c.user_id) theirActions = x; });
+  });
   const theirEntries = $derived(current ? entries.filter((e) => e.author_id === current.user_id) : []);
   const since = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
   const lastOf = (uid: string) => entries.find((e) => e.author_id === uid)?.entry_date ?? null;
@@ -208,6 +217,7 @@
           <GroupProjects projects={theirProjects} {milestones} {members} {entries} supervisor newFor={current.user_id} onchanged={load} />
         {:else}
           {#if isMe}<p class="muted small">Write in your <a href="#/logbook">Logbook</a> tab; it's shown here too.</p>{/if}
+          <Actions actions={theirActions} projects={theirProjects} planning={isMe ? planningRefs : []} filter="" canWrite={false} onchanged={load} />
           <Logbook entries={theirEntries} projects={theirProjects} planning={isMe ? planningRefs : []} groupMilestones={milestones} {members} {comments} {edits} {me} canWrite={false} onchanged={load} />
         {/if}
       {:else if !loading}
