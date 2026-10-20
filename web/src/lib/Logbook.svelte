@@ -4,6 +4,10 @@
   } from "./group";
   import type { Entry, EntryKind, GroupProject, GroupMilestone, Member, Comment, Revision, PlanningRef } from "./group";
   import { planningGroups } from "./group";
+  import { saveEntry as saveTimeEntry } from "./data";
+  import { stepSummary } from "./actions";
+  import type { ActionStep } from "./actions";
+  import ActionsInline from "./ActionsInline.svelte";
   import { today, fmtDay } from "./dates";
 
   type Props = {
@@ -40,21 +44,30 @@
   let error = $state("");
 
   // ---- writing (a new entry, or editing one) ---------------------------------------
-  type Draft = { id: string | null; kind: EntryKind; entry_date: string; project_id: string; milestone: string; did: string; results: string; next: string; links: string };
+  type Time = { mode: "none" | "times" | "minutes"; start: string; end: string; minutes: number | null; core: boolean };
+  type Draft = {
+    id: string | null; kind: EntryKind; entry_date: string; project_id: string; milestone: string;
+    did: string; results: string; next: string; links: string;
+    log: ActionStep[]; // what this session did to action items
+    time: Time; // the block's time, logged once (Planning projects)
+  };
+  const noTime = (): Time => ({ mode: "none", start: "09:00", end: "10:00", minutes: 60, core: false });
   const blank = (): Draft => ({
     id: null, kind: "entry", entry_date: today(),
     project_id: (() => { const g = projects.find((p) => p.status === "active"); return g ? `g:${g.id}` : ""; })(), milestone: "",
-    did: "", results: "", next: "", links: "",
+    did: "", results: "", next: "", links: "", log: [], time: noTime(),
   });
   let draft = $state<Draft>(blank());
   let editing = $state<string | null>(null); // id of the entry being edited in place
+  const editingEntry = $derived(entries.find((x) => x.id === editing) ?? null);
   let busy = $state(false);
 
   function startEdit(e: Entry) {
     editing = e.id;
     draft = { id: e.id, kind: e.kind, entry_date: e.entry_date, project_id: pick(e),
               milestone: e.planning_milestone_id ?? e.group_milestone_id ?? "", did: e.did ?? "",
-              results: e.results ?? "", next: e.next ?? "", links: e.links.join("\n") };
+              results: e.results ?? "", next: e.next ?? "", links: e.links.join("\n"),
+              log: [...(e.actions ?? [])], time: noTime() };
   }
   async function save(ev: SubmitEvent) {
     ev.preventDefault();
@@ -62,7 +75,33 @@
     busy = true;
     error = "";
     try {
+      // the session's time, once, on the project (and milestone) — never per action
+      let timeFields = {};
+      const t = draft.time;
+      if (t.mode !== "none" && draft.project_id.startsWith("p:")) {
+        const pp = planning.find((p) => p.id === draft.project_id.slice(2));
+        if (!pp?.category_id) throw new Error("That project has no category to log time under.");
+        const day = draft.entry_date || today();
+        const started_at = `${day}T${t.start}:00+00:00`;
+        let ended_at: string | null = null, mins: number;
+        if (t.mode === "times") {
+          ended_at = t.end === "00:00" ? `${new Date(Date.parse(day) + 86_400_000).toISOString().slice(0, 10)}T00:00:00+00:00` : `${day}T${t.end}:00+00:00`;
+          mins = (Date.parse(ended_at) - Date.parse(started_at)) / 60_000;
+          if (mins <= 0) throw new Error("The session must end after it starts.");
+        } else {
+          mins = Math.round(t.minutes ?? 0);
+          if (mins <= 0) throw new Error("Give the minutes.");
+        }
+        const time_entry_id = await saveTimeEntry(null, {
+          category_id: pp.category_id, project_id: pp.id, milestone_id: draft.milestone || null,
+          started_at, ended_at, manual_minutes: t.mode === "minutes" ? mins : null,
+          description: (draft.did.trim().split("\n")[0] || "Logbook session").slice(0, 120), is_core: t.core,
+        });
+        timeFields = { time_entry_id, time_minutes: mins };
+      }
       await saveEntry(draft.id, {
+        ...timeFields,
+        actions: draft.log,
         kind: draft.kind, entry_date: draft.entry_date || today(),
         project_id: draft.project_id.startsWith("g:") ? draft.project_id.slice(2) : null,
         planning_project_id: draft.project_id.startsWith("p:") ? draft.project_id.slice(2) : null,
@@ -71,7 +110,7 @@
         did: draft.did.trim() || null, results: draft.results.trim() || null, next: draft.next.trim() || null,
         links: parseLinks(draft.links),
       });
-      const kind = draft.kind, project = draft.project_id, milestone = draft.milestone;
+      const kind = draft.kind, project = draft.project_id, milestone = draft.milestone; // ready for the next session
       draft = { ...blank(), kind, project_id: project, milestone };
       editing = null;
       await onchanged();
@@ -146,12 +185,35 @@
         {/if}
       {/if}
     </div>
+    {#if draft.project_id}
+      {#key draft.project_id}
+        <ActionsInline projectKey={draft.project_id} milestoneId={draft.project_id.startsWith("p:") ? draft.milestone : ""}
+                       log={draft.log} onlog={(l) => (draft.log = l)} />
+      {/key}
+    {/if}
     <label>{FIELDS[draft.kind].did} <textarea rows="3" bind:value={draft.did}></textarea></label>
     <label>{FIELDS[draft.kind].results} <textarea rows="2" bind:value={draft.results}></textarea></label>
     <label>{FIELDS[draft.kind].next} <textarea rows="2" bind:value={draft.next}></textarea></label>
     <label>Links — files and folders on OneDrive, one per line
       <textarea rows="2" bind:value={draft.links} placeholder="https://…sharepoint.com/…"></textarea>
     </label>
+    {#if draft.project_id.startsWith("p:") && !(isEdit && editingEntry?.time_entry_id)}
+      <div class="lb-time">
+        <span class="small">Time spent</span>
+        <div class="seg" role="group" aria-label="Time spent">
+          <button type="button" class:on={draft.time.mode === "none"} onclick={() => (draft.time.mode = "none")}>not logged</button>
+          <button type="button" class:on={draft.time.mode === "times"} onclick={() => (draft.time.mode = "times")}>start & end</button>
+          <button type="button" class:on={draft.time.mode === "minutes"} onclick={() => (draft.time.mode = "minutes")}>minutes</button>
+        </div>
+        {#if draft.time.mode !== "none"}
+          <input type="time" bind:value={draft.time.start} step="300" aria-label="Start" />
+          {#if draft.time.mode === "times"}–<input type="time" bind:value={draft.time.end} step="300" aria-label="End" />
+          {:else}<input type="number" min="5" step="5" bind:value={draft.time.minutes} aria-label="Minutes" /> min{/if}
+          <label class="small check"><input type="checkbox" bind:checked={draft.time.core} /> core</label>
+          <span class="muted small">logged once, on this project{draft.milestone ? " and milestone" : ""}, as in Week</span>
+        {/if}
+      </div>
+    {/if}
     <div class="lb-actions">
       <button class="primary" type="submit" disabled={busy}>{busy ? "Saving…" : isEdit ? "Save changes" : "Add to logbook"}</button>
       {#if isEdit}<button type="button" onclick={cancelEdit}>Cancel</button>
@@ -184,6 +246,11 @@
           {#if deletable(e)}<button class="mini danger" onclick={() => remove(e)}>Delete</button>{/if}
         {/if}
       </header>
+      {#if e.time_minutes || e.actions?.length}
+        <p class="session muted small">
+          {#if e.time_minutes}⏱ {Math.round((e.time_minutes / 60) * 100) / 100} h{e.actions?.length ? " · " : ""}{/if}{e.actions?.length ? stepSummary(e.actions) : ""}
+        </p>
+      {/if}
       {#each ["did", "results", "next"] as const as k (k)}
         {#if e[k]}<div class="field"><span class="label">{f[k]}</span><p>{e[k]}</p></div>{/if}
       {/each}
@@ -245,6 +312,11 @@
   .seg button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
   .seg button:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-left: -1px; }
   .seg button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .lb-time { display: flex; flex-wrap: wrap; gap: 0.45rem; align-items: center; }
+  .lb-time input[type="time"], .lb-time input[type="number"] { width: auto; font-size: 0.85rem; padding: 0.2rem 0.4rem; }
+  .lb-time input[type="number"] { width: 5rem; }
+  .lb-time .seg button { font-size: 0.78rem; padding: 0.25rem 0.55rem; }
+  .session { margin: 0 0 0.3rem; }
   .lb-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
 
   .entry { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem 0.9rem; margin-bottom: 0.8rem; background: var(--paper); }

@@ -5,6 +5,7 @@
 // before it.
 import { supabase } from "./supabase";
 import { check } from "./data";
+import type { ActionStep } from "./actions";
 
 export type Role = "supervisor" | "member";
 export type Member = {
@@ -23,13 +24,19 @@ export type Entry = {
   planning_project_id?: string | null; // or one of your own Planning projects (0022)
   planning_milestone_id?: string | null; // a milestone of that Planning project
   group_milestone_id?: string | null; // or of the shared project
+  actions?: ActionStep[]; // what this session did to the project's action items (0024)
+  time_entry_id?: string | null; // the time it logged, as one time entry
+  time_minutes?: number | null;
   did: string | null; results: string | null; next: string | null; links: string[];
   created_at: string; updated_at: string;
 };
 export type EntryFields = Pick<Entry, "project_id" | "planning_project_id" | "planning_milestone_id" | "group_milestone_id"
-  | "entry_date" | "kind" | "did" | "results" | "next" | "links">;
+  | "entry_date" | "kind" | "did" | "results" | "next" | "links" | "actions" | "time_entry_id" | "time_minutes">;
 /** A Planning project an entry can be about (yours only), with its milestones. */
-export type PlanningRef = { id: string; name: string; milestones: { id: string; title: string; active?: boolean }[]; group?: string };
+export type PlanningRef = {
+  id: string; name: string; milestones: { id: string; title: string; active?: boolean }[]; group?: string;
+  category_id?: string; // for the time a session logs
+};
 /** Planning projects by their area and category ("Research › Supervision"), in the order given. */
 export function planningGroups(planning: PlanningRef[]): { label: string; items: PlanningRef[] }[] {
   const out: { label: string; items: PlanningRef[] }[] = [];

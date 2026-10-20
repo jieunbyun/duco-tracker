@@ -51,7 +51,7 @@
         planning = all
           .filter((x) => LIVE_STATUSES.has(x.status) || used.has(x.id))
           .sort((x, y) => where(x).order[0] - where(y).order[0] || where(x).order[1] - where(y).order[1] || x.name.localeCompare(y.name))
-          .map((x) => ({ id: x.id, name: x.name, group: where(x).label, milestones: x.milestone.map((m) => ({ id: m.id, title: m.title, active: m.status === "active" })) }));
+          .map((x) => ({ id: x.id, name: x.name, category_id: x.category_id, group: where(x).label, milestones: x.milestone.map((m) => ({ id: m.id, title: m.title, active: m.status === "active" })) }));
       }
       error = "";
     } catch (e) {
@@ -99,7 +99,8 @@
       <span class="spacer"></span>
       <button class="mini" onclick={exportMine} disabled={!entries.length} title="As a Markdown file, to keep on OneDrive">Export my logbook</button>
     </div>
-    <Actions {actions} projects={ordered} {planning} {filter} canWrite={!preview.as} onchanged={load} />
+    <!-- a project's action items at a glance; in a session, they are in the entry form -->
+    {#if filter || preview.as}<Actions {actions} projects={ordered} {planning} {filter} canWrite={!preview.as} onchanged={load} />{/if}
     <Logbook entries={shown} projects={ordered} {planning} {groupMilestones} {members} {comments} {edits} {me} canWrite={!preview.as} onchanged={load} />
   {/if}
 </section>

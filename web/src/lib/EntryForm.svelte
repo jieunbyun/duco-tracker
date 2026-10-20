@@ -4,6 +4,9 @@
   import type { Taxonomy, Project, TimeEntry, TimeEntryFields } from "./data";
   import { addDays } from "./dates";
   import { LIVE_STATUSES } from "./horizon";
+  import ActionsInline from "./ActionsInline.svelte";
+  import { stepSummary } from "./actions";
+  import type { ActionStep } from "./actions";
 
   type Defaults = {
     date: string;
@@ -52,6 +55,8 @@
   let busy = $state(false);
   let error = $state("");
   let copyTo = $state(e0 ? e0.started_at.slice(0, 10) : "");
+  // what this session did to the project's action items, added to the note on saving
+  let log = $state<ActionStep[]>([]);
 
   // ---- choices -------------------------------------------------------------
   const groups = $derived(
@@ -131,7 +136,7 @@
       started_at: s.started_at,
       ended_at: s.ended_at,
       manual_minutes: mode === "minutes" ? Math.round(minutes!) : null,
-      description: description.trim() || null,
+      description: [description.trim(), stepSummary(log)].filter(Boolean).join(" · ") || null,
       is_core,
     };
   }
@@ -231,6 +236,13 @@
     <span class="duration muted">{durationText}</span>
   </div>
 
+  {#if projectPick && projectPick !== NEW}
+    <div class="wide">
+      {#key projectPick}
+        <ActionsInline projectKey={`p:${projectPick}`} milestoneId={milestonePick !== NEW ? milestonePick : ""} {log} onlog={(l) => (log = l)} />
+      {/key}
+    </div>
+  {/if}
   <label class="wide">Note <input bind:value={description} placeholder="optional" /></label>
   <label class="check"><input type="checkbox" bind:checked={is_core} /> 🎯 Core session</label>
 
