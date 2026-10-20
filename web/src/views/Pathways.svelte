@@ -248,35 +248,72 @@
   }
 
   // ---- links drawn as curves --------------------------------------------------------
-  const drawnLinks = $derived(
-    links
+  // Each link leaves one side of a card and reaches a side of another:
+  //  - cards in different rows that meet or overlap in time: bottom/top middle;
+  //  - same row, one starting where the other ends: a hook under the join;
+  //  - otherwise: from the right edge to the left edge (or round to the right
+  //    edge, going back in time, and between goals in the column).
+  // Where several links share a side of a card, their ends are spread along it,
+  // in the order of where they come from, so they stay apart and do not cross.
+  type Side = "top" | "bottom" | "left" | "right";
+  type Route = { l: PwLink; a: Box; b: Box; hook: boolean; from: Side; to: Side };
+  const drawnLinks = $derived.by(() => {
+    const routes: Route[] = links
       .map((l) => ({ l, a: boxes.get(l.from_id), b: boxes.get(l.to_id) }))
       .filter((x): x is { l: PwLink; a: Box; b: Box } => !!x.a && !!x.b)
       .map(({ l, a, b }) => {
-        const ax = a.x + a.w, ay = a.y + NODE_H / 2;
-        const gap = b.x - ax;
-        const bothGoalsColumn = a.x === x1 + GAP && b.x === x1 + GAP; // these loop round the column's right
+        const gap = b.x - (a.x + a.w);
+        const bothGoalsColumn = a.x === x1 + GAP && b.x === x1 + GAP;
         if (gap < 40 && b.y !== a.y && !bothGoalsColumn) {
-          // In different rows and meeting or overlapping in time, an arrow from
-          // end to start would have no room: it runs from the middle of one
-          // card's bottom (or top) edge to the middle of the other's top (or bottom).
-          const mx1 = a.x + a.w / 2, mx2 = b.x + b.w / 2;
           const down = b.y > a.y;
-          const y1 = down ? a.y + NODE_H : a.y, y2 = down ? b.y : b.y + NODE_H;
-          const bend = Math.max(12, Math.abs(y2 - y1) / 2) * (down ? 1 : -1);
-          return { l, d: `M ${mx1} ${y1} C ${mx1} ${y1 + bend}, ${mx2} ${y2 - bend}, ${mx2} ${y2}` };
+          return { l, a, b, hook: false, from: down ? "bottom" : "top", to: down ? "top" : "bottom" } as Route;
         }
-        if (gap >= -4 && gap < 40 && b.y === a.y) {
-          // Same row, one starting where the other ends: a hook under the join.
-          const hx1 = ax - 14, hx2 = b.x + 14, by0 = a.y + NODE_H, bend = 15;
-          return { l, d: `M ${hx1} ${by0} C ${hx1} ${by0 + bend}, ${hx2} ${by0 + bend}, ${hx2} ${by0}` };
-        }
-        const forward = b.x >= ax - 4;
-        const bx = forward ? b.x : b.x + b.w, by = b.y + NODE_H / 2;
-        const dx = Math.max(40, Math.abs(bx - ax) / 2) * (forward ? 1 : -1);
-        return { l, d: `M ${ax} ${ay} C ${ax + Math.abs(dx)} ${ay}, ${bx - dx} ${by}, ${bx} ${by}` };
-      }),
-  );
+        if (gap >= -4 && gap < 40 && b.y === a.y) return { l, a, b, hook: true, from: "bottom", to: "bottom" } as Route;
+        return { l, a, b, hook: false, from: "right", to: gap >= -4 ? "left" : "right" } as Route;
+      });
+
+    // spread the ends sharing a side of a card
+    const cx = (x: Box) => x.x + x.w / 2, cy = (x: Box) => x.y + NODE_H / 2;
+    const ends = new Map<string, { key: string; order: number }[]>();
+    for (const r of routes) {
+      if (r.hook) continue; // hooks sit at the ends of the cards, apart already
+      for (const [id, side, other, end] of [[r.l.from_id, r.from, r.b, "from"], [r.l.to_id, r.to, r.a, "to"]] as const) {
+        const k = `${id}:${side}`;
+        const order = side === "top" || side === "bottom" ? cx(other) : cy(other);
+        ends.set(k, [...(ends.get(k) ?? []), { key: `${r.l.id}:${end}`, order }]);
+      }
+    }
+    const offset = new Map<string, number>();
+    for (const [k, list] of ends) {
+      const side = k.slice(k.lastIndexOf(":") + 1) as Side;
+      const box = boxes.get(k.slice(0, k.lastIndexOf(":")))!;
+      list.sort((p, q) => p.order - q.order);
+      const n = list.length;
+      const room = side === "top" || side === "bottom" ? box.w * 0.6 : NODE_H - 14;
+      const step = n > 1 ? Math.min(side === "top" || side === "bottom" ? 22 : 8, room / (n - 1)) : 0;
+      list.forEach((e, i) => offset.set(e.key, (i - (n - 1) / 2) * step));
+    }
+    const point = (x: Box, side: Side, o: number) =>
+      side === "top" ? { x: cx(x) + o, y: x.y } : side === "bottom" ? { x: cx(x) + o, y: x.y + NODE_H }
+      : side === "left" ? { x: x.x, y: cy(x) + o } : { x: x.x + x.w, y: cy(x) + o };
+
+    return routes.map((r) => {
+      const { l, a, b } = r;
+      if (r.hook) {
+        const hx1 = a.x + a.w - 14, hx2 = b.x + 14, y = a.y + NODE_H, bend = 15;
+        return { l, d: `M ${hx1} ${y} C ${hx1} ${y + bend}, ${hx2} ${y + bend}, ${hx2} ${y}` };
+      }
+      const p = point(a, r.from, offset.get(`${l.id}:from`) ?? 0);
+      const q = point(b, r.to, offset.get(`${l.id}:to`) ?? 0);
+      if (r.from === "top" || r.from === "bottom") {
+        const bend = Math.max(12, Math.abs(q.y - p.y) / 2) * (r.from === "bottom" ? 1 : -1);
+        return { l, d: `M ${p.x} ${p.y} C ${p.x} ${p.y + bend}, ${q.x} ${q.y - bend}, ${q.x} ${q.y}` };
+      }
+      const forward = r.to === "left";
+      const dx = Math.max(40, Math.abs(q.x - p.x) / 2) * (forward ? 1 : -1);
+      return { l, d: `M ${p.x} ${p.y} C ${p.x + Math.abs(dx)} ${p.y}, ${q.x - dx} ${q.y}, ${q.x} ${q.y}` };
+    });
+  });
   const nodeTitle = (id: string) => nodes.find((x) => x.id === id)?.title ?? "";
   const linkLabel = (k: string) => LINK_KINDS.find((x) => x.key === k)?.label ?? k;
 
