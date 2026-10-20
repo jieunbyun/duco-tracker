@@ -2,12 +2,14 @@
   import {
     FIELDS, saveEntry, deleteEntry, deletable, loadRevisions, addComment, deleteComment, parseLinks, linkName,
   } from "./group";
-  import type { Entry, EntryKind, GroupProject, Member, Comment, Revision } from "./group";
+  import type { Entry, EntryKind, GroupProject, GroupMilestone, Member, Comment, Revision, PlanningRef } from "./group";
   import { today, fmtDay } from "./dates";
 
   type Props = {
     entries: Entry[];
-    projects: GroupProject[]; // the projects these entries can be about
+    projects: GroupProject[]; // the shared projects these entries can be about
+    planning?: PlanningRef[]; // and your own Planning projects (yours only), with their milestones
+    groupMilestones?: GroupMilestone[]; // the shared projects' milestones
     members: Member[];
     comments: Comment[];
     edits: Map<string, number>; // how often each entry was edited
@@ -15,16 +17,29 @@
     canWrite: boolean; // the author's own logbook
     onchanged: () => Promise<void>;
   };
-  let { entries, projects, members, comments, edits, me, canWrite, onchanged }: Props = $props();
+  let { entries, projects, planning = [], groupMilestones = [], members, comments, edits, me, canWrite, onchanged }: Props = $props();
 
   const nameOf = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "—";
-  const projectOf = (id: string | null) => (id ? projects.find((p) => p.id === id)?.title ?? "(project removed)" : "No project");
+  const projectOf = (e: Entry) => e.planning_project_id ? planning.find((p) => p.id === e.planning_project_id)?.name ?? "(project removed)"
+    : e.project_id ? projects.find((p) => p.id === e.project_id)?.title ?? "(project removed)" : "No project";
+  const milestoneOf = (e: Entry) => e.planning_milestone_id
+    ? planning.flatMap((p) => p.milestones).find((m) => m.id === e.planning_milestone_id)?.title
+    : e.group_milestone_id ? groupMilestones.find((m) => m.id === e.group_milestone_id)?.title : undefined;
+  /** The chosen project's existing milestones, to pick one from. */
+  const milestonesFor = (pick: string): { id: string; title: string }[] =>
+    pick.startsWith("p:") ? planning.find((p) => p.id === pick.slice(2))?.milestones ?? []
+    : pick.startsWith("g:") ? groupMilestones.filter((m) => m.project_id === pick.slice(2)).map((m) => ({ id: m.id, title: m.title }))
+    : [];
+  // the Project menu holds both kinds: "g:<id>" a shared project, "p:<id>" a Planning one
+  const pick = (e: Pick<Entry, "project_id" | "planning_project_id">) =>
+    e.planning_project_id ? `p:${e.planning_project_id}` : e.project_id ? `g:${e.project_id}` : "";
   let error = $state("");
 
   // ---- writing (a new entry, or editing one) ---------------------------------------
-  type Draft = { id: string | null; kind: EntryKind; entry_date: string; project_id: string; did: string; results: string; next: string; links: string };
+  type Draft = { id: string | null; kind: EntryKind; entry_date: string; project_id: string; milestone: string; did: string; results: string; next: string; links: string };
   const blank = (): Draft => ({
-    id: null, kind: "entry", entry_date: today(), project_id: projects.find((p) => p.status === "active")?.id ?? "",
+    id: null, kind: "entry", entry_date: today(),
+    project_id: (() => { const g = projects.find((p) => p.status === "active"); return g ? `g:${g.id}` : ""; })(), milestone: "",
     did: "", results: "", next: "", links: "",
   });
   let draft = $state<Draft>(blank());
@@ -33,7 +48,8 @@
 
   function startEdit(e: Entry) {
     editing = e.id;
-    draft = { id: e.id, kind: e.kind, entry_date: e.entry_date, project_id: e.project_id ?? "", did: e.did ?? "",
+    draft = { id: e.id, kind: e.kind, entry_date: e.entry_date, project_id: pick(e),
+              milestone: e.planning_milestone_id ?? e.group_milestone_id ?? "", did: e.did ?? "",
               results: e.results ?? "", next: e.next ?? "", links: e.links.join("\n") };
   }
   async function save(ev: SubmitEvent) {
@@ -43,12 +59,16 @@
     error = "";
     try {
       await saveEntry(draft.id, {
-        kind: draft.kind, entry_date: draft.entry_date || today(), project_id: draft.project_id || null,
+        kind: draft.kind, entry_date: draft.entry_date || today(),
+        project_id: draft.project_id.startsWith("g:") ? draft.project_id.slice(2) : null,
+        planning_project_id: draft.project_id.startsWith("p:") ? draft.project_id.slice(2) : null,
+        planning_milestone_id: draft.project_id.startsWith("p:") ? draft.milestone || null : null,
+        group_milestone_id: draft.project_id.startsWith("g:") ? draft.milestone || null : null,
         did: draft.did.trim() || null, results: draft.results.trim() || null, next: draft.next.trim() || null,
         links: parseLinks(draft.links),
       });
-      const kind = draft.kind, project = draft.project_id;
-      draft = { ...blank(), kind, project_id: project };
+      const kind = draft.kind, project = draft.project_id, milestone = draft.milestone;
+      draft = { ...blank(), kind, project_id: project, milestone };
       editing = null;
       await onchanged();
     } catch (e) {
@@ -96,11 +116,26 @@
       </div>
       <label class="small">Date <input type="date" bind:value={draft.entry_date} /></label>
       <label class="small grow">Project
-        <select bind:value={draft.project_id}>
+        <select bind:value={draft.project_id} onchange={() => (draft.milestone = "")}>
           <option value="">No project</option>
-          {#each projects as p (p.id)}<option value={p.id}>{p.title}</option>{/each}
+          {#if planning.length}
+            {#if projects.length}
+              <optgroup label="Shared projects">{#each projects as p (p.id)}<option value={`g:${p.id}`}>{p.title}</option>{/each}</optgroup>
+            {/if}
+            <optgroup label="My projects (Planning)">{#each planning as p (p.id)}<option value={`p:${p.id}`}>{p.name}</option>{/each}</optgroup>
+          {:else}
+            {#each projects as p (p.id)}<option value={`g:${p.id}`}>{p.title}</option>{/each}
+          {/if}
         </select>
       </label>
+      {#if milestonesFor(draft.project_id).length}
+        <label class="small grow">Milestone
+          <select bind:value={draft.milestone}>
+            <option value="">—</option>
+            {#each milestonesFor(draft.project_id) as m (m.id)}<option value={m.id}>{m.title}</option>{/each}
+          </select>
+        </label>
+      {/if}
     </div>
     <label>{FIELDS[draft.kind].did} <textarea rows="3" bind:value={draft.did}></textarea></label>
     <label>{FIELDS[draft.kind].results} <textarea rows="2" bind:value={draft.results}></textarea></label>
@@ -128,7 +163,7 @@
     {:else}
       <header>
         <strong>{fmtDay(e.entry_date)}</strong>
-        <span class="muted">· {projectOf(e.project_id)}</span>
+        <span class="muted">· {projectOf(e)}{milestoneOf(e) ? ` › ${milestoneOf(e)}` : ""}</span>
         {#if e.kind === "weekly"}<span class="badge">weekly update</span>{/if}
         {#if e.author_id !== me}<span class="muted">· {nameOf(e.author_id)}</span>{/if}
         {#if edits.get(e.id)}

@@ -20,10 +20,16 @@ export type GroupMilestone = { id: string; project_id: string; title: string; du
 export type EntryKind = "entry" | "weekly";
 export type Entry = {
   id: string; author_id: string; project_id: string | null; entry_date: string; kind: EntryKind;
+  planning_project_id?: string | null; // or one of your own Planning projects (0022)
+  planning_milestone_id?: string | null; // a milestone of that Planning project
+  group_milestone_id?: string | null; // or of the shared project
   did: string | null; results: string | null; next: string | null; links: string[];
   created_at: string; updated_at: string;
 };
-export type EntryFields = Pick<Entry, "project_id" | "entry_date" | "kind" | "did" | "results" | "next" | "links">;
+export type EntryFields = Pick<Entry, "project_id" | "planning_project_id" | "planning_milestone_id" | "group_milestone_id"
+  | "entry_date" | "kind" | "did" | "results" | "next" | "links">;
+/** A Planning project an entry can be about (yours only), with its milestones. */
+export type PlanningRef = { id: string; name: string; milestones: { id: string; title: string }[] };
 export type Revision = { id: string; entry_id: string; changed_at: string; old_row: Entry };
 export type Comment = { id: string; entry_id: string; author_id: string; body: string; created_at: string };
 
@@ -107,7 +113,7 @@ export async function deleteMilestone(id: string): Promise<void> {
 }
 
 // ---- the logbook ---------------------------------------------------------------------
-const ENTRY_COLS = "id,author_id,project_id,entry_date,kind,did,results,next,links,created_at,updated_at";
+const ENTRY_COLS = "*"; // every column, so this works before and after 0022
 /** Entries you can see: your own (a member), or everyone's (the supervisor); newest first. */
 export async function loadEntries(authorId?: string): Promise<Entry[]> {
   let q = supabase.from("logbook_entry").select(ENTRY_COLS);
@@ -169,13 +175,18 @@ export function linkName(url: string): string {
 // ---- export --------------------------------------------------------------------------
 /** A logbook as Markdown, oldest first, with comments: to keep on OneDrive, or take along. */
 export function logbookMarkdown(entries: Entry[], projects: GroupProject[], members: Member[], comments: Comment[],
-                                edits: Map<string, number>, title: string): string {
+                                edits: Map<string, number>, title: string, planning: PlanningRef[] = [],
+                                groupMilestones: GroupMilestone[] = []): string {
   const name = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "?";
-  const proj = (id: string | null) => (id ? projects.find((p) => p.id === id)?.title ?? "(project removed)" : "No project");
+  const proj = (e: Entry) => e.planning_project_id ? planning.find((p) => p.id === e.planning_project_id)?.name ?? "(project removed)"
+    : e.project_id ? projects.find((p) => p.id === e.project_id)?.title ?? "(project removed)" : "No project";
+  const ms = (e: Entry) => e.planning_milestone_id
+    ? planning.flatMap((p) => p.milestones).find((m) => m.id === e.planning_milestone_id)?.title
+    : e.group_milestone_id ? groupMilestones.find((m) => m.id === e.group_milestone_id)?.title : undefined;
   const out = [`# ${title}`, "", `Exported ${new Date().toISOString().slice(0, 10)}.`, ""];
   for (const e of [...entries].sort((a, b) => a.entry_date.localeCompare(b.entry_date) || a.created_at.localeCompare(b.created_at))) {
     const f = FIELDS[e.kind];
-    out.push(`## ${e.entry_date} · ${proj(e.project_id)}${e.kind === "weekly" ? " · weekly update" : ""}`, "");
+    out.push(`## ${e.entry_date} · ${proj(e)}${ms(e) ? ` › ${ms(e)}` : ""}${e.kind === "weekly" ? " · weekly update" : ""}`, "");
     out.push(`*${name(e.author_id)}*${edits.get(e.id) ? ` · edited ${edits.get(e.id)}× (last ${e.updated_at.slice(0, 10)})` : ""}`, "");
     for (const k of ["did", "results", "next"] as const) if (e[k]) out.push(`**${f[k]}**`, "", e[k]!, "");
     if (e.links.length) out.push("**Links**", "", ...e.links.map((l) => `- ${l}`), "");

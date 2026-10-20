@@ -6,7 +6,7 @@
     loadMembers, addMember, saveMember, loadGroupProjects, loadMilestones, loadEntries, loadComments, revisionCounts,
     logbookMarkdown, download, myId,
   } from "../lib/group";
-  import type { Member, GroupProject, GroupMilestone, Entry, Comment } from "../lib/group";
+  import type { Member, GroupProject, GroupMilestone, Entry, Comment, PlanningRef } from "../lib/group";
   import { loadProjects, loadTaxonomy } from "../lib/data";
   import type { Project } from "../lib/data";
   import { LIVE_STATUSES } from "../lib/plan";
@@ -23,6 +23,7 @@
   let comments = $state<Comment[]>([]);
   let edits = $state(new Map<string, number>());
   let supervision = $state<Project[]>([]); // your Planning projects under Research › Supervision
+  let planningRefs = $state<PlanningRef[]>([]); // all your Planning projects, to name your own logbook notes
   let loading = $state(true);
   let error = $state("");
 
@@ -35,6 +36,7 @@
       const [cs, ed] = await Promise.all([loadComments(ids), revisionCounts(ids)]);
       const supCats = new Set(tax.allCategories.filter((c) => c.code === "RES_SUP").map((c) => c.id));
       supervision = planning.filter((x) => supCats.has(x.category_id));
+      planningRefs = planning.map((x) => ({ id: x.id, name: x.name, milestones: x.milestone.map((m) => ({ id: m.id, title: m.title })) }));
       // names follow Planning: rename a member there and it shows here (and to them)
       const renames = m.filter((x) => {
         const pp = x.planning_project_id ? planning.find((y) => y.id === x.planning_project_id) : null;
@@ -121,11 +123,11 @@
   // ---- export --------------------------------------------------------------------------------
   function exportOne(m: Member) {
     download(`logbook-${m.display_name.replace(/\W+/g, "-").toLowerCase()}.md`,
-      logbookMarkdown(theirEntries, projects, members, comments, edits, `Logbook — ${m.display_name}`));
+      logbookMarkdown(theirEntries, projects, members, comments, edits, `Logbook — ${m.display_name}`, planningRefs, milestones));
   }
   function exportAll() {
     download(`logbooks-${new Date().toISOString().slice(0, 10)}.md`,
-      logbookMarkdown(entries, projects, members, comments, edits, "Group logbooks"));
+      logbookMarkdown(entries, projects, members, comments, edits, "Group logbooks", planningRefs, milestones));
   }
 </script>
 
@@ -206,7 +208,7 @@
           <GroupProjects projects={theirProjects} {milestones} {members} {entries} supervisor newFor={current.user_id} onchanged={load} />
         {:else}
           {#if isMe}<p class="muted small">Write in your <a href="#/logbook">Logbook</a> tab; it's shown here too.</p>{/if}
-          <Logbook entries={theirEntries} projects={theirProjects} {members} {comments} {edits} {me} canWrite={false} onchanged={load} />
+          <Logbook entries={theirEntries} projects={theirProjects} planning={isMe ? planningRefs : []} groupMilestones={milestones} {members} {comments} {edits} {me} canWrite={false} onchanged={load} />
         {/if}
       {:else if !loading}
         <p class="muted">Add your first member: they write their logbook here, and you comment.</p>

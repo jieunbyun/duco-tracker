@@ -128,7 +128,7 @@
       visible to them. To add a member: invite them in Supabase (<em>Authentication › Users › Invite user</em>; they
       get an email to choose a password), then <em>+ Add a member</em> here: pick them from your Planning projects
       under Research › Supervision (their name then follows Planning) or, for anyone else, type a name.
-      You come first in the list, with the projects you lead; your own <em>Logbook</em> tab is for those.
+      You come first in the list, with the projects you lead. Your own <em>Logbook</em> tab is for those, and for progress notes on your Planning projects: pick one (and, if you like, one of its milestones) in the entry's Project menu. Those notes are yours alone.
       Under each member are their projects (several each; you create them and choose who leads, and both of you tick
       off milestones) and their logbook: dated entries — what they did, results, next, and links to their files on
       the institution's OneDrive — or an optional weekly update. You read every entry and comment; they reply. Only
