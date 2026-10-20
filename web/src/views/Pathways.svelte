@@ -254,6 +254,19 @@
       .filter((x): x is { l: PwLink; a: Box; b: Box } => !!x.a && !!x.b)
       .map(({ l, a, b }) => {
         const ax = a.x + a.w, ay = a.y + NODE_H / 2;
+        const gap = b.x - ax;
+        if (gap >= -4 && gap < 40) {
+          // One starts where (or just after) the other ends: an arrow from end
+          // to start would vanish between them, so it runs under the cards (same
+          // row) or across from one's bottom/top edge to the other's.
+          const x1 = ax - 14, x2 = b.x + 14, bend = 15;
+          const d = b.y > a.y
+            ? `M ${x1} ${a.y + NODE_H} C ${x1} ${a.y + NODE_H + bend}, ${x2} ${b.y - bend}, ${x2} ${b.y}`
+            : b.y < a.y
+              ? `M ${x1} ${a.y} C ${x1} ${a.y - bend}, ${x2} ${b.y + NODE_H + bend}, ${x2} ${b.y + NODE_H}`
+              : `M ${x1} ${a.y + NODE_H} C ${x1} ${a.y + NODE_H + bend}, ${x2} ${b.y + NODE_H + bend}, ${x2} ${b.y + NODE_H}`;
+          return { l, d };
+        }
         const forward = b.x >= ax - 4;
         const bx = forward ? b.x : b.x + b.w, by = b.y + NODE_H / 2;
         const dx = Math.max(40, Math.abs(bx - ax) / 2) * (forward ? 1 : -1);
