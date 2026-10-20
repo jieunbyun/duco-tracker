@@ -136,6 +136,13 @@ export function monthAt(f: number, from: string, to: string): string {
   const pick = d.getTime() - first < next - d.getTime() ? first : next;
   return new Date(pick).toISOString().slice(0, 10);
 }
+/** A date moved by whole months, keeping its day (clamped to the month's length). */
+export function shiftMonths(iso: string, months: number): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  const last = new Date(Date.UTC(y, m - 1 + months + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + months, Math.min(d, last))).toISOString().slice(0, 10);
+}
+
 /** Months between two dates (whole months, by their firsts). */
 export function monthsBetween(a: string, b: string): number {
   return (+b.slice(0, 4) - +a.slice(0, 4)) * 12 + (+b.slice(5, 7) - +a.slice(5, 7));

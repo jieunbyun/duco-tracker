@@ -5,6 +5,7 @@
   } from "./pathways";
   import type { PwNode, PwNodeFields, PwLink, PwRevision, LinkKind, NodeKind, Lane } from "./pathways";
   import type { Project } from "./data";
+  import { setProjectDates } from "./data";
   import type { Reading } from "./reading";
   import { LIVE_STATUSES } from "./plan";
   import { fmtDay } from "./dates";
@@ -38,6 +39,16 @@
     cost: n0?.cost ?? (null as number | null),
     fte: n0?.fte ?? (null as number | null),
   });
+  // a linked Planning project lends its current name and dates
+  {
+    const p = n0?.project_id ? untrack(() => projects).find((x) => x.id === n0.project_id) : undefined;
+    if (p) {
+      f.title = p.name;
+      f.start_on = p.start_on ?? f.start_on;
+      f.end_on = p.end_on ?? f.end_on;
+    }
+  }
+  const linkedProject = $derived(f.kind === "project" && f.project_id ? projects.find((x) => x.id === f.project_id) ?? null : null);
   let reason = $state("");
   let busy = $state(false);
   let error = $state("");
@@ -82,6 +93,10 @@
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
+      // a linked project keeps the Planning project's dates in step
+      if (linkedProject && ((f.start_on || null) !== linkedProject.start_on || (f.end_on || null) !== linkedProject.end_on)) {
+        await setProjectDates(linkedProject.id, f.start_on || null, f.end_on || null);
+      }
       await saveNode(n0?.id ?? null, fields);
       onsaved();
     } catch (e) {
@@ -139,7 +154,10 @@
     </select>
   </label>
 
-  <label class="wide">{f.kind === "person" ? "Name and role" : "Title"} <input bind:value={f.title} required /></label>
+  <label class="wide">{f.kind === "person" ? "Name and role" : "Title"}
+    <input bind:value={f.title} required readonly={!!linkedProject} />
+    {#if linkedProject}<span class="synced">Named in Planning; its dates here and in Planning stay in step.</span>{/if}
+  </label>
   <label class="wide">{f.kind === "person" ? "Original strengths, and the legacy they will leave" : "Description"}
     <textarea rows="3" bind:value={f.detail}></textarea>
   </label>
@@ -247,6 +265,7 @@
   .check { display: flex; align-items: center; gap: 0.45rem; align-self: end; padding-bottom: 0.5rem; color: var(--ink); }
   .check input { width: auto; }
   .reason { color: var(--accent); }
+  .synced { font-size: 0.75rem; color: var(--accent); }
   .links h3 { font-size: 0.9rem; margin: 0 0 0.3rem; }
   .link-row, .link-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.85rem; padding: 0.15rem 0; }
   .link-row select, .link-add select { width: auto; font-size: 0.8rem; padding: 0.2rem 0.3rem; }

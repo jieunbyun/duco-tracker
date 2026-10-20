@@ -1,12 +1,12 @@
 <script lang="ts">
-  import { loadProjects, loadTaxonomy } from "../lib/data";
+  import { loadProjects, loadTaxonomy, setProjectDates } from "../lib/data";
   import type { Project, Taxonomy } from "../lib/data";
   import { LIVE_STATUSES } from "../lib/plan";
   import { loadReadings } from "../lib/reading";
   import type { Reading } from "../lib/reading";
   import {
     LANES, NODE_KINDS, LINK_KINDS, loadPathways, saveYears, saveNode, saveLink, inferLinkKind,
-    monthStart, addMonths, fraction, monthAt, monthsBetween,
+    monthStart, addMonths, fraction, monthAt, monthsBetween, shiftMonths,
   } from "../lib/pathways";
   import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
   import { today, fmtDay } from "../lib/dates";
@@ -58,7 +58,21 @@
   const to = $derived(addMonths(from, years * 12));
   const xOf = (iso: string) => x0 + Math.min(1, Math.max(0, fraction(iso, from, to))) * (x1 - x0);
 
-  const visible = $derived(nodes.filter((n) => showAll || n.status === "active"));
+  // An item linked to a Planning project shows that project's current name and
+  // dates (and is done once the project is); moving it moves the project.
+  const projById = $derived(new Map(projects.map((p) => [p.id, p])));
+  function eff(n: PwNode): PwNode {
+    const p = n.project_id ? projById.get(n.project_id) : undefined;
+    if (!p) return n;
+    return {
+      ...n,
+      title: p.name,
+      start_on: p.start_on ?? n.start_on,
+      end_on: p.end_on ?? n.end_on,
+      status: p.status === "done" || p.status === "dropped" ? "done" : n.status,
+    };
+  }
+  const visible = $derived(nodes.map(eff).filter((n) => showAll || n.status === "active"));
 
   // ---- dragging (move / stretch / link) -------------------------------------------
   type Drag =
@@ -118,9 +132,9 @@
     if (mode === "link") {
       drag = { mode, id: n.id, x: p.x, y: p.y };
     } else {
-      const s = monthStart(n.start_on ?? today());
+      const s = n.start_on ?? today();
       drag = { mode, id: n.id, px: p.x, py: p.y, moved: false,
-               start: s, end: n.end_on ? monthStart(n.end_on) : addMonths(s, 3), lane: n.lane, row: n.lane_row };
+               start: s, end: n.end_on ?? addMonths(monthStart(s), 3), lane: n.lane, row: n.lane_row };
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -134,21 +148,23 @@
       drag = { ...drag, x: p.x, y: p.y };
       return;
     }
-    const n = nodes.find((x) => x.id === drag!.id)!;
+    const n = eff(nodes.find((x) => x.id === drag!.id)!);
     const dx = p.x - drag.px, dy = p.y - drag.py;
     if (!drag.moved && Math.hypot(dx, dy) < 5) return;
-    const s0 = monthStart(n.start_on ?? today());
-    const e0 = n.end_on ? monthStart(n.end_on) : addMonths(s0, 3);
-    const span = Math.max(0, monthsBetween(s0, e0));
+    // dates move by whole months and keep their day, so a Planning project's
+    // exact dates survive a drag (30 Jun moved 7 months is 30 Jan)
+    const s0 = n.start_on ?? today();
+    const e0 = n.end_on ?? addMonths(monthStart(s0), 3);
     const f = (x: number) => (x - x0) / (x1 - x0);
     if (drag.mode === "resize") {
-      let end = monthAt(f(xOf(e0) + dx), from, to);
-      if (end <= s0) end = addMonths(s0, 1);
+      const k = monthsBetween(monthStart(e0), monthAt(f(xOf(e0) + dx), from, to));
+      let end = shiftMonths(e0, k);
+      if (end <= s0) end = shiftMonths(s0, 1);
       drag = { ...drag, moved: true, end };
     } else {
-      const start = n.kind === "goal" ? s0 : monthAt(f(xOf(s0 < from ? from : s0) + dx), from, to);
+      const k = n.kind === "goal" ? 0 : monthsBetween(monthStart(s0 < from ? from : s0), monthAt(f(xOf(s0 < from ? from : s0) + dx), from, to));
       const where = laneAt(p.y);
-      drag = { ...drag, moved: true, start, end: addMonths(start, span), lane: where.lane, row: where.row };
+      drag = { ...drag, moved: true, start: shiftMonths(s0, k), end: shiftMonths(e0, k), lane: where.lane, row: where.row };
     }
   }
 
@@ -159,7 +175,8 @@
     const d = drag;
     drag = null;
     if (!d) return;
-    const n = nodes.find((x) => x.id === d.id);
+    const raw = nodes.find((x) => x.id === d.id);
+    const n = raw ? eff(raw) : undefined;
     if (!n) return;
     try {
       if (d.mode === "link") {
@@ -171,11 +188,15 @@
         }
         return;
       }
-      if (!d.moved) return openEdit(n); // a click
+      if (!d.moved) return openEdit(raw!); // a click
       const fields: Partial<PwNodeFields> = { lane: d.lane, lane_row: d.row };
       if (n.kind !== "goal") Object.assign(fields, { start_on: d.start, end_on: d.end });
       // show it where it was dropped straight away; the reload confirms
       nodes = nodes.map((x) => (x.id === n.id ? { ...x, ...fields } as PwNode : x));
+      if (n.project_id && n.kind !== "goal") {
+        projects = projects.map((p) => (p.id === n.project_id ? { ...p, start_on: d.start, end_on: d.end } : p));
+        await setProjectDates(n.project_id, d.start, d.end);
+      }
       await saveNode(n.id, fields);
       await load();
     } catch (e) {

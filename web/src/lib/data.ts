@@ -163,6 +163,9 @@ export async function saveProject(id: string | null, fields: ProjectFields): Pro
   const row = await check<{ id: string }>(supabase.from("project").insert(fields).select("id").single());
   return row!.id;
 }
+export async function setProjectDates(id: string, start_on: string | null, end_on: string | null): Promise<void> {
+  await check(supabase.from("project").update({ start_on, end_on }).eq("id", id));
+}
 export async function setProjectStatus(id: string, status: string): Promise<void> {
   await check(supabase.from("project").update({ status }).eq("id", id));
 }
