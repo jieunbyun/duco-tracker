@@ -20,14 +20,43 @@
   const byId = $derived(new Map(all.map((n) => [n.id, n])));
   const titleOf = (id: string) => byId.get(id)?.title ?? "?";
 
+  const PLURAL: Record<string, string> = {
+    goal: "Goals", objective: "Objectives", project: "Projects", person: "People", gap: "Knowledge gaps", grant: "Grants",
+  };
+
+  // Order by start or end date, read the way the map draws them: an item with
+  // only an end ("by …") starts now; one with only a start runs on, so it ends
+  // after everything that has an end; one with neither comes last.
+  const ORDER_KEY = "pathways.listOrder";
+  let order = $state<"start" | "end">((() => {
+    try { return localStorage.getItem(ORDER_KEY) === "end" ? "end" : "start"; } catch { return "start"; }
+  })());
+  function setOrder(o: "start" | "end") {
+    order = o;
+    try { localStorage.setItem(ORDER_KEY, o); } catch {}
+  }
+  const LAST = "9999-99-99", OPEN = "9999-00-00"; // sort after any real date; open-ended before undated
+  const now = new Date().toISOString().slice(0, 10);
+  function dateKey(n: PwNode): string {
+    if (!n.start_on && !n.end_on) return LAST;
+    if (order === "start") return n.start_on ?? (n.end_on! < now ? n.end_on! : now);
+    return n.end_on ?? OPEN;
+  }
+  const otherKey = (n: PwNode) => (order === "start" ? n.end_on ?? OPEN : n.start_on ?? "");
+  const byDate = (a: PwNode, b: PwNode) =>
+    dateKey(a).localeCompare(dateKey(b)) || otherKey(a).localeCompare(otherKey(b)) || a.title.localeCompare(b.title);
+
   const groups = $derived(
-    LANES.map((l) => ({
-      lane: l,
-      items: shown
-        .filter((n) => n.lane === l.key)
-        .sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind)
-          || (a.start_on ?? "").localeCompare(b.start_on ?? "") || a.title.localeCompare(b.title)),
-    })),
+    LANES.map((l) => {
+      const inLane = shown.filter((n) => n.lane === l.key);
+      return {
+        lane: l,
+        count: inLane.length,
+        kinds: KIND_ORDER
+          .map((k) => ({ kind: k, items: inLane.filter((n) => n.kind === k).sort(byDate) }))
+          .filter((k) => k.items.length),
+      };
+    }),
   );
 
   // ---- quick entry ------------------------------------------------------------------
@@ -96,10 +125,30 @@
 </p>
 {#if error}<p class="error">{error}</p>{/if}
 
+<div class="order" role="group" aria-label="Order">
+  <span class="muted">Order by</span>
+  <button class:on={order === "start"} aria-pressed={order === "start"} onclick={() => setOrder("start")}>start date</button>
+  <button class:on={order === "end"} aria-pressed={order === "end"} onclick={() => setOrder("end")}>end date</button>
+  <span class="muted note">
+    {order === "start"
+      ? "Items with only an end date count as starting now; undated items come last."
+      : "Open-ended items come after those with an end date; undated items come last."}
+  </span>
+</div>
+
 {#each groups as g (g.lane.key)}
   <section class="grp lane-{g.lane.key}">
-    <h2>{g.lane.label} <span class="muted">{g.items.length}</span></h2>
-    {#each g.items as n (n.id)}
+    <h2>{g.lane.label} <span class="muted">{g.count}</span></h2>
+    {#each g.kinds as k (k.kind)}
+      <h3>{PLURAL[k.kind] ?? kindLabel(k.kind)} <span class="muted">{k.items.length}</span></h3>
+      {#each k.items as n (n.id)}{@render row(n)}{/each}
+    {:else}
+      <p class="muted empty">Nothing here yet.</p>
+    {/each}
+  </section>
+{/each}
+
+{#snippet row(n: PwNode)}
       {@const out = links.filter((l) => l.from_id === n.id)}
       {@const inc = links.filter((l) => l.to_id === n.id)}
       <div class="row" class:inactive={n.status !== "active"}>
@@ -144,11 +193,7 @@
           </div>
         </div>
       </div>
-    {:else}
-      <p class="muted empty">Nothing here yet.</p>
-    {/each}
-  </section>
-{/each}
+{/snippet}
 
 <style>
   .quick {
@@ -168,6 +213,15 @@
   .grp h2 { font-size: 1rem; margin: 0 0 0.3rem; }
   .grp h2 .muted { font-size: 0.8rem; font-weight: 400; }
   .empty { font-size: 0.82rem; margin: 0.2rem 0 0.4rem; }
+  .grp h3 {
+    font-size: 0.74rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft);
+    margin: 0.7rem 0 0.1rem;
+  }
+  .grp h3 .muted { font-weight: 400; }
+  .order { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin: 0 0 0.9rem; font-family: var(--font-ui); font-size: 0.82rem; }
+  .order button { font-size: 0.8rem; padding: 0.2rem 0.6rem; }
+  .order button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .order .note { font-size: 0.76rem; }
 
   .row { display: flex; gap: 0.55rem; padding: 0.4rem 0; border-top: 1px solid var(--rule); }
   .row.inactive { opacity: 0.55; }
