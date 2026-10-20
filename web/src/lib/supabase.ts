@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { undoFetch } from "./undo.svelte";
 
 // Keep only the origin: the dashboard's "API URL" ends in /rest/v1/, which
 // supabase-js would append a second time ("Invalid path specified").
@@ -13,5 +14,6 @@ if (!url || !key) {
 }
 
 // The browser talks to Supabase directly; row-level security (owner-only on
-// every table) is what keeps the data private, not this client.
-export const supabase = createClient(url, key);
+// every table) is what keeps the data private, not this client. Each write is
+// tagged with the action it belongs to, for undo.
+export const supabase = createClient(url, key, { global: { fetch: undoFetch } });

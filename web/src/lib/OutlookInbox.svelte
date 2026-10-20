@@ -11,7 +11,7 @@
     tax: Taxonomy;
     projects: Project[];
     onchange: () => void;
-    remember: (label: string, undo: () => Promise<unknown>) => void;
+    remember: (label: string) => void; // names the change for the app's undo
   };
   let { todos, slots, tax, projects, onchange, remember }: Props = $props();
 
@@ -45,7 +45,6 @@
 
   const day = (d: string) => parse(d).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
   const repeats = (t: Todo) => !!t.source_key?.includes("|");
-  const snap = <T extends object>(x: T): T => ({ ...($state.snapshot(x) as object) }) as T;
 
   async function run(t: Todo, fn: () => Promise<void>) {
     busy = t.id;
@@ -66,8 +65,6 @@
     if (!d) return;
     const s = slotOf(t);
     if (!t.source_all_day && !(d.start && d.end && d.end > d.start)) return void (error = "The end time must be after the start.");
-    const before = snap(t);
-    const slotBefore = s ? snap(s) : null;
     return run(t, async () => {
       const len = t.source_all_day ? d.hours : Math.round(((+d.end.slice(0, 2) * 60 + +d.end.slice(3) - +d.start.slice(0, 2) * 60 - +d.start.slice(3)) / 60) * 100) / 100;
       await saveTodo(t.id, {
@@ -79,15 +76,7 @@
           ? { planned_hours: null }
           : { start_time: d.start, end_time: d.end, planned_hours: len });
       }
-      remember(`${tentative ? "Kept as tentative" : "Kept"} “${t.title}”`, async () => {
-        await saveTodo(t.id, {
-          category_id: before.category_id, project_id: before.project_id, est_hours: before.est_hours,
-          reviewed: false, is_tentative: before.is_tentative,
-        });
-        if (slotBefore) {
-          await saveSlot(slotBefore.id, { start_time: slotBefore.start_time, end_time: slotBefore.end_time, planned_hours: slotBefore.planned_hours });
-        }
-      });
+      remember(`${tentative ? "Kept as tentative" : "Kept"} “${t.title}”`);
     });
   }
 
@@ -95,8 +84,8 @@
   function dismiss(t: Todo, all: boolean) {
     const s = slotOf(t);
     return run(t, async () => {
-      const undo = await dismissOutlook(snap(t), s ? snap(s) : null, all);
-      remember(all ? `Ignored “${t.title}” and its repeats` : `Ignored “${t.title}”`, undo);
+      await dismissOutlook(t, s ?? null, all);
+      remember(all ? `Ignored “${t.title}” and its repeats` : `Ignored “${t.title}”`);
     });
   }
 </script>

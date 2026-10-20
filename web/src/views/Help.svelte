@@ -50,8 +50,16 @@
       <em>Plan across days…</em> (on a duty's menu, or in the to-do list) lets you tick several days and give the
       total hours, which are split evenly over them; each card then shows its share.
       <em>✉ Create email checks</em>, under the calendar, adds a 1.5-hour “Email check” to-do on each weekday;
-      each day is its own to-do, so any one can be edited, moved or cancelled. Every change on this page can be
-      undone: use the bar that appears at the bottom, <em>↶ Undo</em>, or Ctrl+Z.
+      each day is its own to-do, so any one can be edited, moved or cancelled. The bar that appears at the bottom
+      after a change offers to undo it.
+    </dd>
+
+    <dt>Undo</dt>
+    <dd>
+      <em>↶ Undo</em> at the top right, or Ctrl+Z, takes back your latest change in any tab — an edit, an addition
+      or a deletion (a deleted item comes back with its links, notes and everything else deleted along with it).
+      Press it again to go further back, through the changes of this session; hover over it to see what it will
+      undo. Changes made within a second of each other count as one. The Outlook sync is not something it undoes.
     </dd>
 
     <dt>Outlook</dt>

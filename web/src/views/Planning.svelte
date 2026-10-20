@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { undoable, undoLast } from "../lib/undo.svelte";
   import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus } from "../lib/data";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
   import { horizonRange, projectLoad, areaHorizons, plannedOf, PLANNABLE_KINDS, PACE_DAYS } from "../lib/horizon";
@@ -107,21 +108,19 @@
   // ---- project list ---------------------------------------------------------
   let showFinished = $state(false);
 
-  // ---- tick a project complete, with a moment to undo -------------------------------
-  let flash = $state<{ text: string; undo?: () => Promise<void> } | null>(null);
+  // ---- tick a project complete, with a moment to undo (the app's undo) -------------------
+  let flash = $state<{ text: string; undo?: boolean } | null>(null);
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
-  function showFlash(text: string, undo?: () => Promise<void>) {
+  function showFlash(text: string, undo?: boolean) {
     flash = { text, undo };
     clearTimeout(flashTimer);
     flashTimer = setTimeout(() => (flash = null), 8000);
   }
   async function setComplete(p: Project, done: boolean) {
-    const before = p.status;
-    const after = done ? "done" : "active";
+    const label = done ? `Marked “${p.name}” done` : `Reopened “${p.name}”`;
     try {
-      await setProjectStatus(p.id, after);
-      showFlash(done ? `Marked “${p.name}” done${showFinished ? "" : " — hidden with done projects"}` : `Reopened “${p.name}”`,
-        async () => { await setProjectStatus(p.id, before); flash = null; await load(); });
+      await undoable(label, () => setProjectStatus(p.id, done ? "done" : "active"));
+      showFlash(done && !showFinished ? `${label} — hidden with done projects` : label, true);
     } catch (e) {
       error = (e as Error).message;
     }
@@ -406,7 +405,7 @@
 {#if flash}
   <div class="flash" role="status">
     <span>{flash.text}</span>
-    {#if flash.undo}<button onclick={flash.undo}>Undo</button>{/if}
+    {#if flash.undo}<button onclick={() => { flash = null; undoLast(); }}>Undo</button>{/if}
     <button class="x" aria-label="Dismiss" onclick={() => (flash = null)}>✕</button>
   </div>
 {/if}

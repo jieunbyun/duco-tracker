@@ -362,22 +362,6 @@ export async function deleteSlot(id: string): Promise<void> {
   await check(supabase.from("todo_slot").delete().eq("id", id));
 }
 
-/**
- * Put deleted rows back with their original ids (for undo), so anything that
- * pointed at them still does. Time entries drop their computed minutes.
- */
-export async function reinsertTodo(todo: Todo, slots: Slot[]): Promise<void> {
-  await check(supabase.from("todo").insert(todo));
-  if (slots.length) await check(supabase.from("todo_slot").insert(slots));
-}
-export async function reinsertSlot(slot: Slot): Promise<void> {
-  await check(supabase.from("todo_slot").insert(slot));
-}
-export async function reinsertEntry(entry: TimeEntry): Promise<void> {
-  const { minutes: _computed, ...row } = entry;
-  await check(supabase.from("time_entry").insert(row));
-}
-
 /** Time entries that started within [from, to] (whole days). */
 export async function loadEntriesBetween(from: string, to: string): Promise<TimeEntry[]> {
   const rows = await fetchAll<TimeEntry>((a, b) =>

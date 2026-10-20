@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
-    saveEntry, deleteEntry, reinsertTodo, reinsertSlot, reinsertEntry, loadAllHours, targetOn, loadIdeas,
+    saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
@@ -16,6 +16,7 @@
   import OutlookSettings from "../lib/OutlookSettings.svelte";
   import { loadFeed, syncOutlook, isStale, loadUnreviewed, dismissOutlook } from "../lib/outlook";
   import type { Feed } from "../lib/outlook";
+  import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
 
   const SHOW_LOGGED = "week.showLogged";
   const LAST_CATEGORY = "log.category";
@@ -51,7 +52,7 @@
     syncing = true;
     syncNote = "";
     try {
-      const r = await syncOutlook();
+      const r = await quietly(syncOutlook); // not something to undo
       const parts = [r.added && `${r.added} new`, r.updated && `${r.updated} changed`, r.removed && `${r.removed} removed`,
                      r.cleared && `${r.cleared} outside the range cleared`].filter(Boolean);
       syncNote = parts.length ? parts.join(", ") : "up to date";
@@ -119,10 +120,8 @@
   }
 
   // ---- undo ----------------------------------------------------------------------
-  // Each change made here records how to reverse it. Undo walks back through
-  // them, most recent first; the bar at the bottom offers the latest one.
-  type Step = { label: string; undo: () => Promise<unknown> };
-  let history = $state<Step[]>([]);
+  // Changes here go into the app-wide undo (the header's ↶ Undo, Ctrl+Z) under
+  // a name; the bar at the bottom names the latest one and offers to undo it.
   let toast = $state<{ text: string; canUndo: boolean } | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -131,35 +130,22 @@
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toast = null), 8000);
   }
-  function remember(label: string, undo: () => Promise<unknown>) {
-    history = [...history.slice(-29), { label, undo }];
+  /** Name the change just made (its writes are already recorded for undo). */
+  function remember(label: string) {
+    nameLast(label);
     showToast(label, true);
   }
-  async function undoLast() {
-    const step = history[history.length - 1];
-    if (!step) return;
-    history = history.slice(0, -1);
+  /** Run a change as one undoable action. */
+  async function change(label: string, run: () => Promise<unknown>) {
     try {
-      await step.undo();
-      showToast(`Undone: ${step.label}`, false);
-    } catch (e) {
-      error = `Could not undo “${step.label}”: ${(e as Error).message}`;
-    }
-    await load();
-  }
-  /** Run a change; on success, remember how to undo it. */
-  async function change(label: string, run: () => Promise<unknown>, undo: () => Promise<unknown>) {
-    try {
-      await run();
-      remember(label, undo);
+      await undoable(label, run);
+      showToast(label, true);
     } catch (e) {
       error = (e as Error).message;
     }
     await load();
   }
   const q = (t: { title: string }) => `“${t.title}”`;
-  const snapTodo = (t: Todo): Todo => ({ ...$state.snapshot(t) }) as Todo;
-  const snapSlot = (s: Slot): Slot => ({ ...$state.snapshot(s) }) as Slot;
 
   // ---- lookups -------------------------------------------------------------------
   const todoById = $derived(new Map(todos.map((t) => [t.id, t])));
@@ -269,10 +255,8 @@
       showToast(`${q(t)} is already on ${dayName(day)} ${dayNum(day)}`, false);
       return;
     }
-    let id = "";
     return change(`Planned ${q(t)} on ${dayName(day)} ${dayNum(day)}`,
-      async () => (id = await saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null })),
-      () => deleteSlot(id));
+      () => saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null }));
   }
 
   // Moving a card onto a day that already holds the same to-do merges the two
@@ -283,20 +267,13 @@
     const there = openCardOn(t.id, to, s.id);
     if (!there) {
       return change(`Moved ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
-        () => saveSlot(s.id, { planned_on: to }),
-        () => saveSlot(s.id, { planned_on: s.planned_on }));
+        () => saveSlot(s.id, { planned_on: to }));
     }
-    const moving = snapSlot(s);
-    const before = there.planned_hours;
     const merged = sumHours(there.planned_hours, s.planned_hours);
     return change(`Merged ${q(t)} into ${dayName(to)} ${dayNum(to)}${merged ? ` (${fmtHours(merged)})` : ""}`,
       async () => {
         await saveSlot(there.id, { planned_hours: merged });
         await deleteSlot(s.id);
-      },
-      async () => {
-        await reinsertSlot(moving);
-        await saveSlot(there.id, { planned_hours: before });
       });
   }
 
@@ -315,20 +292,12 @@
     if (!rest) return;
     const to = addDays(s.planned_on, by);
     const there = openCardOn(t.id, to, s.id);
-    const ownBefore = s.planned_hours;
-    const thereBefore = there?.planned_hours ?? null;
     const done = (cardHours(s, t) ?? 0) - rest;
-    let made = "";
     return change(`Moved the remaining ${fmtHours(rest)} of ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
       async () => {
         await saveSlot(s.id, { planned_hours: done });
         if (there) await saveSlot(there.id, { planned_hours: sumHours(there.planned_hours, rest) });
-        else made = await saveSlot(null, { todo_id: t.id, planned_on: to, planned_hours: rest });
-      },
-      async () => {
-        await saveSlot(s.id, { planned_hours: ownBefore });
-        if (there) await saveSlot(there.id, { planned_hours: thereBefore });
-        else if (made) await deleteSlot(made);
+        else await saveSlot(null, { todo_id: t.id, planned_on: to, planned_hours: rest });
       });
   }
   function unplan(s: Slot) {
@@ -336,69 +305,49 @@
     if (!t) return;
     if (t.kind === "meeting") {
       if (!confirm(`Delete the meeting “${t.title}”?${s.entry_id ? " Its logged time stays." : ""} (Use Edit to change its time.)`)) return;
-      const todo = snapTodo(t);
-      const own = slotsOf(t).map(snapSlot);
-      return change(`Deleted the meeting ${q(t)}`, () => deleteTodo(t.id), () => reinsertTodo(todo, own));
+      return change(`Deleted the meeting ${q(t)}`, () => deleteTodo(t.id));
     }
     if (s.entry_id && !confirm("This day was logged. Remove it from the plan? The logged time stays.")) return;
-    const slot = snapSlot(s);
-    return change(`Took ${q(t)} off ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`,
-      () => deleteSlot(s.id), () => reinsertSlot(slot));
+    return change(`Took ${q(t)} off ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`, () => deleteSlot(s.id));
   }
   // Cancelling keeps the card on its day, struck through, so the week still
   // shows what was planned; it can be restored. ✕ takes it off altogether.
   function setCancelled(s: Slot, cancelled: boolean) {
     const t = todoById.get(s.todo_id)!;
     return change(`${cancelled ? "Cancelled" : "Restored"} ${q(t)} on ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`,
-      () => saveSlot(s.id, { is_cancelled: cancelled }),
-      () => saveSlot(s.id, { is_cancelled: !cancelled }));
+      () => saveSlot(s.id, { is_cancelled: cancelled }));
   }
   function setDone(t: Todo, done: boolean) {
-    const before = { is_done: t.is_done, done_at: t.done_at };
     return change(done ? `Marked ${q(t)} done` : `Reopened ${q(t)}`,
-      () => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null }),
-      () => saveTodo(t.id, before));
+      () => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null }));
   }
   function setMust(t: Todo) {
     const was = t.must_this_week;
     return change(`Made ${q(t)} ${was ? "flexible" : "a must-do"}`,
-      () => saveTodo(t.id, { must_this_week: !was }),
-      () => saveTodo(t.id, { must_this_week: was }));
+      () => saveTodo(t.id, { must_this_week: !was }));
   }
   function setTentative(t: Todo, on: boolean, keep = false) {
-    const before = { is_tentative: t.is_tentative, reviewed: t.reviewed };
     return change(on ? `Marked ${q(t)} tentative` : `Confirmed ${q(t)}`,
-      () => saveTodo(t.id, { is_tentative: on, ...(keep ? { reviewed: true } : {}) }),
-      () => saveTodo(t.id, before));
+      () => saveTodo(t.id, { is_tentative: on, ...(keep ? { reviewed: true } : {}) }));
   }
   function keepAsIs(t: Todo) {
-    return change(`Kept ${q(t)}`, () => saveTodo(t.id, { reviewed: true }), () => saveTodo(t.id, { reviewed: false }));
+    return change(`Kept ${q(t)}`, () => saveTodo(t.id, { reviewed: true }));
   }
-  async function ignoreEvent(t: Todo, s: Slot | null, all: boolean) {
-    try {
-      const undo = await dismissOutlook(snapTodo(t), s ? snapSlot(s) : null, all);
-      remember(all ? `Ignored ${q(t)} and its repeats` : `Ignored ${q(t)}`, undo);
-    } catch (e) {
-      error = (e as Error).message;
-    }
-    await load();
+  function ignoreEvent(t: Todo, s: Slot | null, all: boolean) {
+    return change(all ? `Ignored ${q(t)} and its repeats` : `Ignored ${q(t)}`, () => dismissOutlook(t, s, all));
   }
   function cancelTodo(t: Todo) {
     return change(`Cancelled ${q(t)}`,
-      () => saveTodo(t.id, { is_cancelled: true }),
-      () => saveTodo(t.id, { is_cancelled: false }));
+      () => saveTodo(t.id, { is_cancelled: true }));
   }
   function deleteWhole(t: Todo) {
     const logged = slotsOf(t).some((x) => x.entry_id);
     if (!confirm(`Delete “${t.title}”${slotsOf(t).length ? " and its planned days" : ""}?${logged ? " Logged time stays." : ""}`)) return;
-    const todo = snapTodo(t);
-    const own = slotsOf(t).map(snapSlot);
-    return change(`Deleted ${q(t)}`, () => deleteTodo(t.id), () => reinsertTodo(todo, own));
+    return change(`Deleted ${q(t)}`, () => deleteTodo(t.id));
   }
   function restore(t: Todo) {
     return change(`Restored ${q(t)}`,
-      () => saveTodo(t.id, { is_cancelled: false }),
-      () => saveTodo(t.id, { is_cancelled: true }));
+      () => saveTodo(t.id, { is_cancelled: false }));
   }
 
   // ---- card menu: click or right-click a card ------------------------------------------
@@ -496,14 +445,9 @@
     ];
   }
 
-  // Ctrl/Cmd+Z undoes, unless you are typing or a form is open.
+  // (Ctrl/Cmd+Z is the app's, for every tab.)
   function keys(ev: KeyboardEvent) {
     if (menu) return menuKeys(ev);
-    if (!(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.key.toLowerCase() !== "z" || panel) return;
-    const el = document.activeElement as HTMLElement | null;
-    if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
-    ev.preventDefault();
-    undoLast();
   }
 
   function focusFirst(node: HTMLElement) {
@@ -596,36 +540,25 @@
   async function entrySaved(p: Extract<Panel, { kind: "entry" }>, f: TimeEntryFields, id: string,
                             action: "created" | "updated" | "copied" | "deleted") {
     try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
-    const old = p.entry ? ({ ...$state.snapshot(p.entry) } as TimeEntry) : null;
     const when = `${dayName(f.started_at.slice(0, 10))} ${dayNum(f.started_at.slice(0, 10))}`;
-    if (action === "created") remember(`Logged ${label(f) || "time"} on ${when}`, () => deleteEntry(id));
-    else if (action === "copied") remember(`Copied the entry to ${when}`, () => deleteEntry(id));
-    else if (action === "deleted" && old) remember(`Deleted the entry on ${when}`, () => reinsertEntry(old));
-    else if (action === "updated" && old) {
-      const { id: _id, minutes: _m, ...fields } = old;
-      remember(`Changed the entry on ${when}`, () => saveEntry(old.id, fields));
-    }
+    if (action === "created") remember(`Logged ${label(f) || "time"} on ${when}`);
+    else if (action === "copied") remember(`Copied the entry to ${when}`);
+    else if (action === "deleted") remember(`Deleted the entry on ${when}`);
+    else remember(`Changed the entry on ${when}`);
     panel = null;
     await load();
   }
 
   async function logged(p: Extract<Panel, { kind: "log" }>, f: TimeEntryFields, entryId: string) {
-    const slotBefore = p.slot ? snapSlot(p.slot) : null;
-    const doneBefore = { is_done: p.todo.is_done, done_at: p.todo.done_at };
     const markedDone = markDone && !p.todo.is_done;
-    let newSlot = "";
     try {
+      // these join the entry just saved, as one action
       const day = f.started_at.slice(0, 10);
       if (p.slot) await saveSlot(p.slot.id, { entry_id: entryId, planned_on: day });
-      else newSlot = await saveSlot(null, { todo_id: p.todo.id, planned_on: day, entry_id: entryId });
+      else await saveSlot(null, { todo_id: p.todo.id, planned_on: day, entry_id: entryId });
       if (markedDone) await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() });
       try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
-      remember(`Logged ${q(p.todo)}`, async () => {
-        if (slotBefore) await saveSlot(slotBefore.id, { entry_id: null, planned_on: slotBefore.planned_on });
-        else if (newSlot) await deleteSlot(newSlot);
-        await deleteEntry(entryId);
-        if (markedDone) await saveTodo(p.todo.id, doneBefore);
-      });
+      remember(`Logged ${q(p.todo)}`);
     } catch (e) {
       error = (e as Error).message;
     }
@@ -635,25 +568,15 @@
 
   async function closed(info: { action: "created" | "updated" | "deleted" | "cancelled" | "restored"; ids?: string[] }) {
     const p = panel;
-    const t = p && p.kind === "todo" && p.todo ? snapTodo(p.todo) : null;
-    const own = t ? slots.filter((s) => s.todo_id === t.id).map(snapSlot) : [];
+    const t = p && p.kind === "todo" && p.todo ? p.todo : null;
     if (info.action === "created" && info.ids?.length) {
-      const ids = info.ids;
-      remember(ids.length > 1 ? `Added ${ids.length} meetings` : "Added a to-do",
-        async () => { for (const id of ids) await deleteTodo(id); });
+      remember(info.ids.length > 1 ? `Added ${info.ids.length} meetings` : "Added a to-do");
     } else if (t && info.action === "deleted") {
-      remember(`Deleted ${q(t)}`, () => reinsertTodo(t, own));
+      remember(`Deleted ${q(t)}`);
     } else if (t && (info.action === "cancelled" || info.action === "restored")) {
-      remember(`${info.action === "cancelled" ? "Cancelled" : "Restored"} ${q(t)}`,
-        () => saveTodo(t.id, { is_cancelled: t.is_cancelled }));
+      remember(`${info.action === "cancelled" ? "Cancelled" : "Restored"} ${q(t)}`);
     } else if (t && info.action === "updated") {
-      const { id: _id, ...fields } = t;
-      remember(`Edited ${q(t)}`, async () => {
-        await saveTodo(t.id, fields);
-        for (const s of own) {
-          await saveSlot(s.id, { planned_on: s.planned_on, start_time: s.start_time, end_time: s.end_time, planned_hours: s.planned_hours });
-        }
-      });
+      remember(`Edited ${q(t)}`);
     }
     panel = null;
     await load();
@@ -676,35 +599,26 @@
   const perDay = $derived(spreadHours && spreadDays.length ? Math.round((spreadHours / spreadDays.length) * 100) / 100 : null);
 
   async function saveSpread(t: Todo) {
-    const before = slotsOf(t).filter((x) => x.planned_on >= start && x.planned_on <= end).map(snapSlot);
+    const before = slotsOf(t).filter((x) => x.planned_on >= start && x.planned_on <= end);
     const estBefore = t.est_hours;
-    const created: string[] = [];
-    const removed: Slot[] = [];
+    const label = `Planned ${q(t)} over ${spreadDays.length} ${spreadDays.length === 1 ? "day" : "days"}`;
     try {
+      await undoable(label, async () => {
       for (const d of days) {
         const here = before.filter((x) => x.planned_on === d && !x.is_cancelled);
         if (spreadPick[d]) {
           if (here.length) {
             for (const x of here) await saveSlot(x.id, { planned_hours: perDay });
           } else {
-            created.push(await saveSlot(null, { todo_id: t.id, planned_on: d, planned_hours: perDay }));
+            await saveSlot(null, { todo_id: t.id, planned_on: d, planned_hours: perDay });
           }
         } else {
-          for (const x of here.filter((x) => !x.entry_id)) {
-            await deleteSlot(x.id);
-            removed.push(x);
-          }
+          for (const x of here.filter((x) => !x.entry_id)) await deleteSlot(x.id);
         }
       }
       if (spreadHours !== estBefore) await saveTodo(t.id, { est_hours: spreadHours });
-      remember(`Planned ${q(t)} over ${spreadDays.length} ${spreadDays.length === 1 ? "day" : "days"}`, async () => {
-        for (const id of created) await deleteSlot(id);
-        for (const x of removed) await reinsertSlot(x);
-        for (const x of before.filter((b) => !removed.some((r) => r.id === b.id))) {
-          await saveSlot(x.id, { planned_hours: x.planned_hours });
-        }
-        await saveTodo(t.id, { est_hours: estBefore });
       });
+      showToast(label, true);
     } catch (e) {
       error = (e as Error).message;
     }
@@ -725,11 +639,9 @@
     const title = ideaText.trim();
     if (!title) return;
     ideaText = "";
-    let id = "";
     const sort_order = Math.max(0, ...ideas.map((t) => t.sort_order)) + 10; // newest at the bottom
     await change(`Jotted down “${title}”`,
-      async () => (id = await saveTodo(null, { kind: "idea", title, due_on: today(), must_this_week: false, sort_order })),
-      () => deleteTodo(id));
+      () => saveTodo(null, { kind: "idea", title, due_on: today(), must_this_week: false, sort_order }));
   }
 
   // ---- rearranging ideas: drag the ⠿ handle (mouse or touch), or arrow keys on it ----
@@ -794,8 +706,7 @@
     // show the new order at once; the reload confirms it
     ideas = order.map((id, i) => ({ ...ideas.find((t) => t.id === id)!, sort_order: (i + 1) * 10 }));
     await change("Reordered your ideas",
-      async () => { for (const c of changes) await saveTodo(c.id, { sort_order: c.sort_order }); },
-      async () => { for (const c of changes) await saveTodo(c.id, { sort_order: before.get(c.id)! }); });
+      async () => { for (const c of changes) await saveTodo(c.id, { sort_order: c.sort_order }); });
   }
   /** Text split around web addresses, so each address can show as a short "link". */
   function linkParts(text: string): { text?: string; url?: string }[] {
@@ -823,27 +734,21 @@
   async function saveIdea(t: Todo) {
     const title = ideaDraft.title.trim();
     if (!title) return;
-    const before = { title: t.title, note: t.note };
     ideaEditing = null;
-    await change(`Edited ${q(t)}`,
-      () => saveTodo(t.id, { title, note: ideaDraft.note.trim() || null }),
-      () => saveTodo(t.id, before));
+    await change(`Edited ${q(t)}`, () => saveTodo(t.id, { title, note: ideaDraft.note.trim() || null }));
   }
   function ideaDone(t: Todo) {
     return change(`Thought through ${q(t)}`,
-      () => saveTodo(t.id, { is_done: true, done_at: new Date().toISOString() }),
-      () => saveTodo(t.id, { is_done: false, done_at: null }));
+      () => saveTodo(t.id, { is_done: true, done_at: new Date().toISOString() }));
   }
   function ideaToTodo(t: Todo) {
     const day = isCurrent ? today() : start;
     return change(`Turned ${q(t)} into a to-do`,
-      () => saveTodo(t.id, { kind: "task", due_on: day }),
-      () => saveTodo(t.id, { kind: "idea", due_on: t.due_on }));
+      () => saveTodo(t.id, { kind: "task", due_on: day }));
   }
   function deleteIdea(t: Todo) {
     if (!confirm(`Delete “${t.title}”?`)) return;
-    const todo = snapTodo(t);
-    return change(`Deleted ${q(t)}`, () => deleteTodo(t.id), () => reinsertTodo(todo, []));
+    return change(`Deleted ${q(t)}`, () => deleteTodo(t.id));
   }
 
   // ---- to-dos from milestones live this week ------------------------------------------------
@@ -921,24 +826,16 @@
 
   async function addFromMilestones() {
     const picked = msRows.filter((r) => r.pick);
-    const added: string[] = [];
-    try {
+    if (picked.length) await change(`Added ${picked.length} to-${picked.length === 1 ? "do" : "dos"} from milestones`, async () => {
       for (const r of picked) {
-        added.push(await saveTodo(null, {
+        await saveTodo(null, {
           kind: "task", title: r.m.title, due_on: isCurrent ? today() : start,
           category_id: r.p.category_id, project_id: r.p.id, milestone_id: r.m.id,
           est_hours: r.hours, must_this_week: r.must,
-        }));
+        });
       }
-      if (added.length) {
-        remember(`Added ${added.length} to-${added.length === 1 ? "do" : "dos"} from milestones`,
-          async () => { for (const id of added) await deleteTodo(id); });
-      }
-    } catch (e) {
-      error = (e as Error).message;
-    }
+    });
     panel = null;
-    await load();
   }
 
   // ---- email checks: one to-do per weekday ------------------------------------------------
@@ -961,25 +858,16 @@
   }
   async function createEmailChecks() {
     const picked = weekdays.filter((d) => emailPick[d]);
-    const added: string[] = [];
-    try {
+    if (picked.length) await change(`Added ${picked.length} email ${picked.length === 1 ? "check" : "checks"}`, async () => {
       for (const d of picked) {
         const id = await saveTodo(null, {
           kind: "task", title: EMAIL_TITLE, due_on: d, category_id: emailCategory || null,
           est_hours: emailHours, must_this_week: false,
         });
-        added.push(id);
         await saveSlot(null, { todo_id: id, planned_on: d, planned_hours: null });
       }
-      if (added.length) {
-        remember(`Added ${added.length} email ${added.length === 1 ? "check" : "checks"}`,
-          async () => { for (const id of added) await deleteTodo(id); });
-      }
-    } catch (e) {
-      error = (e as Error).message;
-    }
+    });
     panel = null;
-    await load();
   }
 
   /** Hours planned for this card: its own share, or the to-do's estimate when it has just one day. */
@@ -1034,8 +922,9 @@
     const picked = candidates.filter((c) => c.pick);
     if (!picked.length) return;
     importing = true;
-    const added: string[] = [];
+    const label = `Imported ${picked.length} ${picked.length === 1 ? "meeting" : "meetings"}`;
     try {
+      await undoable(label, async () => {
       for (const m of picked) {
         const [sh, sm] = m.start.split(":").map(Number);
         const [eh, em] = m.end.split(":").map(Number);
@@ -1044,12 +933,11 @@
           kind: "meeting", title: m.title, due_on: m.date, category_id: importCategory || null,
           est_hours: len, must_this_week: true, note: m.location || null,
         });
-        added.push(id);
         await saveSlot(null, { todo_id: id, planned_on: m.date, start_time: m.start, end_time: m.end, planned_hours: len });
       }
+      });
       importNote = `Added ${picked.length} ${picked.length === 1 ? "meeting" : "meetings"}.`;
-      remember(`Imported ${added.length} ${added.length === 1 ? "meeting" : "meetings"}`,
-        async () => { for (const id of added) await deleteTodo(id); });
+      showToast(label, true);
       candidates = [];
       await load();
     } catch (e) {
@@ -1113,8 +1001,6 @@
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "task" })}>+ To-do</button>
     <button onclick={openMilestones} title="To-dos from milestones that fall in this week">+ From milestones</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: isCurrent ? today() : start })}>+ Meeting</button>
-    <button onclick={undoLast} disabled={!history.length}
-            title={history.length ? `Undo: ${history[history.length - 1].label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
     <label class="toggle"><input type="checkbox" bind:checked={showLogged} /> Show logged time</label>
   </div>
   <div class="outlook-bar">
@@ -1355,7 +1241,7 @@
 {#if toast}
   <div class="toast" role="status">
     <span>{toast.text}</span>
-    {#if toast.canUndo}<button onclick={undoLast}>Undo</button>{/if}
+    {#if toast.canUndo}<button onclick={() => { toast = null; undoLast(); }}>Undo</button>{/if}
     <button class="x" aria-label="Dismiss" onclick={() => (toast = null)}>✕</button>
   </div>
 {/if}

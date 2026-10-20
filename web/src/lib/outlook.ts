@@ -9,7 +9,7 @@
 //                                  (struck through) unless already logged
 //   - marked irrelevant here     → removed and never brought back
 import { supabase } from "./supabase";
-import { check, TODO_COLS, SLOT_COLS, asTodo, asSlot, saveTodo, saveSlot, deleteTodo, reinsertTodo } from "./data";
+import { check, TODO_COLS, SLOT_COLS, asTodo, asSlot, saveTodo, saveSlot, deleteTodo } from "./data";
 import type { Todo, Slot } from "./data";
 import { meetingsInRange, eventUids } from "./ics";
 import type { Meeting } from "./ics";
@@ -91,18 +91,14 @@ export async function seriesTodos(uid: string): Promise<{ todos: Todo[]; slots: 
 /**
  * Mark an Outlook event irrelevant: this occurrence, or (all) the whole
  * series. It is removed (logged occurrences stay, as they happened) and later
- * syncs skip it. Pass plain copies, not live state. Returns the undo.
+ * syncs skip it. (The app's undo puts it all back.)
  */
-export async function dismissOutlook(t: Todo, slot: Slot | null, all: boolean): Promise<() => Promise<void>> {
+export async function dismissOutlook(t: Todo, slot: Slot | null, all: boolean): Promise<void> {
   const uid = t.source_uid ?? t.source_key ?? "";
-  const ignoreId = await addIgnore(uid, all ? null : t.source_key, t.title);
+  await addIgnore(uid, all ? null : t.source_key, t.title);
   const gone = all ? await seriesTodos(uid) : { todos: [t], slots: slot ? [slot] : [] };
   const removable = gone.todos.filter((x) => !gone.slots.some((s) => s.todo_id === x.id && s.entry_id));
   for (const x of removable) await deleteTodo(x.id);
-  return async () => {
-    await removeIgnore(ignoreId);
-    for (const x of removable) await reinsertTodo(x, gone.slots.filter((s) => s.todo_id === x.id));
-  };
 }
 
 const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");

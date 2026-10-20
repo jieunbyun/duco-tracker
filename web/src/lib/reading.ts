@@ -58,8 +58,9 @@ export async function saveReading(id: string | null, fields: Partial<ReadingFiel
   const row = await check<{ id: string }>(supabase.from("reading").insert(fields).select("id").single());
   return row!.id;
 }
+// Deleting a reading, or its PDF, leaves the file in storage so undo can bring
+// it back; prunePdfs() clears files no reading points at, once a session.
 export async function deleteReading(r: Reading): Promise<void> {
-  if (r.pdf_path) await supabase.storage.from(BUCKET).remove([r.pdf_path]);
   await check(supabase.from("reading").delete().eq("id", r.id));
 }
 
@@ -96,10 +97,6 @@ export async function pdfLink(r: Reading): Promise<string> {
   return data.signedUrl;
 }
 export async function removePdf(r: Reading): Promise<void> {
-  if (r.pdf_path) {
-    const { error } = await supabase.storage.from(BUCKET).remove([r.pdf_path]);
-    if (error) throw new Error(error.message);
-  }
   await saveReading(r.id, { pdf_path: null, pdf_size: null });
 }
 
@@ -191,4 +188,18 @@ export function bibtexOf(r: Reading): string {
 export function fmtSize(bytes: number | null): string {
   if (!bytes) return "";
   return bytes >= 1048576 ? `${(bytes / 1048576).toFixed(1)} MB` : `${Math.round(bytes / 1024)} KB`;
+}
+
+let pruned = false;
+/** Remove stored PDFs no reading points at — at the start of a session, when no undo can need them. */
+export async function prunePdfs(readings: Reading[]): Promise<void> {
+  if (pruned) return;
+  pruned = true;
+  const { data: u } = await supabase.auth.getUser();
+  if (!u.user) return;
+  const { data, error } = await supabase.storage.from(BUCKET).list(u.user.id, { limit: 1000 });
+  if (error || !data) return;
+  const used = new Set(readings.map((r) => r.pdf_path).filter(Boolean));
+  const orphans = data.map((f) => `${u.user!.id}/${f.name}`).filter((path) => !used.has(path));
+  if (orphans.length) await supabase.storage.from(BUCKET).remove(orphans);
 }

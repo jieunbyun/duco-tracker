@@ -4,6 +4,7 @@
   import { loadTaxonomy } from "./lib/data";
   import type { Component } from "svelte";
   import Login from "./lib/Login.svelte";
+  import { undo, undoLast } from "./lib/undo.svelte";
 
   // Each tab's code is fetched when the tab is first opened, so the app starts
   // with only what the opening tab needs.
@@ -66,7 +67,21 @@
       .then((m) => { if (route === r) View = m.default as Component; })
       .catch((e) => (viewError = `Could not load this tab: ${(e as Error).message}`));
   });
+
+  // Ctrl/Cmd+Z undoes the latest change, in any tab — unless you are typing
+  // or a dialog is open.
+  const lastAction = $derived(undo.actions[undo.actions.length - 1] ?? null);
+  function keys(ev: KeyboardEvent) {
+    if (!(ev.ctrlKey || ev.metaKey) || ev.shiftKey || ev.altKey || ev.key.toLowerCase() !== "z") return;
+    const el = document.activeElement as HTMLElement | null;
+    if (el && (el.isContentEditable || ["INPUT", "TEXTAREA", "SELECT"].includes(el.tagName))) return;
+    if (document.querySelector("dialog[open]")) return;
+    ev.preventDefault();
+    undoLast();
+  }
 </script>
+
+<svelte:window onkeydown={keys} />
 
 {#if !ready}
   <p class="muted loading">Loading…</p>
@@ -79,6 +94,8 @@
         <a href={`#/${key}`} class:active={route === key}>{labels[key as Route]}</a>
       {/each}
     </nav>
+    <button class="undo" onclick={undoLast} disabled={!lastAction}
+            title={lastAction ? `Undo: ${lastAction.label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
   </header>
   <main>
@@ -90,12 +107,19 @@
       {#if viewError}
         <p class="error">{viewError}</p>
       {:else if View}
-        <View />
+        {#key undo.version}<View />{/key}
       {:else}
         <p class="muted">Loading…</p>
       {/if}
     {/if}
   </main>
+  {#if undo.toast}
+    <div class="undo-toast" role="status">
+      <span>{undo.toast}</span>
+      {#if lastAction}<button onclick={undoLast}>Undo again</button>{/if}
+      <button class="x" aria-label="Dismiss" onclick={() => (undo.toast = null)}>✕</button>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -130,6 +154,15 @@
     color: var(--ink);
     font-weight: 600;
   }
+  .undo { white-space: nowrap; }
+  .undo-toast {
+    position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 30;
+    display: flex; gap: 0.7rem; align-items: center; max-width: calc(100vw - 32px);
+    padding: 0.55rem 0.8rem 0.55rem 1rem; border-radius: var(--radius); font-family: var(--font-ui); font-size: 0.88rem;
+    background: var(--ink); color: var(--paper); box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+  }
+  .undo-toast button { background: none; border: 1px solid var(--paper); color: var(--paper); padding: 0.2rem 0.7rem; font-size: 0.82rem; }
+  .undo-toast button.x { border: none; padding: 0.2rem 0.4rem; opacity: 0.8; }
   main {
     max-width: 72rem;
     margin: 0 auto;

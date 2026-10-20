@@ -2,7 +2,7 @@
   import { loadProjects } from "../lib/data";
   import type { Project } from "../lib/data";
   import {
-    STATUSES, KINDS, loadReadings, loadNotes, saveNote, deleteNote, uploadPdf, pdfLink, removePdf,
+    STATUSES, KINDS, loadReadings, loadNotes, saveNote, deleteNote, uploadPdf, pdfLink, removePdf, prunePdfs,
     citationOf, bibtexOf, fmtSize,
   } from "../lib/reading";
   import type { Reading, Note } from "../lib/reading";
@@ -25,6 +25,7 @@
     try {
       [items, projects] = await Promise.all([loadReadings(), loadProjects()]);
       error = "";
+      prunePdfs(items).catch(() => {}); // files left behind by deletes in earlier sessions
     } catch (e) {
       error = (e as Error).message;
     } finally {
