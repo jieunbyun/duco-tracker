@@ -1,9 +1,12 @@
 <script lang="ts">
   import type { Session } from "@supabase/supabase-js";
-  import { supabase } from "./lib/supabase";
+  import { supabase, arrival } from "./lib/supabase";
   import { loadTaxonomy } from "./lib/data";
+  import { myRole } from "./lib/group";
+  import type { Role } from "./lib/group";
   import type { Component } from "svelte";
   import Login from "./lib/Login.svelte";
+  import SetPassword from "./lib/SetPassword.svelte";
   import { undo, undoLast } from "./lib/undo.svelte";
 
   // Each tab's code is fetched when the tab is first opened, so the app starts
@@ -12,29 +15,42 @@
     week: () => import("./views/Week.svelte"),
     planning: () => import("./views/Planning.svelte"),
     pathways: () => import("./views/Pathways.svelte"),
+    supervision: () => import("./views/Supervision.svelte"),
     time: () => import("./views/Time.svelte"),
     reading: () => import("./views/Reading.svelte"),
     cv: () => import("./views/CV.svelte"),
     help: () => import("./views/Help.svelte"),
+    logbook: () => import("./views/MyLogbook.svelte"),
+    projects: () => import("./views/MyProjects.svelte"),
   };
   const labels: Record<keyof typeof views, string> = {
-    week: "Week", planning: "Planning", pathways: "Pathways", time: "Time", reading: "Reading", cv: "CV", help: "Help",
+    week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Supervision", time: "Time", reading: "Reading",
+    cv: "CV", help: "Help", logbook: "Logbook", projects: "Projects",
   };
   type Route = keyof typeof views;
 
+  // Who sees which tabs: the planner is yours alone; a student (or
+  // collaborator) sees only their logbook and projects.
+  const OWNER: Route[] = ["week", "planning", "pathways", "time", "reading", "cv", "help"];
+  const SUPERVISOR: Route[] = ["week", "planning", "pathways", "supervision", "time", "reading", "cv", "help"];
+  const MEMBER: Route[] = ["logbook", "projects"];
+
   let session = $state<Session | null>(null);
   let ready = $state(false);
-  let route = $state<Route>(routeFromHash());
+  let role = $state<Role | "none" | null | undefined>(undefined); // undefined: not known yet; null: the planner's owner, no group
+  let needsPassword = $state(arrival === "invite" || arrival === "recovery");
+  const member = $derived(role === "student" || role === "collaborator");
+  const tabs = $derived(member ? MEMBER : role === "supervisor" ? SUPERVISOR : OWNER);
 
   // Hash routing (#/week): no server rewrites needed, and the browser's
-  // back button moves between views.
-  function routeFromHash(): Route {
-    const r = location.hash.replace(/^#\/?/, "");
-    return r in views ? (r as Route) : "week"; // anything else, including the old #/log
-  }
+  // back button moves between views. Anything else (including the old #/log)
+  // opens the first tab.
+  const fromHash = () => location.hash.replace(/^#\/?/, "");
+  let hash = $state(fromHash());
+  const route = $derived<Route>(tabs.includes(hash as Route) ? (hash as Route) : tabs[0]);
 
   $effect(() => {
-    const onHash = () => (route = routeFromHash());
+    const onHash = () => (hash = fromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   });
@@ -44,15 +60,24 @@
       session = data.session;
       ready = true;
     });
-    const { data } = supabase.auth.onAuthStateChange((_event, s) => (session = s));
+    const { data } = supabase.auth.onAuthStateChange((event, s) => {
+      session = s;
+      if (event === "PASSWORD_RECOVERY") needsPassword = true;
+    });
     return () => data.subscription.unsubscribe();
   });
 
-  // Settings (week start, targets) load once after sign-in, before any view.
+  $effect(() => {
+    if (!session) return void (role = undefined);
+    myRole().then((r) => (role = r)).catch(() => (role = null));
+  });
+
+  // Settings (week start, targets) load once after sign-in, before any view of the planner.
   let settingsReady = $state(false);
   let settingsError = $state("");
   $effect(() => {
-    if (!session) return;
+    if (!session || role === undefined) return;
+    if (member || role === "none") return void (settingsReady = true);
     loadTaxonomy()
       .then(() => (settingsReady = true))
       .catch((e) => (settingsError = e.message));
@@ -62,6 +87,7 @@
   let viewError = $state("");
   $effect(() => {
     const r = route;
+    if (role === undefined || role === "none") return;
     viewError = "";
     views[r]()
       .then((m) => { if (route === r) View = m.default as Component; })
@@ -87,11 +113,20 @@
   <p class="muted loading">Loading…</p>
 {:else if !session}
   <Login />
+{:else if needsPassword}
+  <SetPassword first={arrival === "invite"} ondone={() => { needsPassword = false; history.replaceState(null, "", location.pathname); hash = ""; }} />
+{:else if role === "none"}
+  <main class="waiting">
+    <h1>Almost there</h1>
+    <p>You're signed in as <strong>{session.user.email}</strong>, but your supervisor hasn't added you to the group yet.
+      Once they have, reload this page.</p>
+    <button onclick={() => supabase.auth.signOut()}>Sign out</button>
+  </main>
 {:else}
   <header>
     <nav>
-      {#each Object.keys(views) as key (key)}
-        <a href={`#/${key}`} class:active={route === key}>{labels[key as Route]}</a>
+      {#each tabs as key (key)}
+        <a href={`#/${key}`} class:active={route === key}>{labels[key]}</a>
       {/each}
     </nav>
     <button class="undo" onclick={undoLast} disabled={!lastAction}
@@ -124,6 +159,7 @@
 
 <style>
   .loading { padding: 2rem 16px; }
+  .waiting { max-width: 32rem; margin: 12vh auto 0; padding: 0 16px; }
   header {
     position: sticky;
     top: 0;

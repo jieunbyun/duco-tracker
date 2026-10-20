@@ -16,6 +16,8 @@
   import AssetEditor from "../lib/AssetEditor.svelte";
   import { loadAssets } from "../lib/assets";
   import type { Asset } from "../lib/assets";
+  import { loadGroupProjects, loadEntries } from "../lib/group";
+  import type { GroupProject, Entry } from "../lib/group";
 
   // ---- data -----------------------------------------------------------------------
   let nodes = $state<PwNode[]>([]);
@@ -24,6 +26,8 @@
   let projects = $state<Project[]>([]);
   let tax = $state<Taxonomy | null>(null);
   let assets = $state<Asset[]>([]);
+  let groupProjects = $state<GroupProject[]>([]);
+  let groupEntries = $state<Entry[]>([]);
 
   // three views of the same pathways: the map, a list for entering and linking, and the information system
   type View = "map" | "list" | "system";
@@ -52,6 +56,10 @@
       ]);
       tax = t;
       assets = as;
+      // students' shared projects and their logbooks (none before 0015, or without a group)
+      [groupProjects, groupEntries] = await Promise.all([
+        loadGroupProjects().catch(() => [] as GroupProject[]), loadEntries().catch(() => [] as Entry[]),
+      ]);
       nodes = pw.nodes;
       links = pw.links;
       years = pw.years;
@@ -455,6 +463,11 @@
     if (fu) bits.push(fu);
     if (n.effort_pm) bits.push(`${n.effort_pm} pm`);
     if (n.fte) bits.push(`${Math.round(n.fte * 100)}%`);
+    if (n.group_project_id) {
+      const since = new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10);
+      const k = groupEntries.filter((e) => e.project_id === n.group_project_id && e.entry_date >= since).length;
+      bits.push(`logbook ${k} this week`);
+    }
     const k = assetCount(n.id);
     if (k) bits.push(`${k} ${k === 1 ? "asset" : "assets"}`);
     return bits.join(" · ");
@@ -602,7 +615,7 @@
   {:else if panel && "node" in panel}
     <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
     {#key panel}
-      <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} onsaved={saved} oncancel={() => (panel = null)} />
+      <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} onsaved={saved} oncancel={() => (panel = null)} />
     {/key}
   {/if}
 </dialog>

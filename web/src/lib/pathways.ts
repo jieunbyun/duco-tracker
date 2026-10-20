@@ -44,6 +44,7 @@ export type PwNode = {
   lane_row: number;
   grant_stage: GrantStage | null;
   hands_on: boolean; // a project your own research time goes into substantially
+  group_project_id: string | null; // a student's shared project it stands for (Supervision)
 };
 export type PwNodeFields = Omit<PwNode, "id">;
 // A link is one kind of arrow, from one item to another; its direction says it all.
@@ -51,7 +52,7 @@ export type PwNodeFields = Omit<PwNode, "id">;
 export type PwLink = { id: string; from_id: string; to_id: string };
 export type PwRevision = { id: string; changed_at: string; old_title: string; old_detail: string | null; reason: string | null };
 
-const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage,hands_on";
+const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage,hands_on,group_project_id";
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {

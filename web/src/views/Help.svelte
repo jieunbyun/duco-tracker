@@ -113,6 +113,21 @@
       gives the cards as YAML, ready to seed a shared group repository. Everything stays in your own database.
     </dd>
 
+    <dt>Supervision</dt>
+    <dd>
+      Your students sign in to this same app and see only two tabs of their own: <em>Logbook</em> and
+      <em>Projects</em>. Nothing else here — your planning, time, targets, Pathways — is visible to them.
+      To add a student: invite them in Supabase (<em>Authentication › Users › Invite user</em>; they get an email
+      to choose a password), then <em>+ Add a student</em> here with the same email. Under each student's name are
+      their projects (they can have several; you create them, they and you tick off milestones) and their logbook:
+      dated entries — what they did, results, next, and links to their files on the institution's OneDrive — or an
+      optional weekly update. You read every entry and comment; they reply. Only they write their entries: they can
+      edit any (every earlier version stays in its history) and delete one only on the day it was written.
+      <em>Export logbook</em> saves it as a Markdown file, to keep on OneDrive or take along when they leave.
+      <em>Take out of the group</em> ends their access but keeps their logbook. On the Pathways map, a project can
+      stand for a student's project, and then shows how many logbook entries it had this week.
+    </dd>
+
     <dt>Time</dt>
     <dd>
       Where the time went over a period: hours against target per area, and a breakdown you can click into — all

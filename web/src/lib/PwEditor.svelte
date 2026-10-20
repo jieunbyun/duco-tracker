@@ -7,6 +7,7 @@
   import type { Project } from "./data";
   import { setProjectDates } from "./data";
   import type { Reading } from "./reading";
+  import type { GroupProject } from "./group";
   import { LIVE_STATUSES } from "./plan";
   import { fmtDay } from "./dates";
 
@@ -17,10 +18,11 @@
     links: PwLink[];
     projects: Project[];
     readings: Reading[];
+    groupProjects?: GroupProject[]; // students' shared projects (Supervision)
     onsaved: () => void;
     oncancel: () => void;
   };
-  let { node, draft, nodes, links, projects, readings, onsaved, oncancel }: Props = $props();
+  let { node, draft, nodes, links, projects, readings, groupProjects = [], onsaved, oncancel }: Props = $props();
 
   const n0 = untrack(() => node);
   const d0 = untrack(() => draft) ?? {};
@@ -40,6 +42,7 @@
     fte: n0?.fte ?? (null as number | null),
     grant_stage: (n0?.grant_stage ?? d0.grant_stage ?? "drafting") as GrantStage,
     hands_on: n0?.hands_on ?? false,
+    group_project_id: n0?.group_project_id ?? "",
   });
   // projects and grants can each be a Planning project (a grant: one under Proposals)
   const plannable = $derived(f.kind === "project" || f.kind === "grant");
@@ -102,6 +105,7 @@
         fte: f.kind === "person" ? n(f.fte) : null,
         grant_stage: f.kind === "grant" ? f.grant_stage : null,
         hands_on: f.kind === "project" ? f.hands_on : false,
+        ...(groupProjects.length || n0?.group_project_id ? { group_project_id: f.kind === "project" ? f.group_project_id || null : null } : {}),
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
@@ -184,6 +188,14 @@
       </select>
     </label>
     <label class="check wide"><input type="checkbox" bind:checked={f.hands_on} /> Hands-on — my own research time goes into it substantially</label>
+    {#if groupProjects.length}
+      <label class="wide">A student's project (Supervision)
+        <select bind:value={f.group_project_id}>
+          <option value="">— none —</option>
+          {#each groupProjects as g (g.id)}<option value={g.id}>{g.title}</option>{/each}
+        </select>
+      </label>
+    {/if}
     {#if !f.project_id}
       <label class="check"><input type="checkbox" bind:checked={f.potential} /> Potential (not started)</label>
     {/if}
