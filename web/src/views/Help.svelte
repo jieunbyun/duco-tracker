@@ -2,6 +2,27 @@
   import { loadTaxonomy } from "../lib/data";
   import type { Taxonomy } from "../lib/data";
   import { PACE_DAYS } from "../lib/horizon";
+  import { exportEverything, rowCount } from "../lib/backup";
+  import { download } from "../lib/group";
+
+  // ---- your data: everything, as one file for OneDrive ------------------------------
+  let exporting = $state<string | null>(null);
+  let exported = $state("");
+  async function exportAll() {
+    exporting = "Reading…";
+    exported = "";
+    try {
+      const b = await exportEverything((done, total) => (exporting = `Reading ${done} of ${total} tables…`));
+      const day = b.exported_at.slice(0, 10);
+      download(`duco-backup-${day}.json`, JSON.stringify(b, null, 1));
+      exported = `Saved ${rowCount(b).toLocaleString()} records from ${Object.keys(b.tables).length} tables` +
+        (b.missing.length ? ` (not yet set up: ${b.missing.join(", ")})` : "") + ". Put the file in OneDrive › Me › Backups.";
+    } catch (e) {
+      exported = `Could not export: ${(e as Error).message}`;
+    } finally {
+      exporting = null;
+    }
+  }
 
   let tax = $state<Taxonomy | null>(null);
   loadTaxonomy().then((t) => (tax = t)).catch(() => {});
@@ -11,6 +32,17 @@
 <section class="help">
   <span class="eyebrow">Help</span>
   <h1>How the tracker works</h1>
+
+  <div class="data">
+    <h2>Your data</h2>
+    <p>
+      Files live on OneDrive; the app keeps the links — each project and Pathways item can point to its OneDrive
+      folder (📁), a reading to its PDF, a logbook entry to its files. For a copy of everything in the app itself,
+      export it now and then (monthly, say) and keep the file in OneDrive › Me › Backups.
+    </p>
+    <button class="primary" onclick={exportAll} disabled={!!exporting}>{exporting ?? "Export everything (JSON)"}</button>
+    {#if exported}<p class="muted small">{exported}</p>{/if}
+  </div>
 
   <p class="lede">
     Time is organised the way the yearly allocation is:
@@ -146,8 +178,8 @@
     <dd>
       Journal articles, books, chapters and reports you read: details (a DOI fills them in from Crossref), status —
       reading, to read, finished, abandoned — with start and finish dates, an optional project, dated notes (with a
-      page if you like), a citation and BibTeX to copy, and the PDF if you have one. PDFs are kept privately in your
-      Supabase storage (1 GB free, 50 MB a file) and open through a link that lasts an hour.
+      page if you like), a citation and BibTeX to copy, and a link to its PDF on OneDrive. (PDFs uploaded here before still
+      open; once a PDF is on OneDrive and linked, its stored copy can be removed.)
     </dd>
 
     <dt>CV</dt>
@@ -226,6 +258,9 @@
   .help { max-width: 46rem; }
   .lede { font-size: 1.02rem; }
   .help h2 { margin-top: 2rem; }
+  .data { border: 1px solid var(--rule); border-radius: var(--radius); background: var(--panel); padding: 0.2rem 1rem 0.9rem; margin: 1rem 0; }
+  .data h2 { margin-top: 0.6rem; }
+  .small { font-size: 0.85rem; }
   dl { margin: 0; }
   dt { font-weight: 600; margin-top: 1rem; }
   dd { margin: 0.2rem 0 0; color: var(--ink); white-space: pre-line; }

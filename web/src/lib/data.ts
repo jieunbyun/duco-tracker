@@ -124,20 +124,23 @@ export type Project = {
   planned_hours: number | null;
   is_important: boolean;
   notes: string | null;
+  folder_url: string | null; // its folder on OneDrive
   milestone: Milestone[];
 };
 
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadProjects(): Promise<Project[]> {
-  const { data, error } = await supabase
-    .from("project")
-    .select("id,category_id,name,status,start_on,end_on,planned_hours,is_important,notes," +
-            "milestone(id,project_id,title,status,start_on,due_on,planned_hours,hard_deadline,sort_order,notes)")
-    .order("name");
+  const cols = (folder: boolean) =>
+    `id,category_id,name,status,start_on,end_on,planned_hours,is_important,notes${folder ? ",folder_url" : ""},` +
+    "milestone(id,project_id,title,status,start_on,due_on,planned_hours,hard_deadline,sort_order,notes)";
+  let { data, error } = await supabase.from("project").select(cols(true)).order("name");
+  // before 0019_folders.sql is run there is no folder column: everything else still works
+  if (error && /folder_url/.test(error.message)) ({ data, error } = await supabase.from("project").select(cols(false)).order("name"));
   if (error) throw new Error(error.message);
   return ((data ?? []) as unknown as Project[]).map((p) => ({
     ...p,
+    folder_url: p.folder_url ?? null,
     planned_hours: num(p.planned_hours),
     milestone: p.milestone
       .map((m) => ({ ...m, planned_hours: num(m.planned_hours) }))

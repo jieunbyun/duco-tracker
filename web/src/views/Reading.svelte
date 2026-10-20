@@ -2,7 +2,7 @@
   import { loadProjects } from "../lib/data";
   import type { Project } from "../lib/data";
   import {
-    STATUSES, KINDS, loadReadings, loadNotes, saveNote, deleteNote, uploadPdf, pdfLink, removePdf, prunePdfs,
+    STATUSES, KINDS, loadReadings, loadNotes, saveNote, deleteNote, setPdfUrl, pdfLink, removePdf, prunePdfs,
     citationOf, bibtexOf, fmtSize,
   } from "../lib/reading";
   import type { Reading, Note } from "../lib/reading";
@@ -124,15 +124,17 @@
   }
 
   // ---- PDF ---------------------------------------------------------------------------
+  // PDFs live on OneDrive: a reading keeps the link. (Copies stored here before
+  // still open, and can be removed once moved.)
   let pdfBusy = $state(false);
-  async function onPdf(r: Reading, ev: Event) {
-    const input = ev.target as HTMLInputElement;
-    const file = input.files?.[0];
-    input.value = "";
-    if (!file) return;
+  let pdfDraft = $state<Record<string, string>>({});
+  async function savePdfUrl(r: Reading, url: string | null) {
+    const clean = url?.trim() || null;
+    if (clean && !/^https?:\/\//i.test(clean)) return void (error = "Paste the PDF's link from OneDrive (it starts with https://).");
     pdfBusy = true;
     try {
-      await uploadPdf(r, file);
+      await setPdfUrl(r, clean);
+      pdfDraft[r.id] = "";
       await load();
     } catch (e) {
       error = (e as Error).message;
@@ -222,7 +224,7 @@
             <span class="meta muted">
               {kindLabel(r.kind)}{period(r) ? ` · ${period(r)}` : ""}
               {#if noteCount(r)} · {noteCount(r)} {noteCount(r) === 1 ? "note" : "notes"}{/if}
-              {#if r.pdf_path} · PDF{/if}
+              {#if r.pdf_url || r.pdf_path} · PDF{/if}
               {#if r.project_id} · {projectName(r.project_id)}{/if}
             </span>
           </button>
@@ -250,14 +252,24 @@
 
                 <div class="pdf">
                   <h3>PDF</h3>
+                  {#if r.pdf_url}
+                    <a class="mini open" href={r.pdf_url} target="_blank" rel="noopener noreferrer">Open PDF ↗</a>
+                    <button class="mini" onclick={() => (pdfDraft[r.id] = r.pdf_url ?? "")}>Change link</button>
+                    <button class="mini danger" onclick={() => savePdfUrl(r, null)} disabled={pdfBusy}>Remove link</button>
+                  {/if}
+                  {#if !r.pdf_url || pdfDraft[r.id]}
+                    <form class="pdf-link" onsubmit={(ev) => { ev.preventDefault(); savePdfUrl(r, pdfDraft[r.id] ?? ""); }}>
+                      <input type="url" bind:value={pdfDraft[r.id]} placeholder="Paste the PDF's link from OneDrive" aria-label="PDF link" />
+                      <button class="mini" type="submit" disabled={pdfBusy || !(pdfDraft[r.id] ?? "").trim()}>Save link</button>
+                    </form>
+                  {/if}
                   {#if r.pdf_path}
-                    <button class="mini" onclick={() => openPdf(r)}>Open PDF</button>
-                    <span class="muted small">{fmtSize(r.pdf_size)}</span>
-                    <label class="mini file">Replace<input type="file" accept="application/pdf,.pdf" onchange={(ev) => onPdf(r, ev)} /></label>
-                    <button class="mini danger" onclick={() => dropPdf(r)}>Remove</button>
-                  {:else}
-                    <label class="mini file">{pdfBusy ? "Uploading…" : "Upload PDF"}<input type="file" accept="application/pdf,.pdf" disabled={pdfBusy} onchange={(ev) => onPdf(r, ev)} /></label>
-                    <span class="muted small">up to 50 MB; kept privately in your storage</span>
+                    <span class="stored muted small">
+                      A copy is stored here ({fmtSize(r.pdf_size)}):
+                      <button class="mini" onclick={() => openPdf(r)}>Open it</button>
+                      {#if r.pdf_url}<button class="mini danger" onclick={() => dropPdf(r)}>Remove the stored copy</button>
+                      {:else}— to move it, open it, save it to OneDrive, and paste its link above.{/if}
+                    </span>
                   {/if}
                 </div>
 
@@ -322,8 +334,10 @@
   .cite-acts, .pdf { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
   .pdf h3 { width: 100%; }
   .mini { font-size: 0.78rem; padding: 0.2rem 0.55rem; }
-  .file { position: relative; display: inline-block; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--panel); cursor: pointer; }
-  .file input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+  .pdf-link { display: flex; gap: 0.4rem; flex: 1; min-width: 16rem; }
+  .pdf-link input { flex: 1; font-size: 0.85rem; padding: 0.25rem 0.5rem; }
+  .open { text-decoration: none; border: 1px solid var(--rule); border-radius: var(--radius); background: var(--panel); }
+  .stored { width: 100%; display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
   .danger { color: var(--danger); }
   .note-form { display: grid; grid-template-columns: 10rem 6rem 1fr; gap: 0.4rem; margin-bottom: 0.6rem; }
   .note-form textarea { grid-column: 1 / -1; }

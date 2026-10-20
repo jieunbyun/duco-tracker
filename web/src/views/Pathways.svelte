@@ -14,6 +14,7 @@
   import OutputsMap from "../lib/OutputsMap.svelte";
   import PwList from "../lib/PwList.svelte";
   import { loadOutputs } from "../lib/assets";
+  import FolderLink from "../lib/FolderLink.svelte";
   import type { Output, OutputLink } from "../lib/assets";
   import { loadGroupProjects, loadEntries, loadMembers, myId } from "../lib/group";
   import type { GroupProject, Entry, Member } from "../lib/group";
@@ -123,6 +124,7 @@
     return {
       ...n,
       title: p.name,
+      folder_url: n.folder_url ?? p.folder_url,
       start_on: p.start_on ?? n.start_on,
       end_on: p.end_on ?? n.end_on,
       status: p.status === "done" || p.status === "dropped" ? "done" : n.status,
@@ -595,7 +597,7 @@
              style:left={`${b.x}px`} style:top={`${b.y}px`} style:width={`${b.w}px`} style:height={`${NODE_H}px`}
              onpointerdown={(ev) => begin(ev, n, "move")}
              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEdit(n); } }}>
-          <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}</span>
+          <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}<FolderLink url={n.folder_url} /></span>
           <span class="n-sub">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
           {#if !inColumn(n) && !member}
             <!-- pointer shortcuts; the editor's dates and Links do the same by keyboard -->

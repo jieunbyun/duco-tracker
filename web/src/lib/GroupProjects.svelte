@@ -5,6 +5,7 @@
   import type { GroupProject, GroupMilestone, Member, Entry } from "./group";
   import { fromMonth, fmtMonth } from "./pathways";
   import { today } from "./dates";
+  import FolderLink from "./FolderLink.svelte";
 
   type Props = {
     projects: GroupProject[];
@@ -26,12 +27,12 @@
   const leads = $derived(members.filter((m) => m.active));
 
   // ---- a project's details (new or edited) ------------------------------------------
-  type Draft = { id: string | null; title: string; aim: string; status: GroupProject["status"]; start: string; end: string; lead: string };
+  type Draft = { id: string | null; title: string; aim: string; status: GroupProject["status"]; start: string; end: string; lead: string; folder: string };
   let draft = $state<Draft | null>(null);
   function edit(p: GroupProject | null) {
     draft = p
-      ? { id: p.id, title: p.title, aim: p.aim ?? "", status: p.status, start: (p.start_on ?? "").slice(0, 7), end: (p.end_on ?? "").slice(0, 7), lead: p.lead_id ?? "" }
-      : { id: null, title: "", aim: "", status: "active", start: today().slice(0, 7), end: "", lead: newFor ?? "" };
+      ? { id: p.id, title: p.title, aim: p.aim ?? "", status: p.status, start: (p.start_on ?? "").slice(0, 7), end: (p.end_on ?? "").slice(0, 7), lead: p.lead_id ?? "", folder: p.folder_url ?? "" }
+      : { id: null, title: "", aim: "", status: "active", start: today().slice(0, 7), end: "", lead: newFor ?? "", folder: "" };
   }
   async function saveDraft(ev: SubmitEvent) {
     ev.preventDefault();
@@ -43,6 +44,7 @@
         title: d.title.trim(), aim: d.aim.trim() || null, status: d.status,
         start_on: fromMonth(d.start, false, was?.start_on ?? null), end_on: fromMonth(d.end, true, was?.end_on ?? null),
         ...(supervisor ? { lead_id: d.lead || null } : {}),
+        ...(d.folder.trim() || was?.folder_url ? { folder_url: d.folder.trim() || null } : {}),
       });
       if (!d.id && newFor) await addProjectMember(id, newFor);
       // whoever leads it is on it
@@ -92,6 +94,7 @@
           </select>
         </label>
       {/if}
+      <label class="wide">OneDrive folder (link) <input type="url" bind:value={draft.folder} placeholder="https://…sharepoint.com/…" /></label>
       <div class="wide actions">
         <button class="primary" type="submit">{draft.id ? "Save" : "Add project"}</button>
         <button type="button" onclick={() => (draft = null)}>Cancel</button>
@@ -108,7 +111,7 @@
       {@render editor()}
     {:else}
       <header>
-        <h3>{p.title}</h3>
+        <h3>{p.title}<FolderLink url={p.folder_url} /></h3>
         <span class="muted small">
           {p.status}{p.lead_id ? ` · led by ${nameOf(p.lead_id)}` : ""}{p.start_on ? ` · ${fmtMonth(p.start_on)} → ${p.end_on ? fmtMonth(p.end_on) : "…"}` : ""}
           · {recent(p)} {recent(p) === 1 ? "entry" : "entries"} this week{lastEntry(p) ? ` · last ${lastEntry(p)}` : ""}

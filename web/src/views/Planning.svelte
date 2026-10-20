@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FolderLink from "../lib/FolderLink.svelte";
   import { undoable, undoLast } from "../lib/undo.svelte";
   import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus } from "../lib/data";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
@@ -294,7 +295,7 @@
               <div class="p-line">
               <button class="p-row" onclick={() => toggle(p.id)} aria-expanded={expanded === p.id}>
                 <span class="p-name">
-                  {#if p.is_important}<span class="star" title="Important">★</span>{/if}{p.name}
+                  {#if p.is_important}<span class="star" title="Important">★</span>{/if}{p.name}<FolderLink url={p.folder_url} />
                   <span class="chip status-{p.status}">{p.status}</span>
                 </span>
                 <span class="p-dates muted">{period(p)}</span>

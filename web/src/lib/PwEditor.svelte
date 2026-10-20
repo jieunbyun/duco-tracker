@@ -48,6 +48,7 @@
     grant_stage: (n0?.grant_stage ?? d0.grant_stage ?? "drafting") as GrantStage,
     hands_on: n0?.hands_on ?? false,
     group_project_id: n0?.group_project_id ?? "",
+    folder_url: n0?.folder_url ?? "",
   });
   // projects and grants can each be a Planning project (a grant: one under Proposals)
   const plannable = $derived(f.kind === "project" || f.kind === "grant");
@@ -110,6 +111,7 @@
         fte: f.kind === "person" ? n(f.fte) : null,
         grant_stage: staged(f.kind) ? f.grant_stage : null,
         hands_on: f.kind === "project" ? f.hands_on : false,
+        folder_url: f.folder_url.trim() || null,
         ...(groupProjects.length || n0?.group_project_id ? { group_project_id: f.kind === "project" ? f.group_project_id || null : null } : {}),
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
@@ -175,6 +177,9 @@
   <label class="wide">{f.kind === "person" ? "Name and role" : "Title"}
     <input bind:value={f.title} required readonly={!!linkedProject} />
     {#if linkedProject}<span class="synced">Named in Planning; its dates here and in Planning stay in step.</span>{/if}
+  </label>
+  <label class="wide">OneDrive folder (link)
+    <input type="url" bind:value={f.folder_url} placeholder={linkedProject?.folder_url ? "the Planning project's folder" : "https://…sharepoint.com/…"} />
   </label>
   <label class="wide">{f.kind === "person" ? "Original strengths, and the legacy they will leave" : "Description"}
     <textarea rows="3" bind:value={f.detail}></textarea>

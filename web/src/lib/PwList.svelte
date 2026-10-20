@@ -1,4 +1,5 @@
 <script lang="ts">
+  import FolderLink from "./FolderLink.svelte";
   import { LANES, NODE_KINDS, staged, fromMonth, saveLink, deleteLink, saveNode } from "./pathways";
   import type { PwNode, PwLink, NodeKind, Lane } from "./pathways";
 
@@ -149,7 +150,7 @@
         <span class="icon kind-{n.kind}" title={kindLabel(n.kind)}>{ICON[n.kind] ?? "·"}</span>
         <div class="main">
           <span class="head">
-            <button class="name" onclick={() => onedit(n)}>{n.title}</button>
+            <button class="name" onclick={() => onedit(n)}>{n.title}</button><FolderLink url={n.folder_url} label="folder" />
             {#if n.kind === "project"}
               <button class="hands" class:on={n.hands_on} aria-pressed={n.hands_on}
                       title={n.hands_on ? "Hands-on: your own research time goes into it — click to unmark" : "Mark as hands-on: your own research time goes into it"}

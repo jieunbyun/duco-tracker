@@ -48,7 +48,8 @@ export type PwNode = {
   lane_row: number;
   grant_stage: GrantStage | null;
   hands_on: boolean; // a project your own research time goes into substantially
-  group_project_id: string | null; // a student's shared project it stands for (Supervision)
+  group_project_id: string | null; // a member's shared project it stands for
+  folder_url: string | null; // its folder on OneDrive
 };
 export type PwNodeFields = Omit<PwNode, "id">;
 // A link is one kind of arrow, from one item to another; its direction says it all.
@@ -56,7 +57,7 @@ export type PwNodeFields = Omit<PwNode, "id">;
 export type PwLink = { id: string; from_id: string; to_id: string };
 export type PwRevision = { id: string; changed_at: string; old_title: string; old_detail: string | null; reason: string | null };
 
-const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage,hands_on,group_project_id";
+const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading_id,start_on,end_on,effort_pm,cost,fte,lane_row,grant_stage,hands_on,group_project_id,folder_url";
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {
@@ -95,7 +96,7 @@ export async function loadMemberMap(): Promise<{ nodes: PwNode[]; links: PwLink[
   const nodes = ((n.data ?? []) as Pick<PwNode, "id" | "kind" | "lane" | "title" | "start_on" | "end_on" | "status" | "grant_stage" | "lane_row">[])
     .map((x) => ({
       ...x, detail: null, potential: false, project_id: null, reading_id: null, effort_pm: null, cost: null, fte: null,
-      hands_on: false, group_project_id: null,
+      hands_on: false, group_project_id: null, folder_url: (x as { folder_url?: string | null }).folder_url ?? null,
     }) as PwNode);
   return { nodes, links: (l.data ?? []) as PwLink[] };
 }

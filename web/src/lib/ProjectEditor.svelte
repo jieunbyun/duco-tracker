@@ -25,6 +25,7 @@
   let planned = $state<number | null>(initial?.planned_hours ?? null);
   let is_important = $state(initial?.is_important ?? false);
   let notes = $state(initial?.notes ?? "");
+  let folder = $state(initial?.folder_url ?? "");
   let busy = $state(false);
   let error = $state("");
 
@@ -43,6 +44,7 @@
         planned_hours: planned === null || Number.isNaN(planned) ? null : planned,
         is_important,
         notes: notes.trim() || null,
+        folder_url: folder.trim() || null,
       });
       onsaved();
     } catch (e) {
@@ -96,6 +98,7 @@
   </label>
   <label class="check"><input type="checkbox" bind:checked={is_important} /> Important</label>
   <label class="wide">Notes <textarea rows="3" bind:value={notes}></textarea></label>
+  <label class="wide">OneDrive folder (link) <input type="url" bind:value={folder} placeholder="https://…sharepoint.com/…" /></label>
   {#if error}<p class="error wide">{error}</p>{/if}
   <div class="actions wide">
     <button class="primary" type="submit" disabled={busy || !name.trim()}>{project ? "Save" : "Add project"}</button>

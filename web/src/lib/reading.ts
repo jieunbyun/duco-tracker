@@ -35,8 +35,9 @@ export type Reading = {
   started_on: string | null;
   finished_on: string | null;
   project_id: string | null;
-  pdf_path: string | null;
+  pdf_path: string | null; // a copy stored here (before PDFs moved to OneDrive)
   pdf_size: number | null;
+  pdf_url?: string | null; // the PDF on OneDrive
   created_at: string;
   reading_note?: { count: number }[];
 };
@@ -79,18 +80,11 @@ export async function deleteNote(id: string): Promise<void> {
 }
 
 // ---- PDFs ----------------------------------------------------------------------
-export const MAX_PDF_BYTES = 50 * 1024 * 1024;
-
-export async function uploadPdf(r: Reading, file: File): Promise<void> {
-  if (file.size > MAX_PDF_BYTES) throw new Error("That PDF is over 50 MB, the storage limit per file.");
-  const { data: u } = await supabase.auth.getUser();
-  if (!u.user) throw new Error("Not signed in.");
-  const path = `${u.user.id}/${r.id}.pdf`;
-  const { error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true, contentType: "application/pdf" });
-  if (error) throw new Error(error.message);
-  await saveReading(r.id, { pdf_path: path, pdf_size: file.size });
+/** The PDF lives on OneDrive; the reading keeps its link. */
+export async function setPdfUrl(r: Reading, url: string | null): Promise<void> {
+  await saveReading(r.id, { pdf_url: url });
 }
-/** A link to the PDF that works for an hour. */
+/** A link to a stored copy that works for an hour. */
 export async function pdfLink(r: Reading): Promise<string> {
   const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(r.pdf_path!, 3600);
   if (error) throw new Error(error.message);

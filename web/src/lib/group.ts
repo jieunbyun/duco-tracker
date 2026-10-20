@@ -14,6 +14,7 @@ export type Member = {
 export type GroupProject = {
   id: string; title: string; aim: string | null; status: "active" | "paused" | "done";
   start_on: string | null; end_on: string | null; lead_id: string | null; members: string[]; // user ids
+  folder_url?: string | null; // its folder on OneDrive
 };
 export type GroupMilestone = { id: string; project_id: string; title: string; due_on: string | null; done: boolean; done_on: string | null; sort_order: number };
 export type EntryKind = "entry" | "weekly";
@@ -71,7 +72,7 @@ export async function saveMember(userId: string, fields: Partial<Pick<Member, "d
 // ---- projects and milestones -------------------------------------------------------
 export async function loadGroupProjects(): Promise<GroupProject[]> {
   const rows = (await check<(Omit<GroupProject, "members"> & { group_project_member: { user_id: string }[] })[]>(
-    supabase.from("group_project").select("id,title,aim,status,start_on,end_on,lead_id,group_project_member(user_id)").order("created_at"),
+    supabase.from("group_project").select("*,group_project_member(user_id)").order("created_at"),
   )) ?? [];
   return rows.map(({ group_project_member, ...p }) => ({ ...p, members: group_project_member.map((m) => m.user_id) }));
 }

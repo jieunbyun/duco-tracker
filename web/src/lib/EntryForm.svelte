@@ -113,7 +113,7 @@
       if (!newProject.trim()) return "Name the new project, or pick one.";
       project_id = await saveProject(null, {
         name: newProject.trim(), category_id, status: "active", start_on: day, end_on: null,
-        planned_hours: null, is_important: false, notes: null,
+        planned_hours: null, is_important: false, notes: null, folder_url: null,
       });
     }
     let milestone_id: string | null = project_id && milestonePick ? milestonePick : null;
