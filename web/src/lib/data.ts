@@ -336,11 +336,11 @@ export async function saveTodo(id: string | null, fields: Partial<TodoFields>): 
   const row = await check<{ id: string }>(supabase.from("todo").insert(fields).select("id").single());
   return row!.id;
 }
-/** Open ideas ("To think about"), newest first — whatever week they were jotted in. */
+/** Open ideas ("To think about") in your order — oldest first until you rearrange them. */
 export async function loadIdeas(): Promise<Todo[]> {
   return ((await check<Todo[]>(
     supabase.from("todo").select(TODO_COLS).eq("kind", "idea").eq("is_done", false).eq("is_cancelled", false)
-      .order("created_at", { ascending: false }),
+      .order("sort_order").order("created_at"),
   )) ?? []).map(asTodo);
 }
 

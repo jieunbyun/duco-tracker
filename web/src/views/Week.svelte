@@ -725,9 +725,76 @@
     if (!title) return;
     ideaText = "";
     let id = "";
+    const sort_order = Math.max(0, ...ideas.map((t) => t.sort_order)) + 10; // newest at the bottom
     await change(`Jotted down “${title}”`,
-      async () => (id = await saveTodo(null, { kind: "idea", title, due_on: today(), must_this_week: false })),
+      async () => (id = await saveTodo(null, { kind: "idea", title, due_on: today(), must_this_week: false, sort_order })),
       () => deleteTodo(id));
+  }
+
+  // ---- rearranging ideas: drag the ⠿ handle (mouse or touch), or arrow keys on it ----
+  let dragOrder = $state<string[] | null>(null); // ids, while dragging
+  let dragId = $state<string | null>(null);
+  const shownIdeas = $derived(
+    dragOrder ? dragOrder.map((id) => ideas.find((t) => t.id === id)).filter((t): t is Todo => !!t) : ideas,
+  );
+
+  // The window follows the pointer for the whole drag: the dragged row moves in
+  // the page as the order changes, which would drop a capture held by its handle.
+  function startDrag(ev: PointerEvent, t: Todo) {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    dragId = t.id;
+    dragOrder = ideas.map((x) => x.id);
+    window.addEventListener("pointermove", dragMove);
+    window.addEventListener("pointerup", endDrag);
+    window.addEventListener("pointercancel", endDrag);
+  }
+  function dragMove(ev: PointerEvent) {
+    if (!dragId || !dragOrder) return;
+    const over = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>("li.idea");
+    const overId = over?.dataset.id;
+    if (!overId || overId === dragId) return;
+    const order = dragOrder.filter((id) => id !== dragId);
+    const r = over!.getBoundingClientRect();
+    const at = order.indexOf(overId) + (ev.clientY > r.top + r.height / 2 ? 1 : 0);
+    order.splice(at, 0, dragId);
+    if (order.join() !== dragOrder.join()) dragOrder = order;
+  }
+  async function endDrag() {
+    window.removeEventListener("pointermove", dragMove);
+    window.removeEventListener("pointerup", endDrag);
+    window.removeEventListener("pointercancel", endDrag);
+    if (!dragOrder) return;
+    const order = dragOrder;
+    dragOrder = null;
+    dragId = null;
+    await saveIdeaOrder(order);
+  }
+  function keyMove(ev: KeyboardEvent, t: Todo) {
+    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+    ev.preventDefault();
+    const order = ideas.map((x) => x.id);
+    const i = order.indexOf(t.id);
+    const j = i + (ev.key === "ArrowUp" ? -1 : 1);
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    saveIdeaOrder(order).then(() => {
+      // keep the focus on the moved idea's handle
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`li.idea[data-id="${t.id}"] .grip`)?.focus());
+    });
+  }
+  /** Store an order as sort_order 10, 20, 30…, changing only what moved. */
+  async function saveIdeaOrder(order: string[]) {
+    const before = new Map(ideas.map((t) => [t.id, t.sort_order]));
+    const changes = order
+      .map((id, i) => ({ id, sort_order: (i + 1) * 10 }))
+      .filter((c) => before.get(c.id) !== c.sort_order);
+    if (!changes.length) return;
+    // show the new order at once; the reload confirms it
+    ideas = order.map((id, i) => ({ ...ideas.find((t) => t.id === id)!, sort_order: (i + 1) * 10 }));
+    await change("Reordered your ideas",
+      async () => { for (const c of changes) await saveTodo(c.id, { sort_order: c.sort_order }); },
+      async () => { for (const c of changes) await saveTodo(c.id, { sort_order: before.get(c.id)! }); });
   }
   /** Text split around web addresses, so each address can show as a short "link". */
   function linkParts(text: string): { text?: string; url?: string }[] {
@@ -1207,8 +1274,8 @@
       <button type="submit" disabled={!ideaText.trim()}>Add</button>
     </form>
     <ul class="todos">
-      {#each ideas as t (t.id)}
-        <li class="idea">
+      {#each shownIdeas as t (t.id)}
+        <li class="idea" class:dragging={dragId === t.id} data-id={t.id}>
           {#if ideaEditing === t.id}
             <div class="idea-edit">
               <input bind:value={ideaDraft.title} aria-label="Idea" />
@@ -1219,6 +1286,9 @@
               </div>
             </div>
           {:else}
+            <button class="grip" title="Drag to reorder (or use ↑ ↓)" aria-label={`Move “${t.title}”: drag, or press up or down`}
+                    onpointerdown={(ev) => startDrag(ev, t)}
+                    onkeydown={(ev) => keyMove(ev, t)}>⠿</button>
             <div class="t-main">
               <span class="idea-title">{@render linked(t.title)}</span>
               {#if t.note}<span class="idea-note">{@render linked(t.note)}</span>{/if}
@@ -1645,7 +1715,13 @@
   .ideas { margin-top: 1.4rem; }
   .idea-add { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; max-width: 46rem; }
   .idea-add input { flex: 1; }
-  li.idea { display: grid; grid-template-columns: 1fr auto; gap: 0.7rem; align-items: start; padding: 0.45rem 0.3rem; border-radius: var(--radius); }
+  li.idea { display: grid; grid-template-columns: auto 1fr auto; gap: 0.5rem; align-items: start; padding: 0.45rem 0.3rem; border-radius: var(--radius); }
+  li.idea.dragging { background: var(--panel); box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
+  .grip {
+    background: none; border: none; padding: 0 0.2rem; font-size: 1rem; line-height: 1.3;
+    color: var(--ink-soft); cursor: grab; touch-action: none; user-select: none;
+  }
+  .grip:active { cursor: grabbing; }
   li.idea:hover { background: var(--panel); }
   .idea-note { font-size: 0.82rem; white-space: pre-line; color: var(--ink); }
   .idea-title { font-size: 0.92rem; overflow-wrap: anywhere; }
