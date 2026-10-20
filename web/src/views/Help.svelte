@@ -96,6 +96,8 @@
       in its lane over that span — drag it back to the column to clear them. Rewording a goal keeps its earlier
       wording and your reason. An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
+      Dates on Pathways are months: an item runs from the start of its first month to the end of its last
+      (a linked Planning project keeps its exact days, but shows months here too).
       The <em>Grant writing</em> lane holds grant applications: writing period up to the deadline, stage
       (drafting, submitted, awarded, declined) and, if you like, the amount sought. Link a grant to whatever it
       would fund, in any lane. That link stays dotted, and the item reads “funding pending”, until the grant is

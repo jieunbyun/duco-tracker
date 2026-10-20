@@ -1,7 +1,7 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import {
-    LANES, NODE_KINDS, LINK_KINDS, GRANT_STAGES, saveNode, deleteNode, saveLink, setLinkKind, deleteLink, loadRevisions, addRevision,
+    LANES, NODE_KINDS, LINK_KINDS, GRANT_STAGES, fromMonth, saveNode, deleteNode, saveLink, setLinkKind, deleteLink, loadRevisions, addRevision,
   } from "./pathways";
   import type { PwNode, PwNodeFields, PwLink, PwRevision, LinkKind, NodeKind, Lane, GrantStage } from "./pathways";
   import type { Project } from "./data";
@@ -33,8 +33,8 @@
     potential: n0?.potential ?? d0.potential ?? false,
     project_id: n0?.project_id ?? "",
     reading_id: n0?.reading_id ?? "",
-    start_on: n0?.start_on ?? d0.start_on ?? "",
-    end_on: n0?.end_on ?? d0.end_on ?? "",
+    start_on: (n0?.start_on ?? d0.start_on ?? "").slice(0, 7), // months, as "YYYY-MM"
+    end_on: (n0?.end_on ?? d0.end_on ?? "").slice(0, 7),
     effort_pm: n0?.effort_pm ?? (null as number | null),
     cost: n0?.cost ?? (null as number | null),
     fte: n0?.fte ?? (null as number | null),
@@ -47,10 +47,13 @@
     const p = n0?.project_id ? untrack(() => projects).find((x) => x.id === n0.project_id) : undefined;
     if (p) {
       f.title = p.name;
-      f.start_on = p.start_on ?? f.start_on;
-      f.end_on = p.end_on ?? f.end_on;
+      f.start_on = p.start_on?.slice(0, 7) ?? f.start_on;
+      f.end_on = p.end_on?.slice(0, 7) ?? f.end_on;
     }
   }
+  // the exact dates behind the months shown, kept when a month is left as it is
+  const wasStart = untrack(() => projects).find((x) => x.id === n0?.project_id)?.start_on ?? n0?.start_on ?? null;
+  const wasEnd = untrack(() => projects).find((x) => x.id === n0?.project_id)?.end_on ?? n0?.end_on ?? null;
   const linkedProject = $derived(plannable && f.project_id ? projects.find((x) => x.id === f.project_id) ?? null : null);
   let reason = $state("");
   let busy = $state(false);
@@ -71,8 +74,8 @@
     const p = projects.find((x) => x.id === f.project_id);
     if (!p) return;
     if (!f.title.trim()) f.title = p.name;
-    if (!f.start_on && p.start_on) f.start_on = p.start_on;
-    if (!f.end_on && p.end_on) f.end_on = p.end_on;
+    if (!f.start_on && p.start_on) f.start_on = p.start_on.slice(0, 7);
+    if (!f.end_on && p.end_on) f.end_on = p.end_on.slice(0, 7);
     f.potential = false;
   }
 
@@ -83,13 +86,16 @@
     if (f.start_on && f.end_on && f.end_on < f.start_on) return (error = "It ends before it starts.");
     busy = true;
     error = "";
+    const p = linkedProject;
+    const startOn = fromMonth(f.start_on, false, p ? p.start_on : wasStart);
+    const endOn = fromMonth(f.end_on, true, p ? p.end_on : wasEnd);
     try {
       const fields: Partial<PwNodeFields> = {
         kind: f.kind, lane: f.lane, title: f.title.trim(), detail: f.detail.trim() || null, status: f.status as PwNode["status"],
         potential: f.kind === "project" ? f.potential : false,
         project_id: plannable ? f.project_id || null : null,
         reading_id: f.kind === "gap" ? f.reading_id || null : null,
-        start_on: dated ? f.start_on || null : null, end_on: dated ? f.end_on || null : null,
+        start_on: dated ? startOn : null, end_on: dated ? endOn : null,
         effort_pm: f.kind === "project" ? n(f.effort_pm) : null,
         cost: plannable ? n(f.cost) : null,
         fte: f.kind === "person" ? n(f.fte) : null,
@@ -98,8 +104,8 @@
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
       // a linked project keeps the Planning project's dates in step
-      if (linkedProject && ((f.start_on || null) !== linkedProject.start_on || (f.end_on || null) !== linkedProject.end_on)) {
-        await setProjectDates(linkedProject.id, f.start_on || null, f.end_on || null);
+      if (p && (startOn !== p.start_on || endOn !== p.end_on)) {
+        await setProjectDates(p.id, startOn, endOn);
       }
       await saveNode(n0?.id ?? null, fields);
       onsaved();
@@ -210,8 +216,8 @@
     </label>
   {/if}
   {#if dated}
-    <label>{f.kind === "grant" ? "Writing from" : f.kind === "goal" ? "From (optional)" : "From"} <input type="date" bind:value={f.start_on} /></label>
-    <label>{f.kind === "grant" ? "Deadline" : f.kind === "goal" ? "By (optional)" : "To"} <input type="date" bind:value={f.end_on} min={f.start_on || undefined} /></label>
+    <label>{f.kind === "grant" ? "Writing from" : f.kind === "goal" ? "From (optional)" : "From"} <input type="month" bind:value={f.start_on} /></label>
+    <label>{f.kind === "grant" ? "Deadline" : f.kind === "goal" ? "By (optional)" : "To"} <input type="month" bind:value={f.end_on} min={f.start_on || undefined} /></label>
     {#if f.kind === "goal"}
       <p class="hint wide">Without dates the goal sits in the goals column at the horizon; with them it sits on the timeline. You can also drag it between the two.</p>
     {/if}

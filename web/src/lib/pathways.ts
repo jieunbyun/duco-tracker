@@ -145,6 +145,29 @@ export function monthAt(f: number, from: string, to: string): string {
   const pick = d.getTime() - first < next - d.getTime() ? first : next;
   return new Date(pick).toISOString().slice(0, 10);
 }
+// Pathways works in months: an item runs from the first of its first month to
+// the last day of its last month. (A linked Planning project keeps its exact
+// days; only months are shown.)
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+/** "2026-10-15" → "Oct 2026" */
+export function fmtMonth(iso: string): string {
+  return `${MONTHS[+iso.slice(5, 7) - 1]} ${iso.slice(0, 4)}`;
+}
+/** The last day of a date's month. */
+export function monthEnd(iso: string): string {
+  const [y, m] = iso.split("-").map(Number);
+  return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10);
+}
+/**
+ * A month picked as "YYYY-MM" back to a date: the first of the month for a
+ * start, the last day for an end. A date already in that month is kept as it is.
+ */
+export function fromMonth(ym: string, end: boolean, was: string | null = null): string | null {
+  if (!ym) return null;
+  if (was && was.slice(0, 7) === ym) return was;
+  return end ? monthEnd(`${ym}-01`) : `${ym}-01`;
+}
+
 /** A date moved by whole months, keeping its day (clamped to the month's length). */
 export function shiftMonths(iso: string, months: number): string {
   const [y, m, d] = iso.split("-").map(Number);

@@ -6,7 +6,7 @@
   import type { Reading } from "../lib/reading";
   import {
     LANES, NODE_KINDS, LINK_KINDS, loadPathways, saveYears, saveNode, saveLink, inferLinkKind,
-    monthStart, addMonths, fraction, monthAt, monthsBetween, shiftMonths,
+    monthStart, monthEnd, fmtMonth, addMonths, fraction, monthAt, monthsBetween, shiftMonths,
   } from "../lib/pathways";
   import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
   import { today, fmtDay } from "../lib/dates";
@@ -170,6 +170,10 @@
     window.addEventListener("pointercancel", onUp);
   }
 
+  // Pathways works in months; a linked Planning project keeps its own days.
+  const snapStart = (n: PwNode, iso: string) => (n.project_id ? iso : monthStart(iso));
+  const snapEnd = (n: PwNode, iso: string) => (n.project_id ? iso : monthEnd(iso));
+
   function onMove(ev: PointerEvent) {
     if (!drag || !mapEl) return;
     const p = local(ev);
@@ -187,8 +191,8 @@
     const f = (x: number) => (x - x0) / (x1 - x0);
     if (drag.mode === "resize") {
       const k = monthsBetween(monthStart(e0), monthAt(f(xOf(e0) + dx), from, to));
-      let end = shiftMonths(e0, k);
-      if (end <= s0) end = shiftMonths(s0, 1);
+      let end = snapEnd(n, shiftMonths(e0, k));
+      if (end <= s0) end = snapEnd(n, shiftMonths(s0, 1));
       drag = { ...drag, moved: true, end };
     } else {
       const where = laneAt(p.y);
@@ -200,8 +204,8 @@
         drag = { ...drag, moved: true, dated: true, start: monthAt(f(Math.max(x0, p.x)), from, to), end: null, lane: where.lane, row: where.row };
       } else {
         const k = monthsBetween(monthStart(s0 < from ? from : s0), monthAt(f(xOf(s0 < from ? from : s0) + dx), from, to));
-        const end = n.kind === "goal" && !n.end_on ? null : shiftMonths(e0, k);
-        drag = { ...drag, moved: true, dated: true, start: shiftMonths(s0, k), end, lane: where.lane, row: where.row };
+        const end = n.kind === "goal" && !n.end_on ? null : snapEnd(n, shiftMonths(e0, k));
+        drag = { ...drag, moved: true, dated: true, start: snapStart(n, shiftMonths(s0, k)), end, lane: where.lane, row: where.row };
       }
     }
   }
@@ -297,7 +301,7 @@
   function openNew(kind: NodeKind) {
     const lane = (NODE_KINDS.find((k) => k.key === kind)?.lane ?? "research") as Lane;
     const s = monthStart(today());
-    const e = addMonths(s, DEFAULT_MONTHS[kind]);
+    const e = monthEnd(addMonths(s, Math.max(1, DEFAULT_MONTHS[kind]) - 1));
     panel = {
       node: null,
       draft: {
@@ -311,7 +315,7 @@
   async function quickAdd(kind: NodeKind, lane: Lane, title: string, start: string | null, end: string | null) {
     let s = start, e = end;
     if (kind !== "goal" && !s) s = monthStart(today());
-    if (kind !== "goal" && !e && s) e = addMonths(monthStart(s), DEFAULT_MONTHS[kind]);
+    if (kind !== "goal" && !e && s) e = monthEnd(addMonths(monthStart(s), DEFAULT_MONTHS[kind] - 1));
     const inCol = kind === "goal" && !s && !e;
     const rs = s ?? today(), re = e ?? addMonths(monthStart(rs), 12);
     await saveNode(null, {
@@ -391,9 +395,9 @@
   const linkStage = (l: PwLink) => (l.kind === "funds" ? nodeById.get(l.from_id)?.grant_stage ?? "drafting" : null);
   function sub(n: PwNode): string {
     const bits: string[] = [n.potential ? "potential project" : n.kind === "grant" ? `grant · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
-    if (n.kind === "grant" && n.end_on) bits.push(`deadline ${fmtDay(n.end_on)}`);
-    else if (n.start_on) bits.push(`${n.start_on.slice(0, 7)} → ${n.end_on ? n.end_on.slice(0, 7) : "…"}`);
-    else if (n.end_on) bits.push(`by ${n.end_on.slice(0, 7)}`);
+    if (n.kind === "grant" && n.end_on) bits.push(`deadline ${fmtMonth(n.end_on)}`);
+    else if (n.start_on) bits.push(`${fmtMonth(n.start_on)} → ${n.end_on ? fmtMonth(n.end_on) : "…"}`);
+    else if (n.end_on) bits.push(`by ${fmtMonth(n.end_on)}`);
     if (n.kind === "grant" && n.cost) bits.push(n.cost.toLocaleString());
     const fu = funding(n.id);
     if (fu) bits.push(fu);
@@ -524,7 +528,7 @@
               <input type="checkbox" bind:checked={r.pick} disabled={r.already} />
               <span class="imp-name">{r.p.name}</span>
               <span class="muted">
-                {r.p.start_on || r.p.end_on ? `${r.p.start_on ?? "…"} → ${r.p.end_on ?? "…"}` : "no dates"}
+                {r.p.start_on || r.p.end_on ? `${r.p.start_on ? fmtMonth(r.p.start_on) : "…"} → ${r.p.end_on ? fmtMonth(r.p.end_on) : "…"}` : "no dates"}
                 · {LANES.find((l) => l.key === r.lane)?.label} lane{r.already ? " · already on the map" : ""}
               </span>
             </label>

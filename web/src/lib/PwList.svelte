@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { LANES, NODE_KINDS, LINK_KINDS, saveLink, setLinkKind, deleteLink, inferLinkKind } from "./pathways";
+  import { LANES, NODE_KINDS, LINK_KINDS, fromMonth, saveLink, setLinkKind, deleteLink, inferLinkKind } from "./pathways";
   import type { PwNode, PwLink, LinkKind, NodeKind, Lane } from "./pathways";
 
   type Props = {
@@ -75,7 +75,7 @@
     adding = true;
     error = "";
     try {
-      await onadd(q.kind, q.lane, q.title.trim(), q.start || null, q.end || null);
+      await onadd(q.kind, q.lane, q.title.trim(), fromMonth(q.start, false), fromMonth(q.end, true));
       q.title = "";
       titleEl?.focus(); // ready for the next one
     } catch (e) {
@@ -114,8 +114,8 @@
   <select bind:value={q.lane} onchange={() => (laneTouched = true)} aria-label="Lane">
     {#each LANES as l (l.key)}<option value={l.key}>{l.label}</option>{/each}
   </select>
-  <label class="q-date">{q.kind === "grant" ? "writing from" : "from"} <input type="date" bind:value={q.start} /></label>
-  <label class="q-date">{q.kind === "grant" ? "deadline" : q.kind === "goal" ? "by" : "to"} <input type="date" bind:value={q.end} min={q.start || undefined} /></label>
+  <label class="q-date">{q.kind === "grant" ? "writing from" : "from"} <input type="month" bind:value={q.start} /></label>
+  <label class="q-date">{q.kind === "grant" ? "deadline" : q.kind === "goal" ? "by" : "to"} <input type="month" bind:value={q.end} min={q.start || undefined} /></label>
   <button class="primary" type="submit" disabled={adding || !q.title.trim()}>{adding ? "Adding…" : "Add"}</button>
 </form>
 <p class="muted q-hint">
