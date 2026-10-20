@@ -12,6 +12,7 @@
   import { today, fmtDay } from "../lib/dates";
   import PwEditor from "../lib/PwEditor.svelte";
   import InfoSystem from "../lib/InfoSystem.svelte";
+  import PwList from "../lib/PwList.svelte";
   import AssetEditor from "../lib/AssetEditor.svelte";
   import { loadAssets } from "../lib/assets";
   import type { Asset } from "../lib/assets";
@@ -24,13 +25,17 @@
   let tax = $state<Taxonomy | null>(null);
   let assets = $state<Asset[]>([]);
 
-  // two views of the same pathways: the map, and the information system
+  // three views of the same pathways: the map, a list for entering and linking, and the information system
+  type View = "map" | "list" | "system";
   const VIEW_KEY = "pathways.view";
-  function savedView(): "map" | "system" {
-    try { return localStorage.getItem(VIEW_KEY) === "system" ? "system" : "map"; } catch { return "map"; }
+  function savedView(): View {
+    try {
+      const v = localStorage.getItem(VIEW_KEY);
+      return v === "system" || v === "list" ? v : "map";
+    } catch { return "map"; }
   }
-  let view = $state<"map" | "system">(savedView());
-  function setView(v: "map" | "system") {
+  let view = $state<View>(savedView());
+  function setView(v: View) {
     view = v;
     try { localStorage.setItem(VIEW_KEY, v); } catch {}
   }
@@ -302,6 +307,20 @@
       },
     };
   }
+  /** Add an item straight from the list, with the same defaults as the + buttons. */
+  async function quickAdd(kind: NodeKind, lane: Lane, title: string, start: string | null, end: string | null) {
+    let s = start, e = end;
+    if (kind !== "goal" && !s) s = monthStart(today());
+    if (kind !== "goal" && !e && s) e = addMonths(monthStart(s), DEFAULT_MONTHS[kind]);
+    const inCol = kind === "goal" && !s && !e;
+    const rs = s ?? today(), re = e ?? addMonths(monthStart(rs), 12);
+    await saveNode(null, {
+      kind, lane, title, potential: kind === "project", grant_stage: kind === "grant" ? "drafting" : null,
+      start_on: s, end_on: e, lane_row: inCol ? freeRow(lane, "goal", rs, re) : freeRow(lane, kind === "goal" ? "project" : kind, rs, re),
+    });
+    await load();
+  }
+
   // ---- bring existing Planning projects onto the map ------------------------------------
   // Each lands in its area's lane (student projects under Supervision go to the
   // Supervision lane), keeps the project's dates, and stays linked to it.
@@ -392,6 +411,7 @@
 
   <div class="views" role="tablist" aria-label="Pathways view">
     <button role="tab" aria-selected={view === "map"} class:on={view === "map"} onclick={() => setView("map")}>Map</button>
+    <button role="tab" aria-selected={view === "list"} class:on={view === "list"} onclick={() => setView("list")}>List</button>
     <button role="tab" aria-selected={view === "system"} class:on={view === "system"} onclick={() => setView("system")}>Information system</button>
   </div>
 
@@ -404,20 +424,25 @@
     {/each}
     <button onclick={openImport} title="Put existing Planning projects on the map, linked to them">+ From Planning</button>
     <span class="spacer"></span>
-    <div class="years" role="group" aria-label="How far ahead">
-      {#each [3, 5, 10, 15, 20] as y (y)}
-        <button class:on={years === y} aria-pressed={years === y} onclick={() => setYears(y)}>{y} yr</button>
-      {/each}
-    </div>
+    {#if view === "map"}
+      <div class="years" role="group" aria-label="How far ahead">
+        {#each [3, 5, 10, 15, 20] as y (y)}
+          <button class:on={years === y} aria-pressed={years === y} onclick={() => setYears(y)}>{y} yr</button>
+        {/each}
+      </div>
+    {/if}
     <label class="toggle"><input type="checkbox" bind:checked={showAll} /> Show done and retired</label>
   </div>
+  {#if error}<p class="error">{error}</p>{/if}
+  {#if loading}<p class="muted">Loading…</p>{/if}
+
+  {#if view === "list"}
+    <PwList shown={visible} all={nodes.map(eff)} {links} {sub} onedit={openEdit} onadd={quickAdd} onchanged={load} />
+  {:else}
   <div class="legend muted" aria-hidden="true">
     {#each LINK_KINDS as k (k.key)}<span><i class="lk {k.key}"></i>{k.label}</span>{/each}
     <span class="hint">Drag an item to move it in time or across lanes · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit</span>
   </div>
-
-  {#if error}<p class="error">{error}</p>{/if}
-  {#if loading}<p class="muted">Loading…</p>{/if}
 
   <div class="scroller" bind:clientWidth={width}>
     <div class="map" bind:this={mapEl} style:width={`${mapW}px`} style:height={`${mapH}px`} class:dragging={!!drag}>
@@ -478,6 +503,7 @@
 
   {#if !loading && !nodes.length}
     <p class="muted">Nothing on the map yet. Start with a goal on the right, then add projects and link them towards it.</p>
+  {/if}
   {/if}
   {/if}
 </section>

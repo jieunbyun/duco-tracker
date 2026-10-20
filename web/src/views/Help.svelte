@@ -92,7 +92,9 @@
       (drafting, submitted, awarded, declined) and, if you like, the amount sought. Link a grant to whatever it
       would fund, in any lane. That link stays dotted, and the item reads “funding pending”, until the grant is
       awarded; then it turns solid and reads “funded”. Projects under Proposals in Planning arrive here as grants.
-      <em>Information system</em> (the second view) holds asset cards — algorithms, models, datasets, software,
+      <em>List</em> (the second view) shows every item by lane, with quick entry at the top — kind, title, lane and
+      optional dates, Enter to add and straight on to the next — and each item's links, which you can add, change
+      or remove right there. <em>Information system</em> (the third view) holds asset cards — algorithms, models, datasets, software,
       knowledge — each with what it takes in and gives out, an owner and the project that produces it. Assets join
       up wherever one's output has the same name as another's input; inputs nothing produces show on the left as
       the system's open ends. People and projects on the map count the assets they contribute. “Copy catalogue”
