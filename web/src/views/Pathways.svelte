@@ -15,6 +15,7 @@
   import PwList from "../lib/PwList.svelte";
   import { loadOutputs } from "../lib/assets";
   import FolderLink from "../lib/FolderLink.svelte";
+  import { undoable } from "../lib/undo.svelte";
   import { preview } from "../lib/preview.svelte";
   import type { Output, OutputLink } from "../lib/assets";
   import { loadGroupProjects, loadMembers, myId } from "../lib/group";
@@ -213,6 +214,36 @@
   const snapEnd = (n: PwNode, iso: string) => (n.project_id ? iso : monthEnd(iso));
 
   const DEAD_X = 30; // px a block must move sideways before its dates change
+
+  // ---- tidy rows: close the empty lines in every row, keeping the order -------------
+  // Goals in the column and items on the timeline sit side by side, so each is
+  // tidied on its own; hidden (done, retired) items too, so nothing overlaps later.
+  let tidying = $state(false);
+  async function tidyRows() {
+    const moves: { id: string; row: number }[] = [];
+    for (const l of LANES) {
+      for (const col of [true, false]) {
+        const here = nodes.filter((n) => n.lane === l.key && inColumn(eff(n)) === col);
+        const used = [...new Set(here.map((n) => n.lane_row))].sort((a, b) => a - b);
+        for (const n of here) {
+          const row = used.indexOf(n.lane_row);
+          if (row !== n.lane_row) moves.push({ id: n.id, row });
+        }
+      }
+    }
+    if (!moves.length) return;
+    tidying = true;
+    try {
+      await undoable("Tidied the rows", async () => {
+        for (const m of moves) await saveNode(m.id, { lane_row: m.row });
+      });
+      await load();
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      tidying = false;
+    }
+  }
 
   function onMove(ev: PointerEvent) {
     if (!drag || !mapEl) return;
@@ -546,6 +577,9 @@
           <button class:on={years === y} aria-pressed={years === y} onclick={() => setYears(y)}>{y} yr</button>
         {/each}
       </div>
+    {/if}
+    {#if view === "map" && !member}
+      <button onclick={tidyRows} disabled={tidying} title="Close the empty lines in every row, keeping the order">{tidying ? "Tidying…" : "Tidy rows"}</button>
     {/if}
     <label class="toggle"><input type="checkbox" bind:checked={showAll} /> Show done and retired</label>
   </div>
