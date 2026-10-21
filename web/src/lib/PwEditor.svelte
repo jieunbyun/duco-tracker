@@ -47,6 +47,7 @@
     fte: n0?.fte ?? (null as number | null),
     grant_stage: (n0?.grant_stage ?? d0.grant_stage ?? "drafting") as GrantStage,
     hands_on: n0?.hands_on ?? false,
+    show_milestones: n0?.show_milestones ?? false,
     group_project_id: n0?.group_project_id ?? "",
     folder_url: n0?.folder_url ?? "",
   });
@@ -80,12 +81,13 @@
   const mine = $derived(n0 ? links.filter((l) => l.from_id === n0.id || l.to_id === n0.id) : []);
 
   // a linked Planning project lends its dates when they are empty
+  // linking a Planning project takes its name and dates (and keeps them in step from then on)
   function onProject() {
     const p = projects.find((x) => x.id === f.project_id);
     if (!p) return;
-    if (!f.title.trim()) f.title = p.name;
-    if (!f.start_on && p.start_on) f.start_on = p.start_on.slice(0, 7);
-    if (!f.end_on && p.end_on) f.end_on = p.end_on.slice(0, 7);
+    f.title = p.name;
+    if (p.start_on) f.start_on = p.start_on.slice(0, 7);
+    if (p.end_on) f.end_on = p.end_on.slice(0, 7);
     f.potential = false;
   }
 
@@ -111,6 +113,7 @@
         fte: f.kind === "person" ? n(f.fte) : null,
         grant_stage: staged(f.kind) ? f.grant_stage : null,
         hands_on: f.kind === "project" ? f.hands_on : false,
+        show_milestones: plannable && !!f.project_id ? f.show_milestones : false,
         folder_url: f.folder_url.trim() || null,
         ...(groupProjects.length || n0?.group_project_id ? { group_project_id: f.kind === "project" ? f.group_project_id || null : null } : {}),
       };
@@ -199,6 +202,10 @@
       </select>
     </label>
     <label class="check wide"><input type="checkbox" bind:checked={f.hands_on} /> Hands-on — my own research time goes into it substantially</label>
+    {#if f.project_id}
+      <label class="check wide"><input type="checkbox" bind:checked={f.show_milestones} />
+        Show its milestones on the map ({linkedProject?.milestone.length ?? 0}, from Planning)</label>
+    {/if}
     {#if groupProjects.length}
       <label class="wide">A member's project (Members tab)
         <select bind:value={f.group_project_id}>

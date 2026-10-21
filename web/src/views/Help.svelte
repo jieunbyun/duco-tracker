@@ -97,7 +97,7 @@
       it in time or across lanes, drag its right edge to stretch it, drag its ○ onto another item to link them (an
       arrow from one to the other), and click it to edit. A goal without dates sits in the goals column; give it dates (or drag it onto the timeline) and it sits
       in its lane over that span — drag it back to the column to clear them. Rewording a goal keeps its earlier
-      wording and your reason. An item linked to a Planning project shows that project's name and dates, and
+      wording and your reason. Linking an item to a Planning project takes its name and dates, and can show its milestones (◆ at their due dates, read from Planning). An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
       Mark a project <em>hands-on</em> (✋, in its editor or on its row in the List) when your own research time
       goes into it substantially; it stands out on the map, bolder and shaded.

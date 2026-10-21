@@ -427,6 +427,7 @@
   type ImportRow = { p: Project; group: string; lane: Lane; kind: "project" | "grant"; already: boolean; pick: boolean };
   let importRows = $state<ImportRow[]>([]);
   let importing = $state(false);
+  let importMilestones = $state(true); // show the imported projects' milestones on their bars
 
   function laneFor(p: Project): { lane: Lane; kind: "project" | "grant"; group: string } {
     const c = tax?.allCategories.find((x) => x.id === p.category_id);
@@ -453,13 +454,13 @@
     const placed: PwNode[] = [];
     try {
       for (const r of importRows.filter((x) => x.pick && !x.already)) {
-        const s = r.p.start_on ? monthStart(r.p.start_on) : monthStart(today());
+        const s = r.p.start_on ?? monthStart(today()); // the project's own dates
         const e = r.p.end_on ?? null;
         const row = freeRow(r.lane, r.kind, s, e ?? addMonths(s, 3), placed);
         const fields: Partial<PwNodeFields> = {
           kind: r.kind, lane: r.lane, title: r.p.name, project_id: r.p.id, potential: false,
           grant_stage: r.kind === "grant" ? "drafting" : null,
-          start_on: s, end_on: e, lane_row: row,
+          start_on: s, end_on: e, lane_row: row, show_milestones: importMilestones && r.p.milestone.length > 0,
         };
         const id = await saveNode(null, fields);
         placed.push({ ...(fields as PwNode), id });
@@ -602,6 +603,17 @@
              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEdit(n); } }}>
           <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}<FolderLink url={n.folder_url} /></span>
           <span class="n-sub">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
+          {#if n.show_milestones && n.project_id}
+            <!-- the Planning project's milestones, at their due dates (read from Planning, never copied) -->
+            {#each projById.get(n.project_id)?.milestone ?? [] as m (m.id)}
+              {@const when = m.due_on ?? m.start_on}
+              {#if when}
+                <span class="ms-mark" class:ms-done={m.status === "done" || m.status === "dropped"}
+                      style:left={`${Math.min(b.w - 6, Math.max(0, xOf(when) - b.x - 5))}px`}
+                      title={`${m.title} · ${m.due_on ? "due" : "starts"} ${fmtMonth(when)}${m.status === "done" ? " · done" : ""}`}>◆</span>
+              {/if}
+            {/each}
+          {/if}
           {#if !inColumn(n) && !member}
             <!-- pointer shortcuts; the editor's dates and Links do the same by keyboard -->
             <span class="resize" role="presentation" aria-hidden="true" title="Drag to change the end" onpointerdown={(ev) => begin(ev, n, "resize")}></span>
@@ -623,6 +635,7 @@
   {#if panel && "importing" in panel}
     <h2>Projects from Planning</h2>
     <p class="muted small">Tick the projects to put on the map. Each lands in its area's lane with its dates, linked to the Planning project.</p>
+    <label class="small imp-ms"><input type="checkbox" bind:checked={importMilestones} /> Show their milestones on the map</label>
     {#if !importRows.length}
       <p class="muted">No live projects in Planning.</p>
     {/if}
@@ -635,7 +648,7 @@
               <input type="checkbox" bind:checked={r.pick} disabled={r.already} />
               <span class="imp-name">{r.p.name}</span>
               <span class="muted">
-                {r.p.start_on || r.p.end_on ? `${r.p.start_on ? fmtMonth(r.p.start_on) : "…"} → ${r.p.end_on ? fmtMonth(r.p.end_on) : "…"}` : "no dates"}
+                {r.p.start_on || r.p.end_on ? `${r.p.start_on ? fmtMonth(r.p.start_on) : "…"} → ${r.p.end_on ? fmtMonth(r.p.end_on) : "…"}` : "no dates"}{r.p.milestone.length ? ` · ${r.p.milestone.length} milestones` : ""}
                 · {LANES.find((l) => l.key === r.lane)?.label} lane{r.already ? " · already on the map" : ""}
               </span>
             </label>
@@ -746,6 +759,10 @@
   .node.open-end { border-right-style: dashed; }
   .node.inactive { opacity: 0.5; }
   .n-title { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ms-mark { position: absolute; bottom: -8px; font-size: 0.8rem; line-height: 1; color: var(--accent); pointer-events: auto; text-shadow: 0 0 2px var(--paper), 0 0 2px var(--paper); cursor: help; }
+  .ms-mark.ms-done { color: var(--ink-soft); opacity: 0.6; }
+  .imp-ms { display: inline-flex; gap: 0.35rem; align-items: center; margin: 0.2rem 0; font-family: var(--font-ui); }
+  .imp-ms input { width: auto; }
   .n-sub { font-size: 0.66rem; color: var(--ink-soft); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 400; }
   .resize { position: absolute; right: -2px; top: 0; bottom: 0; width: 9px; cursor: ew-resize; }
   .connector {
