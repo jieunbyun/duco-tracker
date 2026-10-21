@@ -31,7 +31,7 @@
   // "+ Create it in Planning too": a new Planning project from this item, linked to it
   const NEW_PLANNING = "__new__";
   const planningCats = $derived(
-    (tax?.areas ?? []).map((a) => ({ area: a, cats: (tax?.categories ?? []).filter((c) => c.area_id === a.id && c.kind === "project") }))
+    (tax?.areas ?? []).map((a) => ({ area: a, cats: (tax?.categories ?? []).filter((c) => c.area_id === a.id) })) // any category
       .filter((g) => g.cats.length),
   );
   /** A sensible category for the lane: proposals for grants, the lane's own area otherwise. */
