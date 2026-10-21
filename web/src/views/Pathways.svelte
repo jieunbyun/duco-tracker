@@ -212,6 +212,8 @@
   const snapStart = (n: PwNode, iso: string) => (n.project_id ? iso : monthStart(iso));
   const snapEnd = (n: PwNode, iso: string) => (n.project_id ? iso : monthEnd(iso));
 
+  const DEAD_X = 30; // px a block must move sideways before its dates change
+
   function onMove(ev: PointerEvent) {
     if (!drag || !mapEl) return;
     const p = local(ev);
@@ -241,7 +243,10 @@
         // from the goals column onto the timeline: starts where it is dropped, runs on
         drag = { ...drag, moved: true, dated: true, start: monthAt(f(Math.max(x0, p.x)), from, to), end: null, lane: where.lane, row: where.row };
       } else {
-        const k = monthsBetween(monthStart(s0 < from ? from : s0), monthAt(f(xOf(s0 < from ? from : s0) + dx), from, to));
+        // sideways moves need to be meant: nothing changes within the dead zone (or with Shift held),
+        // so moving a block between rows or lanes does not nudge its dates
+        const dxt = ev.shiftKey || Math.abs(dx) <= DEAD_X ? 0 : dx - Math.sign(dx) * DEAD_X;
+        const k = monthsBetween(monthStart(s0 < from ? from : s0), monthAt(f(xOf(s0 < from ? from : s0) + dxt), from, to));
         const end = n.kind === "goal" && !n.end_on ? null : snapEnd(n, shiftMonths(e0, k));
         drag = { ...drag, moved: true, dated: true, start: snapStart(n, shiftMonths(s0, k)), end, lane: where.lane, row: where.row };
       }
@@ -554,7 +559,7 @@
     {#if member}
       <span class="hint">Your items, and the goals and objectives they lead to.</span>
     {:else}
-      <span class="hint">Drag an item to move it in time or across lanes · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit</span>
+      <span class="hint">Drag an item to move it in time or across lanes (hold Shift to keep its dates) · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit</span>
     {/if}
   </div>
 
