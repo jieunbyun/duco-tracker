@@ -34,6 +34,8 @@ export type AreaHorizon = {
   committed: number;
   free: number;
   freePerWeek: number; // free hours per working week left in the horizon
+  committedBy: { id: string; name: string; hours: number }[]; // the projects behind "committed", largest first
+  routineBy: { id: string; label: string; hours: number }[]; // the categories behind "routine", largest first
 };
 
 export function areaHorizons(
@@ -56,15 +58,21 @@ export function areaHorizons(
       h.area_id === area.id && !PLANNABLE_KINDS.has(h.category_kind) &&
       h.entry_date >= paceFrom && h.entry_date < horizon.from);
     const routine = (recent.reduce((s, h) => s + h.hours, 0) / PACE_DAYS) * days;
+    const byCat = new Map<string, number>();
+    for (const h of recent) byCat.set(h.category_id, (byCat.get(h.category_id) ?? 0) + h.hours);
+    const routineBy = [...byCat].map(([id, hrs]) => ({ id, label: cats.get(id)?.label ?? "Other", hours: (hrs / PACE_DAYS) * days }))
+      .filter((x) => x.hours > 0).sort((a, b) => b.hours - a.hours);
 
-    const committed = projects
+    const committedBy = projects
       .filter((p) => {
         const c = cats.get(p.category_id);
         return c?.area_id === area.id && PLANNABLE_KINDS.has(c.kind);
       })
-      .reduce((s, p) => s + (loads.get(p.id)?.inHorizon ?? 0), 0);
+      .map((p) => ({ id: p.id, name: p.name, hours: loads.get(p.id)?.inHorizon ?? 0 }))
+      .filter((x) => x.hours > 0).sort((a, b) => b.hours - a.hours);
+    const committed = committedBy.reduce((s, x) => s + x.hours, 0);
 
     const free = capacity - routine - committed;
-    return { area, capacity, routine, committed, free, freePerWeek: workingWeeks ? free / workingWeeks : 0 };
+    return { area, capacity, routine, committed, free, freePerWeek: workingWeeks ? free / workingWeeks : 0, committedBy, routineBy };
   });
 }

@@ -195,6 +195,19 @@
     <p class="error">{error}</p>
   {:else if tax}
     <!-- ================= horizon ================= -->
+    {#snippet breakdown(projs: { id: string; name: string; hours: number }[], routine: { id: string; label: string; hours: number }[])}
+      <!-- shown on hover (or when the row has focus): what the hours are made of -->
+      <div class="breakdown" role="tooltip">
+        <div>
+          <strong>Committed to projects</strong>
+          {#each projs as x (x.id)}<span><span>{x.name}</span><span>{fmtHours(x.hours)}</span></span>{:else}<span class="muted">none</span>{/each}
+        </div>
+        <div>
+          <strong>Routine (projected)</strong>
+          {#each routine as x (x.id)}<span><span>{x.label}</span><span>{fmtHours(x.hours)}</span></span>{:else}<span class="muted">none</span>{/each}
+        </div>
+      </div>
+    {/snippet}
     <div class="horizon-head">
       <h2>Remaining time · {choice.title}</h2>
       <div class="horizon-pick" role="group" aria-label="Viewing period">
@@ -218,7 +231,8 @@
     <div class="horizon">
       {#each areaRows as r (r.area.id)}
         {@const over = r.free < 0}
-        <div class="h-row">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="h-row" tabindex="0">
           <span class="name">{r.area.label}</span>
           <div class="stack" aria-hidden="true">
             <span class="seg routine" style:width={`${(100 * r.routine) / scale}%`}></span>
@@ -237,11 +251,13 @@
           <span class="detail muted">
             capacity {fmtHours(r.capacity)} · routine {fmtHours(r.routine)} · projects {fmtHours(r.committed)}
           </span>
+          {@render breakdown(r.committedBy, r.routineBy)}
         </div>
       {/each}
       {#if combo}
         {@const over = combo.free < 0}
-        <div class="h-row combo">
+        <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+        <div class="h-row combo" tabindex="0">
           <span class="name"><em>{combo.label}</em> <small class="tag">combined</small></span>
           <div class="stack thin" aria-hidden="true">
             <span class="seg routine" style:width={`${(100 * combo.routine) / scale}%`}></span>
@@ -263,6 +279,10 @@
             capacity {fmtHours(combo.capacity)} · routine {fmtHours(combo.routine)} ·
             projects {combo.parts.map((part) => `${part!.area.label} ${fmtHours(part!.committed)}`).join(" + ")}
           </span>
+          {@render breakdown(
+            combo.parts.flatMap((part) => part!.committedBy).sort((a, b) => b.hours - a.hours),
+            combo.parts.flatMap((part) => part!.routineBy).sort((a, b) => b.hours - a.hours),
+          )}
         </div>
       {/if}
       <div class="h-total">
@@ -437,6 +457,20 @@
     align-items: center;
   }
   .h-row .name { grid-area: name; font-weight: 600; }
+  /* hover (or focus) a row to see its hours by project and by routine category */
+  .h-row { position: relative; }
+  .h-row:focus-visible { outline: 2px solid var(--accent, var(--ink)); outline-offset: 4px; border-radius: 2px; }
+  .breakdown {
+    display: none; position: absolute; z-index: 5; top: calc(100% + 0.3rem); left: 7.9rem;
+    grid-template-columns: repeat(2, minmax(12rem, 16rem)); gap: 1.2rem;
+    background: var(--paper, var(--bg)); border: 1px solid var(--rule); border-radius: 6px;
+    padding: 0.6rem 0.8rem; box-shadow: 0 4px 14px rgb(0 0 0 / 0.12); font-size: 0.8rem;
+  }
+  .h-row:hover .breakdown, .h-row:focus-within .breakdown { display: grid; }
+  .breakdown > div { display: grid; gap: 0.15rem; align-content: start; }
+  .breakdown strong { font-weight: 600; margin-bottom: 0.15rem; }
+  .breakdown > div > span { display: flex; justify-content: space-between; gap: 0.8rem; }
+  .breakdown > div > span > span:last-child { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .stack { grid-area: stack; position: relative; display: flex; gap: 2px; height: 12px; }
   .seg { display: block; height: 100%; min-width: 0; }
   .seg:first-child { border-radius: 2px 0 0 2px; }
@@ -534,6 +568,7 @@
 
   @media (max-width: 44rem) {
     .h-row { grid-template-columns: 1fr auto; grid-template-areas: "name value" "stack stack" "detail detail"; }
+    .breakdown { left: 0; right: 0; grid-template-columns: 1fr; gap: 0.6rem; }
     .p-row {
       grid-template-columns: 1fr auto;
       grid-template-areas: "name hours" "meter meter" "dates dates" "flag flag";

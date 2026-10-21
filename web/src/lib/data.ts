@@ -191,12 +191,12 @@ export async function deleteMilestone(id: string): Promise<void> {
 }
 
 /** Every logged hour, thinly: enough for all-time project totals and recent pace. */
-export type HourRow = Pick<EntryHours, "entry_date" | "hours" | "area_id" | "category_kind" | "project_id" | "milestone_id">;
+export type HourRow = Pick<EntryHours, "entry_date" | "hours" | "area_id" | "category_id" | "category_kind" | "project_id" | "milestone_id">;
 export async function loadAllHours(): Promise<HourRow[]> {
   const rows = await fetchAll<HourRow>((a, b) =>
     supabase
       .from("entry_hours")
-      .select("entry_date,hours,area_id,category_kind,project_id,milestone_id")
+      .select("entry_date,hours,area_id,category_id,category_kind,project_id,milestone_id")
       .order("started_at")
       .order("id")
       .range(a, b),
