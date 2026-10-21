@@ -99,7 +99,7 @@ export async function loadEntryHours(from: string, to: string): Promise<EntryHou
 
 // ---- projects and milestones ---------------------------------------------
 export const PROJECT_STATUSES = ["planned", "active", "paused", "done", "dropped"] as const;
-export const MILESTONE_STATUSES = ["planned", "active", "done", "dropped"] as const;
+export const MILESTONE_STATUSES = ["active", "done", "dropped"] as const;
 
 export type Milestone = {
   id: string;

@@ -14,7 +14,7 @@
   let error = $state("");
 
   function blank() {
-    return { title: "", status: "planned", start_on: "", due_on: "", planned: null as number | null, hard_deadline: false, notes: "" };
+    return { title: "", status: "active", start_on: "", due_on: "", planned: null as number | null, hard_deadline: false, notes: "" };
   }
 
   function open(m: Milestone | null) {
