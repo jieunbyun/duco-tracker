@@ -668,7 +668,7 @@
   {:else if panel && "node" in panel}
     <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
     {#key panel}
-      <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} members={groupMembers}
+      <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} {tax} members={groupMembers}
         contributors={panel.node ? contributors.get(panel.node.id) ?? [] : []} onsaved={saved} oncancel={() => (panel = null)} />
     {/key}
   {/if}

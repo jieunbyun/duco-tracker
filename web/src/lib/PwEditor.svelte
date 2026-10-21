@@ -5,7 +5,8 @@
   } from "./pathways";
   import type { PwNode, PwNodeFields, PwLink, PwRevision, NodeKind, Lane, GrantStage } from "./pathways";
   import type { Project } from "./data";
-  import { setProjectDates } from "./data";
+  import { setProjectDates, saveProject } from "./data";
+  import type { Taxonomy } from "./data";
   import type { Reading } from "./reading";
   import type { GroupProject, Member } from "./group";
   import { LIVE_STATUSES } from "./plan";
@@ -21,10 +22,28 @@
     groupProjects?: GroupProject[]; // members' shared projects (Members tab)
     members?: Member[]; // the group, to name contributors
     contributors?: string[]; // this item's contributors now
+    tax?: Taxonomy | null; // Planning's categories, to create the project there too
     onsaved: () => void;
     oncancel: () => void;
   };
-  let { node, draft, nodes, links, projects, readings, groupProjects = [], members = [], contributors = [], onsaved, oncancel }: Props = $props();
+  let { node, draft, nodes, links, projects, readings, groupProjects = [], members = [], contributors = [], tax = null, onsaved, oncancel }: Props = $props();
+
+  // "+ Create it in Planning too": a new Planning project from this item, linked to it
+  const NEW_PLANNING = "__new__";
+  const planningCats = $derived(
+    (tax?.areas ?? []).map((a) => ({ area: a, cats: (tax?.categories ?? []).filter((c) => c.area_id === a.id && c.kind === "project") }))
+      .filter((g) => g.cats.length),
+  );
+  /** A sensible category for the lane: proposals for grants, the lane's own area otherwise. */
+  function defaultCategory(kind: string, lane: string): string {
+    const cats = tax?.categories ?? [];
+    if (kind === "grant") return cats.find((c) => c.code === "RES_PROP")?.id ?? "";
+    const areaCode = lane === "teaching" ? "TEA" : lane === "outreach" ? "OUT" : "RES";
+    const area = tax?.areas.find((a) => a.code === areaCode);
+    return cats.find((c) => c.area_id === area?.id && c.kind === "project" && c.code !== "RES_SUP" && c.code !== "RES_PROP")?.id
+      ?? cats.find((c) => c.kind === "project")?.id ?? "";
+  }
+  let newCategory = $state("");
   const had = untrack(() => contributors);
   let contrib = $state<string[]>([...untrack(() => contributors)]);
   const eligible = $derived(members.filter((m) => m.active || contrib.includes(m.user_id)));
@@ -83,6 +102,10 @@
   // a linked Planning project lends its dates when they are empty
   // linking a Planning project takes its name and dates (and keeps them in step from then on)
   function onProject() {
+    if (f.project_id === NEW_PLANNING) {
+      if (!newCategory) newCategory = defaultCategory(f.kind, f.lane);
+      return;
+    }
     const p = projects.find((x) => x.id === f.project_id);
     if (!p) return;
     f.title = p.name;
@@ -102,6 +125,16 @@
     const startOn = fromMonth(f.start_on, false, p ? p.start_on : wasStart);
     const endOn = fromMonth(f.end_on, true, p ? p.end_on : wasEnd);
     try {
+      // create the Planning project first, so the item can link to it
+      if (f.project_id === NEW_PLANNING) {
+        if (!newCategory) throw new Error("Choose the Planning category for the new project.");
+        f.project_id = await saveProject(null, {
+          name: f.title.trim(), category_id: newCategory, status: f.potential ? "planned" : "active",
+          start_on: startOn, end_on: endOn, planned_hours: null, is_important: false,
+          notes: f.detail.trim() || null, folder_url: f.folder_url.trim() || null,
+        });
+        f.potential = false;
+      }
       const fields: Partial<PwNodeFields> = {
         kind: f.kind, lane: f.lane, title: f.title.trim(), detail: f.detail.trim() || null, status: f.status as PwNode["status"],
         potential: f.kind === "project" ? f.potential : false,
@@ -162,6 +195,18 @@
   }
 </script>
 
+{#snippet newInPlanning()}
+  <label class="wide new-planning">Planning category for the new project
+    <select bind:value={newCategory}>
+      <option value="">choose…</option>
+      {#each planningCats as g (g.area.id)}
+        <optgroup label={g.area.label}>{#each g.cats as c (c.id)}<option value={c.id}>{c.label}</option>{/each}</optgroup>
+      {/each}
+    </select>
+    <span class="hint">Created on saving, with this item's name, dates, description and folder, and linked to it.</span>
+  </label>
+{/snippet}
+
 <form class="pw-form" onsubmit={save}>
   <label>Kind
     <select bind:value={f.kind} disabled={!!n0}>
@@ -198,11 +243,13 @@
     <label class="wide">Planning project (if it exists)
       <select bind:value={f.project_id} onchange={onProject}>
         <option value="">— none: a potential project —</option>
+        <option value={NEW_PLANNING}>+ Create it in Planning too</option>
         {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
       </select>
     </label>
+    {#if f.project_id === NEW_PLANNING}{@render newInPlanning()}{/if}
     <label class="check wide"><input type="checkbox" bind:checked={f.hands_on} /> Hands-on — my own research time goes into it substantially</label>
-    {#if f.project_id}
+    {#if f.project_id && f.project_id !== NEW_PLANNING}
       <label class="check wide"><input type="checkbox" bind:checked={f.show_milestones} />
         Show its milestones on the map ({linkedProject?.milestone.length ?? 0}, from Planning)</label>
     {/if}
@@ -214,8 +261,8 @@
         </select>
       </label>
     {/if}
-    {#if !f.project_id}
-      <label class="check"><input type="checkbox" bind:checked={f.potential} /> Potential (not started)</label>
+    {#if !f.project_id || f.project_id === NEW_PLANNING}
+      <label class="check"><input type="checkbox" bind:checked={f.potential} /> Potential (not started){f.project_id === NEW_PLANNING ? " — “planned” in Planning" : ""}</label>
     {/if}
     <label>Effort (person-months) <input type="number" min="0" step="0.5" bind:value={f.effort_pm} /></label>
     <label>Cost <input type="number" min="0" step="100" bind:value={f.cost} /></label>
@@ -224,9 +271,11 @@
     <label class="wide">Planning project (if you track the writing there)
       <select bind:value={f.project_id} onchange={onProject}>
         <option value="">— none —</option>
+        <option value={NEW_PLANNING}>+ Create it in Planning too</option>
         {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
       </select>
     </label>
+    {#if f.project_id === NEW_PLANNING}{@render newInPlanning()}{/if}
     <label>Stage
       <select bind:value={f.grant_stage}>{#each GRANT_STAGES as s (s)}<option value={s}>{s}</option>{/each}</select>
     </label>
@@ -326,6 +375,7 @@
   .synced { font-size: 0.75rem; color: var(--accent); }
   .contrib { display: flex; flex-wrap: wrap; gap: 0.3rem 1rem; border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.4rem 0.7rem; }
   .contrib legend { font-size: 0.8rem; color: var(--ink-soft); padding: 0 0.3rem; }
+  .new-planning select { width: auto; }
   .hint { font-size: 0.78rem; color: var(--ink-soft); margin: -0.3rem 0 0; }
   .links h3 { font-size: 0.9rem; margin: 0 0 0.3rem; }
   .link-row, .link-add { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.85rem; padding: 0.15rem 0; }
