@@ -275,6 +275,12 @@
       () => saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null }));
   }
 
+  /** A second (third…) card for the same to-do on the same day: separate sessions, each logged on its own. */
+  function addSession(t: Todo, day: string) {
+    return change(`Added another session of ${q(t)} on ${dayName(day)} ${dayNum(day)}`,
+      () => saveSlot(null, { todo_id: t.id, planned_on: day, planned_hours: null }));
+  }
+
   // Moving a card onto a day that already holds the same to-do merges the two
   // into one card with their hours added.
   function move(s: Slot, by: number) {
@@ -437,7 +443,8 @@
       const restItems: Item[] = rest
         ? [{ label: `Move the remaining ${fmtHours(rest)} to the day after ›`, run: () => moveRest(s, 1) }]
         : [];
-      return [...done, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
+      const another: Item[] = meeting ? [] : [{ label: "+ Another session on this day", run: () => addSession(t, m.day) }];
+      return [...done, ...another, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
     }
     const moves: Item[] = meeting
       ? []
@@ -449,6 +456,7 @@
       ...(t.is_tentative ? [tentativeItem] : []),
       { label: "✓ Log time", run: () => openLog(t, s, m.day) },
       ...(t.is_tentative ? [] : [tentativeItem]),
+      ...(meeting ? [] : [{ label: "+ Another session on this day", run: () => addSession(t, m.day) }]),
       ...(meeting ? [] : [{ label: "Plan across days…", run: () => openSpread(t) }]),
       ...done,
       ...moves,
