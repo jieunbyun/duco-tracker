@@ -65,6 +65,17 @@
   });
   const targetEnd = $derived(range.to < today() ? range.to : today());
 
+  // Targets measured so far (the days lived) or for the whole period
+  const BASIS_KEY = "time.basis";
+  let basis = $state<"sofar" | "full">((() => { try { return localStorage.getItem(BASIS_KEY) === "full" ? "full" : "sofar"; } catch { return "sofar"; } })());
+  function chooseBasis(b: "sofar" | "full") {
+    basis = b;
+    try { localStorage.setItem(BASIS_KEY, b); } catch {}
+  }
+  const targetDays = $derived(basis === "full" ? daysIn(range) : elapsed);
+  const targetUntil = $derived(basis === "full" ? range.to : targetEnd); // the last day a target counts
+  const basisWord = $derived(basis === "full" ? "for the period" : "to date");
+
   const plan = $derived.by(() => {
     if (!tax) return [];
     const perDay = tax.weeksPerYear / 365;
@@ -73,8 +84,8 @@
       const rows = shared.filter((e) => e.area_id === a.id);
       const actual = rows.reduce((s, e) => s + e.hours, 0);
       const email = rows.filter((e) => e.category_kind === "email").reduce((s, e) => s + e.hours, 0);
-      const target = t ? (t.weekly_hours + t.email_weekly_hours) * perDay * elapsed : 0;
-      const emailTarget = t ? t.email_weekly_hours * perDay * elapsed : 0;
+      const target = t ? (t.weekly_hours + t.email_weekly_hours) * perDay * targetDays : 0;
+      const emailTarget = t ? t.email_weekly_hours * perDay * targetDays : 0;
       return { area: a, actual, target, email, emailTarget };
     });
   });
@@ -100,15 +111,15 @@
   });
 
   // ---- core hours: against a weekly target, spread over every day of the week ----
-  const coreTarget = $derived(coreWeekly ? (coreWeekly / 7) * elapsed : 0);
-  /** Each week of the period (up to today): core hours, and the target for its days so far. */
+  const coreTarget = $derived(coreWeekly ? (coreWeekly / 7) * targetDays : 0);
+  /** Each week of the period: core hours, and the target for its days (so far, or all of them). */
   const coreWeeks = $derived.by(() => {
     const out: { start: string; label: string; hours: number; target: number; partial: boolean }[] = [];
     if (elapsed <= 0) return out;
-    for (let ws = weekStart(range.from); ws <= targetEnd; ws = addDays(ws, 7)) {
+    for (let ws = weekStart(range.from); ws <= targetUntil; ws = addDays(ws, 7)) {
       const from = ws < range.from ? range.from : ws;
       const we = addDays(ws, 6);
-      const to = we > targetEnd ? targetEnd : we;
+      const to = we > targetUntil ? targetUntil : we;
       const days = daysIn({ from, to });
       const hours = entries.filter((e) => e.is_core && e.entry_date >= from && e.entry_date <= to).reduce((s, e) => s + e.hours, 0);
       out.push({ start: ws, label: fmtDay(ws), hours, target: coreWeekly ? (coreWeekly / 7) * days : 0, partial: days < 7 });
@@ -226,12 +237,16 @@
       <div class="kpi">
         <span class="kpi-label">Logged</span>
         <span class="kpi-value">{fmtHours(totals.logged)}</span>
-        <span class="kpi-sub">{pct(totals.logged, totals.target)} of target to date</span>
+        <span class="kpi-sub">{pct(totals.logged, totals.target)} of target {basisWord}</span>
       </div>
       <div class="kpi">
-        <span class="kpi-label">Target to date</span>
+        <span class="kpi-label">Target {basisWord}</span>
         <span class="kpi-value">{fmtHours(totals.target)}</span>
         <span class="kpi-sub">{elapsed} of {daysIn(range)} days elapsed</span>
+        <div class="basis" role="group" aria-label="Targets measured">
+          <button class:on={basis === "sofar"} aria-pressed={basis === "sofar"} onclick={() => chooseBasis("sofar")}>So far</button>
+          <button class:on={basis === "full"} aria-pressed={basis === "full"} onclick={() => chooseBasis("full")}>Full period</button>
+        </div>
       </div>
       <div class="kpi">
         <span class="kpi-label">Weekly average</span>
@@ -242,7 +257,7 @@
         <span class="kpi-label">Core</span>
         <span class="kpi-value">{fmtHours(totals.core)}</span>
         <span class="kpi-sub">
-          {coreWeekly ? `${pct(totals.core, coreTarget)} of core target to date · ` : ""}{pct(totals.core, totals.logged)} of logged
+          {coreWeekly ? `${pct(totals.core, coreTarget)} of core target ${basisWord} · ` : ""}{pct(totals.core, totals.logged)} of logged
         </span>
       </div>
     </div>
@@ -250,7 +265,7 @@
     <!-- Core hours -->
     <h2>Core hours</h2>
     {#if coreWeekly}
-      <p class="muted note">Hours flagged core, against {fmtHours(coreWeekly)} a week spread over every day. Each bar is a week; the tick is its target (a part week's, for the days so far).</p>
+      <p class="muted note">Hours flagged core, against {fmtHours(coreWeekly)} a week spread over every day. Each bar is a week; the tick is its target{basis === "full" ? "" : " (a part week's, for the days so far)"}.</p>
       <div class="plan">
         <div class="plan-row" title={`Core: ${fmtHours(totals.core)} logged, target ${fmtHours(coreTarget)}`}>
           <span class="name">Core</span>
@@ -285,7 +300,7 @@
 
     <!-- Plan vs actual -->
     <h2>Plan vs actual</h2>
-    <p class="muted note">Bars are hours logged; the tick is the target for the days elapsed.</p>
+    <p class="muted note">Bars are hours logged; the tick is the target {basis === "full" ? "for the whole period" : "for the days elapsed"}.</p>
     <div class="plan">
       {#each plan as p (p.area.id)}
         <div class="plan-row" title={`${p.area.label}: ${fmtHours(p.actual)} logged, target ${fmtHours(p.target)}`}>
@@ -389,6 +404,11 @@
   .wk-tick { position: absolute; left: 0; right: 0; border-top: 2px solid var(--ink); }
   .wk-h { font-size: 0.7rem; color: var(--ink); min-height: 0.9rem; }
   .wk-label { font-size: 0.62rem; color: var(--ink-soft); white-space: nowrap; }
+  .basis { display: inline-flex; margin-top: 0.35rem; }
+  .basis button { font-size: 0.72rem; padding: 0.15rem 0.5rem; border-radius: 0; }
+  .basis button:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+  .basis button:last-child { border-radius: 0 var(--radius) var(--radius) 0; margin-left: -1px; }
+  .basis button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
   .kpis {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
