@@ -38,7 +38,6 @@ begin
     ('RES', 'RES_MEET', 'Meetings',        'routine', 30),
     ('RES', 'RES_PUB',  'Publications',    'project', 40),
     ('RES', 'RES_PROP', 'Proposals',       'project', 50),
-    ('RES', 'RES_TEXT', 'Textbooks',       'project', 60),
     ('RES', 'RES_SOFT', 'Software',        'project', 70),
     ('RES', 'RES_PRES', 'Presentations',   'project', 80),
     ('RES', 'RES_WEB',  'Web publication', 'mixed',   90),
@@ -48,6 +47,7 @@ begin
     ('TEA', 'TEA_CPD',  'CPD',             'project', 40),
     ('TEA', 'TEA_MOD',  'Modules',         'project', 50),
     ('TEA', 'TEA_MSC',  'MSc programme',   'project', 60),
+    ('TEA', 'TEA_TEXT', 'Textbooks',       'project', 70),
     ('TEA', 'TEA_MAIL', 'Email',           'email',   95),
     ('TEA', 'TEA_MISC', 'Miscellaneous',   'misc',    99),
     -- Admin
