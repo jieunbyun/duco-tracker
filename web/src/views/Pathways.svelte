@@ -1,7 +1,7 @@
 <script lang="ts">
   import { loadProjects, loadTaxonomy, setProjectDates } from "../lib/data";
   import type { Project, Taxonomy } from "../lib/data";
-  import { LIVE_STATUSES } from "../lib/plan";
+  import { LIVE_STATUSES, milestoneDates } from "../lib/plan";
   import { loadReadings } from "../lib/reading";
   import type { Reading } from "../lib/reading";
   import {
@@ -645,11 +645,14 @@
           {#if n.show_milestones && n.project_id}
             <!-- the Planning project's milestones, at their due dates (read from Planning, never copied) -->
             {#each projById.get(n.project_id)?.milestone ?? [] as m (m.id)}
-              {@const when = m.due_on ?? m.start_on}
+              <!-- its due date (its own, or when the next milestone starts), else its start; never just the project's -->
+              {@const d = milestoneDates(projById.get(n.project_id)!, m)}
+              {@const dueKnown = d.dueFrom === "own" || d.dueFrom === "after"}
+              {@const when = dueKnown ? d.due : d.startFrom === "own" || d.startFrom === "after" ? d.start : null}
               {#if when}
                 <span class="ms-mark" class:ms-done={m.status === "done" || m.status === "dropped"}
                       style:left={`${Math.min(b.w - 6, Math.max(0, xOf(when) - b.x - 5))}px`}
-                      title={`${m.title} · ${m.due_on ? "due" : "starts"} ${fmtMonth(when)}${m.status === "done" ? " · done" : ""}`}>◆</span>
+                      title={`${m.title} · ${dueKnown ? "due" : "starts"} ${fmtMonth(when)}${m.status === "done" ? " · done" : ""}`}>◆</span>
               {/if}
             {/each}
           {/if}

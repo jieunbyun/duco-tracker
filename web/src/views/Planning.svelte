@@ -168,7 +168,7 @@
       case "no-plan": return "no planned hours";
       case "no-end": return "no end date — all remaining hours counted now";
       case "overdue": return `past end date · ${fmtHours(l.remaining)} left`;
-      case "over-budget": return `over plan by ${fmtHours(l.actual - (plannedOf(p).hours ?? 0))}`;
+      case "over-budget": return `over plan by ${fmtHours(l.overBy)}`;
       default: return l.perWeek ? `needs ${fmtHours(l.perWeek)}/wk to finish` : "";
     }
   }

@@ -213,7 +213,11 @@
       A project's planned hours are the sum of its milestones' hours — marked Σ — when every milestone (other than
       dropped ones) has hours, or when the project has no figure of its own; otherwise its own figure. With no end date, a project ends with its latest
       milestone. When the plan comes from milestones, each milestone's remaining hours are spread over
-      its own dates (start to due, falling back to the project's), so work due soon weighs on the near term.
+      its own dates, so work due soon weighs on the near term. A milestone can <em>come after</em> others in its
+      project (choose them when editing it): with no start date of its own, it starts when the last of those is due,
+      and one with no due date is due when the first milestone after it starts. Dates still missing are the
+      project's start and end. Dates a milestone does not set itself are shown in italics; hover for where they come
+      from. A milestone ticked done that took longer than planned does not make the project “over plan”.
     </dd>
 
     <dt>Weeks</dt>

@@ -4,8 +4,8 @@
 // Remaining hours are spread evenly over a window, from today (or the start,
 // if later) to the end date; only the share inside the horizon is committed.
 // When the plan comes from milestones, each milestone is spread over its own
-// window — its start and due dates, falling back to the project's — so work
-// due soon weighs on the near term.
+// window — its start and due dates, falling back to the milestones it is
+// connected to, then the project's — so work due soon weighs on the near term.
 import type { Project } from "./data";
 import { daysIn } from "./dates";
 import type { Range } from "./dates";
@@ -20,6 +20,7 @@ export type ProjectLoad = {
   inHorizon: number; // the part of `remaining` that falls inside the horizon
   perWeek: number | null; // pace needed to finish on time
   flag: Flag;
+  overBy: number; // hours over the plan, not counting milestones finished over theirs
 };
 
 /**
@@ -46,6 +47,25 @@ export function endOf(p: Project): string | null {
   return dues.length ? dues[dues.length - 1] : null;
 }
 
+/**
+ * A milestone's working dates, and where each comes from: its own; its connected
+ * milestones (it starts when the last milestone it comes after is due, and is due
+ * when the first one after it starts); else the project's start and end.
+ */
+export type DateSource = "own" | "after" | "project" | null;
+export function milestoneDates(p: Project, m: Project["milestone"][number]) {
+  const live = p.milestone.filter((x) => x.id !== m.id && x.status !== "dropped");
+  const before = live.filter((x) => (m.after_ids ?? []).includes(x.id) && x.due_on).map((x) => x.due_on!).sort();
+  const next = live.filter((x) => (x.after_ids ?? []).includes(m.id) && x.start_on).map((x) => x.start_on!).sort();
+  const start = m.start_on ?? before.at(-1) ?? p.start_on;
+  const due = m.due_on ?? next[0] ?? endOf(p);
+  return {
+    start, due,
+    startFrom: (m.start_on ? "own" : before.length ? "after" : start ? "project" : null) as DateSource,
+    dueFrom: (m.due_on ? "own" : next.length ? "after" : due ? "project" : null) as DateSource,
+  };
+}
+
 /** Spread `remaining` hours from max(today, start) to `end`. */
 function spread(remaining: number, start: string | null, end: string | null, horizon: Range) {
   if (remaining <= 0) return { inHorizon: 0, perWeek: 0, flag: null as Flag };
@@ -70,11 +90,16 @@ export function projectLoad(
   horizon: Range,
   actualByMilestone: Map<string, number> = new Map(),
 ): ProjectLoad {
-  const base = { actual, remaining: 0, inHorizon: 0, perWeek: null };
+  const base = { actual, remaining: 0, inHorizon: 0, perWeek: null, overBy: 0 };
   if (!LIVE_STATUSES.has(p.status)) return { ...base, flag: null };
   const plan = plannedOf(p);
   if (plan.hours === null) return { ...base, flag: "no-plan" };
-  const over: Flag = actual > plan.hours ? "over-budget" : null;
+  // a milestone ticked done that took longer than planned is finished business, not a warning
+  const settled = p.milestone
+    .filter((m) => m.status === "done" && m.planned_hours !== null)
+    .reduce((s, m) => s + Math.max(0, (actualByMilestone.get(m.id) ?? 0) - m.planned_hours!), 0);
+  const overBy = Math.max(0, actual - settled - plan.hours);
+  const over: Flag = overBy > 0 ? "over-budget" : null;
 
   if (!plan.fromMilestones) {
     const remaining = Math.max(0, plan.hours - actual);
@@ -85,6 +110,7 @@ export function projectLoad(
       inHorizon: s.inHorizon,
       perWeek: s.perWeek || null,
       flag: s.flag === "overdue" ? "overdue" : over ?? s.flag,
+      overBy,
     };
   }
 
@@ -95,8 +121,8 @@ export function projectLoad(
   for (const m of p.milestone) {
     if (m.status === "dropped" || m.status === "done" || m.planned_hours === null) continue;
     const left = Math.max(0, m.planned_hours - (actualByMilestone.get(m.id) ?? 0));
-    const start = m.start_on ?? p.start_on;
-    const s = spread(left, start, m.due_on ?? endOf(p), horizon);
+    const { start, due } = milestoneDates(p, m);
+    const s = spread(left, start, due, horizon);
     remaining += left;
     inHorizon += s.inHorizon;
     perWeek += s.perWeek;
@@ -110,12 +136,13 @@ export function projectLoad(
     inHorizon,
     perWeek: paceNow || perWeek || null,
     flag: overdue ? "overdue" : over ?? (noEnd ? "no-end" : null),
+    overBy,
   };
 }
 
 // ---- a milestone's share of one week ------------------------------------------
 export type MilestoneWeek = {
-  due: string | null; // its due date, or the project's end
+  due: string | null; // its due date: its own, else when the next milestone starts, else the project's end
   remaining: number | null; // planned − logged; null when it has no planned hours
   suggested: number | null; // this week's share of `remaining`
   overdue: boolean;
@@ -136,8 +163,7 @@ export function milestoneWeek(
   todayIso: string,
 ): MilestoneWeek | null {
   if (!LIVE_STATUSES.has(p.status) || m.status === "done" || m.status === "dropped") return null;
-  const start = m.start_on ?? p.start_on;
-  const due = m.due_on ?? endOf(p);
+  const { start, due } = milestoneDates(p, m);
   const overdue = !!due && due < todayIso;
   if (!overdue) {
     if (start && start > week.to) return null; // not started by the end of the week

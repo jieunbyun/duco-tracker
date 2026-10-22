@@ -3,6 +3,8 @@
   import type { Milestone, Project } from "./data";
   import { fmtDay } from "./dates";
   import { plannedOf } from "./horizon";
+  import { milestoneDates } from "./plan";
+  import type { DateSource } from "./plan";
 
   type Props = { project: Project; actualByMilestone: Map<string, number>; onchange: () => void };
   let { project, actualByMilestone, onchange }: Props = $props();
@@ -14,7 +16,7 @@
   let error = $state("");
 
   function blank() {
-    return { title: "", status: "active", start_on: "", due_on: "", planned: null as number | null, hard_deadline: false, notes: "" };
+    return { title: "", status: "active", start_on: "", due_on: "", planned: null as number | null, hard_deadline: false, notes: "", after: [] as string[] };
   }
 
   function open(m: Milestone | null) {
@@ -22,13 +24,15 @@
     editing = m?.id ?? "new";
     draft = m
       ? { title: m.title, status: m.status, start_on: m.start_on ?? "", due_on: m.due_on ?? "",
-          planned: m.planned_hours, hard_deadline: m.hard_deadline, notes: m.notes ?? "" }
+          planned: m.planned_hours, hard_deadline: m.hard_deadline, notes: m.notes ?? "", after: m.after_ids.filter((id) => project.milestone.some((x) => x.id === id)) }
       : blank();
   }
 
   async function save(event: SubmitEvent, m: Milestone | null) {
     event.preventDefault();
     if (draft.start_on && draft.due_on && draft.due_on < draft.start_on) return (error = "The due date is before the start date.");
+    const before = project.milestone.find((x) => draft.after.includes(x.id) && x.due_on && draft.due_on && x.due_on > draft.due_on);
+    if (before) return (error = `It is due before “${before.title}”, which it comes after.`);
     busy = true;
     error = "";
     try {
@@ -42,6 +46,8 @@
         hard_deadline: draft.hard_deadline,
         sort_order: m?.sort_order ?? (project.milestone.length + 1) * 10,
         notes: draft.notes.trim() || null,
+        // only sent when there is something to say, so saving works before 0032 is run
+        ...(draft.after.length || m?.after_ids.length ? { after_ids: draft.after } : {}),
       });
       editing = null;
       onchange();
@@ -76,6 +82,27 @@
     }
   }
 
+  // the milestones this one can come after: any other, except those that (in turn) come after it
+  function laterThan(id: string): Set<string> {
+    const out = new Set<string>();
+    const walk = (x: string) => {
+      for (const n of project.milestone) if (n.after_ids.includes(x) && !out.has(n.id)) { out.add(n.id); walk(n.id); }
+    };
+    walk(id);
+    return out;
+  }
+  const candidates = (m: Milestone | null) => {
+    const later = m ? laterThan(m.id) : new Set<string>();
+    return project.milestone.filter((x) => x.id !== m?.id && !later.has(x.id) && (x.status !== "dropped" || draft.after.includes(x.id)));
+  };
+  const titleOf = (id: string) => project.milestone.find((x) => x.id === id)?.title ?? "";
+  const why = (from: DateSource, m: Milestone, end: "start" | "due") =>
+    from === "after"
+      ? end === "start"
+        ? `when ${m.after_ids.map(titleOf).filter(Boolean).join(", ")} ${m.after_ids.length > 1 ? "are" : "is"} due`
+        : "when the next milestone starts"
+      : from === "project" ? `the project's ${end === "start" ? "start" : "end"}` : "";
+
   const plannedSum = $derived(project.milestone.reduce((s, m) => s + (m.planned_hours ?? 0), 0));
 </script>
 
@@ -92,6 +119,14 @@
     <label>Due <input type="date" bind:value={draft.due_on} min={draft.start_on || undefined} /></label>
     <label>Planned hours <input type="number" min="0" step="0.5" bind:value={draft.planned} /></label>
     <label class="check"><input type="checkbox" bind:checked={draft.hard_deadline} /> Hard deadline</label>
+    {#if candidates(m).length}
+      <fieldset class="wide after">
+        <legend>Comes after <span class="hint">— with no start date, it starts when the last of these is due</span></legend>
+        {#each candidates(m) as x (x.id)}
+          <label class="check"><input type="checkbox" value={x.id} bind:group={draft.after} /> {x.title}</label>
+        {/each}
+      </fieldset>
+    {/if}
     <label class="wide">Notes <textarea rows="2" bind:value={draft.notes}></textarea></label>
     {#if error}<p class="error wide">{error}</p>{/if}
     <div class="actions wide">
@@ -125,15 +160,20 @@
             {@render form(m)}
           {:else}
             {@const actual = actualByMilestone.get(m.id) ?? 0}
+            {@const d = milestoneDates(project, m)}
             <div class="ms-line" class:complete={m.status === "done"}>
             <button class="ms-row" onclick={() => open(m)}>
               <span class="title">
                 {m.title}
                 {#if m.hard_deadline}<small class="hard">hard deadline</small>{/if}
+                {#if m.after_ids.some(titleOf)}<small class="after-of">after {m.after_ids.map(titleOf).filter(Boolean).join(", ")}</small>{/if}
               </span>
               <span class="chip status-{m.status}">{m.status}</span>
               <span class="dates muted">
-                {m.start_on ? fmtDay(m.start_on) : "…"} – {m.due_on ? fmtDay(m.due_on) : "…"}
+                <!-- dates it does not set itself are implied (in italics), and say where from -->
+                <span class:implied={d.startFrom !== "own"} title={why(d.startFrom, m, "start")}>{d.start ? fmtDay(d.start) : "…"}</span>
+                –
+                <span class:implied={d.dueFrom !== "own"} title={why(d.dueFrom, m, "due")}>{d.due ? fmtDay(d.due) : "…"}</span>
               </span>
               <span class="hours">
                 <strong>{fmtHours(actual)}</strong>
@@ -185,6 +225,12 @@
   .ms-line.complete .title { text-decoration: line-through; color: var(--ink-soft); }
   .title small.hard { margin-left: 0.4rem; color: var(--danger); font-size: 0.72rem; }
   .dates { font-size: 0.8rem; }
+  .implied { font-style: italic; opacity: 0.8; }
+  .title small.after-of { margin-left: 0.4rem; color: var(--ink-soft); font-size: 0.72rem; }
+  .after { border: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 1rem; }
+  .after legend { font-size: 0.8rem; color: var(--ink-soft); padding: 0; margin-bottom: 0.2rem; }
+  .after .check { padding-bottom: 0; }
+  .hint { font-size: 0.75rem; }
   .hours { text-align: right; font-variant-numeric: tabular-nums; }
   .empty { font-size: 0.85rem; margin: 0.2rem 0 0.5rem; }
   .add { margin-top: 0.5rem; font-size: 0.85rem; }

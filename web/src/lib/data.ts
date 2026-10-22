@@ -112,6 +112,7 @@ export type Milestone = {
   hard_deadline: boolean;
   sort_order: number;
   notes: string | null;
+  after_ids: string[]; // milestones of the same project that come before this one
 };
 
 export type Project = {
@@ -133,7 +134,7 @@ const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 export async function loadProjects(): Promise<Project[]> {
   const cols = (folder: boolean) =>
     `id,category_id,name,status,start_on,end_on,planned_hours,is_important,notes${folder ? ",folder_url" : ""},` +
-    "milestone(id,project_id,title,status,start_on,due_on,planned_hours,hard_deadline,sort_order,notes)";
+    "milestone(*)"; // all its columns, so a newer one (after_ids, 0032) is simply absent until its SQL is run
   let { data, error } = await supabase.from("project").select(cols(true)).order("name");
   // before 0019_folders.sql is run there is no folder column: everything else still works
   if (error && /folder_url/.test(error.message)) ({ data, error } = await supabase.from("project").select(cols(false)).order("name"));
@@ -143,13 +144,13 @@ export async function loadProjects(): Promise<Project[]> {
     folder_url: p.folder_url ?? null,
     planned_hours: num(p.planned_hours),
     milestone: p.milestone
-      .map((m) => ({ ...m, planned_hours: num(m.planned_hours) }))
+      .map((m) => ({ ...m, planned_hours: num(m.planned_hours), after_ids: m.after_ids ?? [] }))
       .sort((a, b) => a.sort_order - b.sort_order || (a.due_on ?? "9").localeCompare(b.due_on ?? "9")),
   }));
 }
 
 export type ProjectFields = Omit<Project, "id" | "milestone">;
-export type MilestoneFields = Omit<Milestone, "id">;
+export type MilestoneFields = Omit<Milestone, "id" | "after_ids"> & { after_ids?: string[] };
 
 async function check<T>(q: PromiseLike<{ error: { message: string } | null; data?: T | null }>): Promise<T | null | undefined> {
   const { error, data } = await q;
