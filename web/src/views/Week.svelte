@@ -5,6 +5,7 @@
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
+  import { shareRemaining } from "../lib/share";
   import type { MilestoneWeek } from "../lib/plan";
   import { addDays, today, weekStart, parse, fmtDay } from "../lib/dates";
   import { meetingsInRange } from "../lib/ics";
@@ -299,12 +300,16 @@
       });
   }
 
-  /** Planned hours of a logged card not yet done: planned minus logged, when positive. */
+  /** Hours of a logged card's to-do with no day left to go to: what is left of the
+   *  estimate (or of this card's plan, without one), when positive. While the to-do
+   *  has an open day, that day already holds the rest, so there is nothing to move. */
   function remainingOf(s: Slot, t: Todo): number {
-    const planned = cardHours(s, t);
     const e = s.entry_id ? entryById.get(s.entry_id) : null;
-    if (planned === null || !e) return 0;
-    const left = Math.round((planned - e.minutes / 60) * 4) / 4;
+    if (!e) return 0;
+    if (slotsOf(t).some((x) => !x.entry_id && !x.is_cancelled)) return 0;
+    const planned = cardHours(s, t);
+    const raw = t.est_hours !== null ? t.est_hours - loggedFor(t) : planned === null ? 0 : planned - e.minutes / 60;
+    const left = Math.round(raw * 4) / 4;
     return left > 0 ? left : 0;
   }
   /** A partly done day: it keeps what was logged; the rest joins (or makes) the next day's card. */
@@ -314,7 +319,8 @@
     if (!rest) return;
     const to = addDays(s.planned_on, by);
     const there = openCardOn(t.id, to, s.id);
-    const done = (cardHours(s, t) ?? 0) - rest;
+    const e = entryById.get(s.entry_id!);
+    const done = e ? e.minutes / 60 : (cardHours(s, t) ?? 0) - rest;
     return change(`Moved the remaining ${fmtHours(rest)} of ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
       async () => {
         await saveSlot(s.id, { planned_hours: done });
@@ -862,7 +868,9 @@
     panel = null;
   }
 
-  // ---- email checks: one to-do per weekday ------------------------------------------------
+  // ---- email checks: one to-do for the week, a card on each ticked day ---------------------
+  // One to-do holding the week's email time, so a day's card moves (and merges)
+  // like any other, and time logged on one day comes off the days still to do.
   const EMAIL_TITLE = "Email check";
   const weekdays = $derived(days.filter((d) => { const w = parse(d).getDay(); return w >= 1 && w <= 5; }));
   let emailPick = $state<Record<string, boolean>>({});
@@ -883,19 +891,34 @@
   async function createEmailChecks() {
     const picked = weekdays.filter((d) => emailPick[d]);
     if (picked.length) await change(`Added ${picked.length} email ${picked.length === 1 ? "check" : "checks"}`, async () => {
-      for (const d of picked) {
-        const id = await saveTodo(null, {
-          kind: "task", title: EMAIL_TITLE, due_on: d, category_id: emailCategory || null,
-          est_hours: emailHours, must_this_week: false,
-        });
-        await saveSlot(null, { todo_id: id, planned_on: d, planned_hours: null });
-      }
+      const id = await saveTodo(null, {
+        kind: "task", title: EMAIL_TITLE, due_on: picked[0], category_id: emailCategory || null,
+        est_hours: emailHours * picked.length, must_this_week: false,
+      });
+      for (const d of picked) await saveSlot(null, { todo_id: id, planned_on: d, planned_hours: emailHours });
     });
     panel = null;
   }
 
-  /** Hours planned for this card: its own share, or the to-do's estimate when it has just one day. */
+  // Hours on each open card (not logged, not cancelled) of a task: what is left
+  // of its estimate after everything logged, shared over the open cards in
+  // proportion to their own planned hours (see share.ts). So the days still to
+  // do follow the estimate, and grow or shrink as logged days come in under or
+  // over their plan.
+  const openHours = $derived.by(() => {
+    const out = new Map<string, number | null>();
+    for (const t of todos) {
+      if (t.kind !== "task") continue;
+      const open = slotsOf(t).filter((x) => !x.entry_id && !x.is_cancelled);
+      for (const [id, h] of shareRemaining(t.est_hours, loggedFor(t), open)) out.set(id, h);
+    }
+    return out;
+  });
+
+  /** Hours planned for this card: an open card's share of what is left; a logged or
+   *  cancelled one keeps its own figure, or the to-do's estimate when it has just one day. */
   function cardHours(s: Slot, t: Todo): number | null {
+    if (t.kind === "task" && openHours.has(s.id)) return openHours.get(s.id)!;
     if (s.planned_hours !== null) return s.planned_hours;
     const live = slotsOf(t).filter((x) => !x.is_cancelled);
     return live.length === 1 ? t.est_hours : null;
@@ -1397,7 +1420,8 @@
       <h2>Create email checks</h2>
       <div class="pick">
         <p class="muted small">
-          One “{EMAIL_TITLE}” to-do on each ticked day; edit any day's afterwards from its card. Email time counts in
+          One “{EMAIL_TITLE}” to-do for the week, with a card on each ticked day. Move a card to another day like any
+          to-do; time logged on one day comes off (or, if under, goes on to) the days still to do. Email time counts in
           equal shares to Teaching, Admin and Outreach, whichever Email category it is logged under.
         </p>
         <div class="pick-days">
@@ -1427,7 +1451,7 @@
         <div class="pick-actions">
           {#if weekdays.some((d) => emailPick[d])}
             {@const n = weekdays.filter((d) => emailPick[d]).length}
-            <button class="primary" onclick={createEmailChecks}>Create {n} email {n === 1 ? "check" : "checks"}</button>
+            <button class="primary" onclick={createEmailChecks}>Create {n} email {n === 1 ? "check" : "checks"} ({fmtHours(emailHours * n)})</button>
           {:else}
             <button class="primary" disabled>Nothing to create</button>
           {/if}

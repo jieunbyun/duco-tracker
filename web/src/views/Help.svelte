@@ -47,12 +47,14 @@
       Click or right-click a meeting or duty on the calendar for its actions: log time, move it a day, cancel it
       (it stays on its day, struck through and restorable, as a record of what was planned), edit it, or take it off
       the calendar (for a meeting, delete it). For a duty, the menu also marks the to-do done or reopens it.
-      Moving a card onto a day that already has the same to-do merges them into one card with the hours added; a
-      day partly logged offers to move its remaining hours to the next day, keeping what was done.
+      Moving a card onto a day that already has the same to-do merges them into one card with the hours added.
       <em>Plan across days…</em> (on a duty's menu, or in the to-do list) lets you tick several days and give the
       total hours, which are split evenly over them; each card then shows its share.
-      <em>✉ Create email checks</em>, under the calendar, adds a 1.5-hour “Email check” to-do on each weekday;
-      each day is its own to-do, so any one can be edited, moved or cancelled. The bar that appears at the bottom
+      A logged day keeps what was logged; the days still to do share what is left of the to-do's total. So they
+      follow the total when you change it, grow when a day comes in under its plan, and shrink when one runs over.
+      If no day is left to take the rest, a partly logged day offers to move it to the next day.
+      <em>✉ Create email checks</em>, under the calendar, adds one “Email check” to-do for the week — 1.5 hours on
+      each ticked weekday, 7.5 hours for all five — so a day's card moves to another day like any to-do. The bar that appears at the bottom
       after a change offers to undo it.
     </dd>
 
