@@ -20,7 +20,7 @@ export type Action = {
   sort_order: number; // your order, by dragging
 };
 export type ActionFields = Pick<Action, "title" | "links" | "project_id" | "milestone_id" | "group_project_id" | "group_milestone_id">;
-export type ActionComment = { id: string; action_id: string; author_id: string; body: string | null; links: string[]; created_at: string };
+export type ActionComment = { id: string; action_id: string; author_id: string; body: string | null; links: string[]; created_at: string; edited_at?: string | null };
 
 const COLS = "id,title,links,project_id,milestone_id,group_project_id,group_milestone_id,is_done,done_at,created_at,sort_order";
 const RECENT_DAYS = 14;
@@ -84,7 +84,7 @@ export async function loadActionComments(actionIds: string[]): Promise<ActionCom
   if (!actionIds.length) return [];
   const out: ActionComment[] = [];
   for (let i = 0; i < actionIds.length; i += 200) {
-    const { data, error } = await supabase.from("action_comment").select("id,action_id,author_id,body,links,created_at")
+    const { data, error } = await supabase.from("action_comment").select("*")
       .in("action_id", actionIds.slice(i, i + 200)).order("created_at");
     if (error) return [];
     out.push(...((data ?? []) as ActionComment[]).map((c) => ({ ...c, links: c.links ?? [] })));
@@ -94,13 +94,17 @@ export async function loadActionComments(actionIds: string[]): Promise<ActionCom
 /** Recent comments you can see, newest first (yours, and members' on shared projects). */
 export async function loadRecentComments(days = 30): Promise<ActionComment[]> {
   const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const { data, error } = await supabase.from("action_comment").select("id,action_id,author_id,body,links,created_at")
+  const { data, error } = await supabase.from("action_comment").select("*")
     .gte("created_at", since).order("created_at", { ascending: false }).limit(2000);
   if (error) return [];
   return ((data ?? []) as ActionComment[]).map((c) => ({ ...c, links: c.links ?? [] }));
 }
 export async function addActionComment(actionId: string, body: string, links: string[]): Promise<void> {
   await check(supabase.from("action_comment").insert({ action_id: actionId, body: body.trim() || null, links }));
+}
+/** Your own comment's text and links, at any time; it then shows as edited. */
+export async function editActionComment(id: string, body: string, links: string[]): Promise<void> {
+  await check(supabase.from("action_comment").update({ body: body.trim() || null, links }).eq("id", id));
 }
 /** Possible on the day it was written; after that a comment stays. */
 export async function deleteActionComment(id: string): Promise<void> {

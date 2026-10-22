@@ -3,7 +3,7 @@
   // comments and links. Tick off what is done, add what comes up, drag to put
   // them in order. Members write on their own actions; the supervisor replies.
   import {
-    addAction, saveAction, setActionDone, deleteAction, saveActionOrder, addActionComment, deleteActionComment,
+    addAction, saveAction, setActionDone, deleteAction, saveActionOrder, addActionComment, editActionComment, deleteActionComment,
     commentDeletable, byOrder,
   } from "./actions";
   import type { Action, ActionComment } from "./actions";
@@ -108,6 +108,16 @@
     open = null;
     await act(() => addActionComment(a.id, b, l));
   }
+  let editing = $state<{ id: string; body: string; links: string } | null>(null);
+  const escEdit = (ev: KeyboardEvent) => { if (ev.key === "Escape") editing = null; };
+  async function saveEdit() {
+    const e = editing;
+    if (!e) return;
+    const l = parseLinks(e.links);
+    if (!e.body.trim() && !l.length) return; // emptying a comment is not deleting it
+    editing = null;
+    await act(() => editActionComment(e.id, e.body, l));
+  }
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
@@ -152,10 +162,24 @@
           <li>
             <span class="when">{fmtDay(c.created_at.slice(0, 10))}</span>
             {#if c.author_id !== me || members.length > 1}<span class="who">{nameOf(c.author_id)}</span>{/if}
-            {#if c.body}<span class="text">{c.body}</span>{/if}
-            {#each c.links as l (l)}<a class="chip" href={l} target="_blank" rel="noopener noreferrer" title={l}>↗ {linkName(l)}</a>{/each}
-            {#if c.author_id === me && commentDeletable(c)}
-              <button class="x" aria-label="Delete comment" onclick={() => act(() => deleteActionComment(c.id))}>✕</button>
+            {#if editing?.id === c.id}
+              <form class="cmt edit" onsubmit={(ev) => { ev.preventDefault(); saveEdit(); }}>
+                <input bind:value={editing.body} placeholder="Comment" aria-label="Comment text" onkeydown={escEdit} />
+                <input bind:value={editing.links} placeholder="Link(s)" aria-label="Comment links" onkeydown={escEdit} />
+                <button class="mini" type="submit">Save</button>
+                <button class="mini" type="button" onclick={() => (editing = null)}>Cancel</button>
+              </form>
+            {:else}
+              {#if c.body}<span class="text">{c.body}</span>{/if}
+              {#each c.links as l (l)}<a class="chip" href={l} target="_blank" rel="noopener noreferrer" title={l}>↗ {linkName(l)}</a>{/each}
+              {#if c.edited_at}<span class="muted small" title={`Edited ${fmtDay(c.edited_at.slice(0, 10))}`}>(edited)</span>{/if}
+              {#if c.author_id === me && canComment}
+                <button class="x edit-btn" aria-label="Edit comment" title="Edit"
+                        onclick={() => (editing = { id: c.id, body: c.body ?? "", links: c.links.join(" ") })}>✎</button>
+              {/if}
+              {#if c.author_id === me && commentDeletable(c)}
+                <button class="x" aria-label="Delete comment" onclick={() => act(() => deleteActionComment(c.id))}>✕</button>
+              {/if}
             {/if}
           </li>
         {/each}
@@ -216,5 +240,7 @@
   .small { font-size: 0.78rem; }
   .x { background: none; border: none; color: var(--ink-soft); font-size: 0.72rem; padding: 0 0.25rem; }
   .x:hover { color: var(--danger); }
+  .x.edit-btn:hover { color: var(--accent); }
+  .cmt.edit { flex: 1 1 20rem; margin: 0; }
   .link { background: none; border: none; color: var(--accent); text-decoration: underline; padding: 0 0.2rem; font-size: 0.75rem; }
 </style>

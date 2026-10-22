@@ -135,7 +135,8 @@
       Logbook covers the projects you lead and your Planning projects; a member's covers their shared projects. Under
       each member are their projects (several each; you create them and choose who leads, and both of you tick off
       milestones) and their Logbook, where you read their threads and reply. A comment can be taken back on the day it
-      was written; after that it stays. Actions are not to-dos and never appear on Week's lists, but the same actions
+      was written; after that it stays. You can edit your own comments at any time with ✎; an edited comment keeps
+      its date and is marked <em>(edited)</em>. Actions are not to-dos and never appear on Week's lists, but the same actions
       appear when you log a block in Week, to tick, add, comment on and reorder there; time is logged there, never per
       action. <em>Actions done</em> keeps the history of every action ticked off, by month, with its thread.
       <em>Export logbook</em> saves it as a Markdown file, to keep on OneDrive or take along when they leave; entries
