@@ -8,6 +8,7 @@ import { today } from "./dates";
 
 export type Action = {
   id: string;
+  user_id: string; // who wrote it — the only one who can tick it off or change it
   title: string;
   links: string[]; // links on the action itself
   project_id: string | null; // a Planning project
@@ -22,7 +23,7 @@ export type Action = {
 export type ActionFields = Pick<Action, "title" | "links" | "project_id" | "milestone_id" | "group_project_id" | "group_milestone_id">;
 export type ActionComment = { id: string; action_id: string; author_id: string; body: string | null; links: string[]; created_at: string; edited_at?: string | null };
 
-const COLS = "id,title,links,project_id,milestone_id,group_project_id,group_milestone_id,is_done,done_at,created_at,sort_order";
+const COLS = "id,user_id,title,links,project_id,milestone_id,group_project_id,group_milestone_id,is_done,done_at,created_at,sort_order";
 const RECENT_DAYS = 14;
 const asAction = (a: Action) => ({ ...a, links: a.links ?? [], sort_order: a.sort_order ?? 100 });
 /** Your order first (dragging sets it), then oldest first. */
@@ -50,8 +51,8 @@ export async function loadDoneActions(): Promise<Action[]> {
 export async function loadMemberActions(userId: string): Promise<Action[]> {
   const { data, error } = await supabase.rpc("member_actions_for", { p: userId });
   if (error) return [];
-  return ((data ?? []) as Omit<Action, "project_id" | "milestone_id">[]).map((a) => asAction({
-    ...a, project_id: null, milestone_id: null,
+  return ((data ?? []) as Omit<Action, "project_id" | "milestone_id" | "user_id">[]).map((a) => asAction({
+    ...a, user_id: userId, project_id: null, milestone_id: null,
   } as Action)).sort(byOrder);
 }
 

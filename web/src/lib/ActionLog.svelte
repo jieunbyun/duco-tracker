@@ -149,7 +149,11 @@
         <button class="a-title" disabled={!canWrite} title={canWrite ? "Click to rename" : ""}
                 onclick={() => (renaming = { id: a.id, title: a.title })}>{a.title}</button>
       {/if}
-      {#if a.done_at && a.is_done}<span class="muted small">done {fmtDay(a.done_at.slice(0, 10))}</span>{/if}
+      {#if a.group_project_id}
+        <!-- on a shared project, who added it and who ticked it off, and when (only its author can do either) -->
+        <span class="muted small logged">added {fmtDay(a.created_at.slice(0, 10))} by {nameOf(a.user_id)}{#if a.is_done && a.done_at}
+          · done {fmtDay(a.done_at.slice(0, 10))} by {nameOf(a.user_id)}{/if}</span>
+      {:else if a.done_at && a.is_done}<span class="muted small">done {fmtDay(a.done_at.slice(0, 10))}</span>{/if}
       {#each a.links as l (l)}<a class="chip" href={l} target="_blank" rel="noopener noreferrer" title={l}>↗ {linkName(l)}</a>{/each}
       <span class="spacer"></span>
       {#if canComment}<button class="link" onclick={() => { open = open === a.id ? null : a.id; body = links = ""; }}>comment / link</button>{/if}
