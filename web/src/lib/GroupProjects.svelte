@@ -1,11 +1,12 @@
 <script lang="ts">
   import {
-    saveGroupProject, deleteGroupProject, addProjectMember, removeProjectMember, saveMilestone, deleteMilestone,
+    saveGroupProject, deleteGroupProject, addProjectMember, removeProjectMember,
   } from "./group";
   import type { GroupProject, GroupMilestone, Member } from "./group";
   import { fromMonth, fmtMonth } from "./pathways";
   import { today } from "./dates";
   import FolderLink from "./FolderLink.svelte";
+  import GroupMilestones from "./GroupMilestones.svelte";
 
   type Props = {
     projects: GroupProject[];
@@ -20,8 +21,9 @@
   let { projects, milestones, members, activity = new Map(), supervisor, newFor = null, readonly = false, onchanged }: Props = $props();
 
   let error = $state("");
-  const act = async (f: () => Promise<unknown>) => {
-    try { error = ""; await f(); await onchanged(); } catch (e) { error = (e as Error).message; }
+  /** Run a change and reload; false (with the message shown) if it failed. */
+  const act = async (f: () => Promise<unknown>): Promise<boolean> => {
+    try { error = ""; await f(); await onchanged(); return true; } catch (e) { error = (e as Error).message; return false; }
   };
   const nameOf = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "—";
   const assignable = $derived(members.filter((m) => m.active));
@@ -53,19 +55,6 @@
       draft = null;
     });
   }
-
-  // ---- milestones ----------------------------------------------------------------------
-  let msText = $state<Record<string, string>>({});
-  let msDue = $state<Record<string, string>>({});
-  async function addMs(p: GroupProject) {
-    const title = (msText[p.id] ?? "").trim();
-    if (!title) return;
-    const order = Math.max(0, ...milestones.filter((m) => m.project_id === p.id).map((m) => m.sort_order)) + 10;
-    await act(() => saveMilestone(null, { project_id: p.id, title, due_on: fromMonth(msDue[p.id] ?? "", true), sort_order: order }));
-    msText[p.id] = "";
-    msDue[p.id] = "";
-  }
-  const tick = (m: GroupMilestone) => act(() => saveMilestone(m.id, { done: !m.done, done_on: m.done ? null : today() }));
 
 </script>
 
@@ -137,21 +126,7 @@
       {/if}
     </div>
 
-    <ul class="ms">
-      {#each ms as m (m.id)}
-        <li class:done={m.done}>
-          <label><input type="checkbox" checked={m.done} disabled={readonly} onchange={() => tick(m)} /> {m.title}</label>
-          {#if m.due_on}<span class="muted small">by {fmtMonth(m.due_on)}</span>{/if}
-          {#if m.done && m.done_on}<span class="muted small">· done {m.done_on}</span>{/if}
-          <button class="x" aria-label="Delete milestone" hidden={readonly} onclick={() => confirm(`Delete the milestone “${m.title}”?`) && act(() => deleteMilestone(m.id))}>✕</button>
-        </li>
-      {/each}
-    </ul>
-    <form class="ms-add" hidden={readonly} onsubmit={(ev) => { ev.preventDefault(); addMs(p); }}>
-      <input bind:value={msText[p.id]} placeholder="New milestone…" aria-label="New milestone" />
-      <input type="month" bind:value={msDue[p.id]} aria-label="Due by" title="Due by (optional)" />
-      <button class="mini" type="submit" disabled={!(msText[p.id] ?? "").trim()}>Add</button>
-    </form>
+    <GroupMilestones project={p} milestones={ms} {readonly} {act} />
   </section>
 {:else}
   <p class="muted">{supervisor ? "No projects yet." : "No projects yet: your supervisor adds them."}</p>
@@ -168,14 +143,6 @@
   .people { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; margin: 0.4rem 0; }
   .person { padding: 0.05rem 0.5rem; border: 1px solid var(--rule); border-radius: 999px; }
   .people select { width: auto; font-size: 0.78rem; padding: 0.1rem 0.3rem; }
-  .ms { list-style: none; margin: 0.4rem 0; padding: 0; }
-  .ms li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; padding: 0.15rem 0; font-size: 0.88rem; }
-  .ms li.done label { text-decoration: line-through; color: var(--ink-soft); }
-  .ms label { display: inline-flex; gap: 0.35rem; align-items: baseline; }
-  .ms input[type="checkbox"] { width: auto; }
-  .ms-add { display: flex; gap: 0.4rem; }
-  .ms-add input { font-size: 0.82rem; padding: 0.25rem 0.45rem; }
-  .ms-add input[type="month"] { width: auto; }
   .gp-form { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.5rem 0.8rem; margin-bottom: 0.8rem; font-family: var(--font-ui); }
   .gp-form label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .gp-form .wide { grid-column: 1 / -1; }

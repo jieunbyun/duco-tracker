@@ -135,8 +135,10 @@
       thread of comments and links. Tick off what is done, add what comes up under a milestone, drag the ⠿ handle to
       put them in order, click an action to rename it, and use <em>comment / link</em> to add to its thread. Your
       Logbook covers the projects you lead and your Planning projects; a member's covers their shared projects. Under
-      each member are their projects (several each; you create them and choose who leads, and both of you tick off
-      milestones) and their Logbook, where you read their threads and reply. A comment can be taken back on the day it
+      each member are their projects (several each; you create them and choose who leads). You and they set a
+      project's milestones the way you set yours in Planning — start and due dates, what each comes after (dates it
+      does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off. Then
+      come their Logbook, where you read their threads and reply. A comment can be taken back on the day it
       was written; after that it stays. You can edit your own comments at any time with ✎; an edited comment keeps
       its date and is marked <em>(edited)</em>. Actions are not to-dos and never appear on Week's lists, but the same actions
       appear when you log a block in Week, to tick, add, comment on and reorder there; time is logged there, never per

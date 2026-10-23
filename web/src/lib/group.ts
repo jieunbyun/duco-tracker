@@ -17,7 +17,11 @@ export type GroupProject = {
   start_on: string | null; end_on: string | null; lead_id: string | null; members: string[]; // user ids
   folder_url?: string | null; // its folder on OneDrive
 };
-export type GroupMilestone = { id: string; project_id: string; title: string; due_on: string | null; done: boolean; done_on: string | null; sort_order: number };
+export type GroupMilestone = {
+  id: string; project_id: string; title: string; due_on: string | null; done: boolean; done_on: string | null; sort_order: number;
+  // set the way Planning milestones are (0034)
+  start_on: string | null; hard_deadline: boolean; notes: string | null; after_ids: string[];
+};
 export type EntryKind = "entry" | "weekly";
 export type Entry = {
   id: string; author_id: string; project_id: string | null; entry_date: string; kind: EntryKind;
@@ -118,9 +122,12 @@ export async function removeProjectMember(projectId: string, userId: string): Pr
 }
 
 export async function loadMilestones(): Promise<GroupMilestone[]> {
-  return (await check<GroupMilestone[]>(
-    supabase.from("group_milestone").select("id,project_id,title,due_on,done,done_on,sort_order").order("sort_order").order("due_on"),
-  )) ?? [];
+  // every column, so the ones added by 0034 are simply absent until its SQL is run
+  return ((await check<GroupMilestone[]>(
+    supabase.from("group_milestone").select("*").order("sort_order").order("due_on"),
+  )) ?? []).map((m) => ({
+    ...m, start_on: m.start_on ?? null, hard_deadline: m.hard_deadline ?? false, notes: m.notes ?? null, after_ids: m.after_ids ?? [],
+  }));
 }
 export async function saveMilestone(id: string | null, fields: Partial<Omit<GroupMilestone, "id">>): Promise<void> {
   await check(id ? supabase.from("group_milestone").update(fields).eq("id", id) : supabase.from("group_milestone").insert(fields));

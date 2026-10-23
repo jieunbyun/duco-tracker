@@ -54,11 +54,22 @@ export function endOf(p: Project): string | null {
  */
 export type DateSource = "own" | "after" | "project" | null;
 export function milestoneDates(p: Project, m: Project["milestone"][number]) {
-  const live = p.milestone.filter((x) => x.id !== m.id && x.status !== "dropped");
+  return impliedDates(p.milestone.filter((x) => x.status !== "dropped"), m, p.start_on, endOf(p));
+}
+
+/** A milestone as far as its dates go: a Planning one, or a member's project's. */
+export type DatedMilestone = { id: string; start_on: string | null; due_on: string | null; after_ids?: string[] | null };
+
+/**
+ * The same rule for any list of milestones (those still counting, without the
+ * dropped ones) and its project's start and end.
+ */
+export function impliedDates(all: DatedMilestone[], m: DatedMilestone, projectStart: string | null, projectEnd: string | null) {
+  const live = all.filter((x) => x.id !== m.id);
   const before = live.filter((x) => (m.after_ids ?? []).includes(x.id) && x.due_on).map((x) => x.due_on!).sort();
   const next = live.filter((x) => (x.after_ids ?? []).includes(m.id) && x.start_on).map((x) => x.start_on!).sort();
-  const start = m.start_on ?? before.at(-1) ?? p.start_on;
-  const due = m.due_on ?? next[0] ?? endOf(p);
+  const start = m.start_on ?? before.at(-1) ?? projectStart;
+  const due = m.due_on ?? next[0] ?? projectEnd;
   return {
     start, due,
     startFrom: (m.start_on ? "own" : before.length ? "after" : start ? "project" : null) as DateSource,
