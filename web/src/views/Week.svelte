@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    loadTaxonomy, loadProjects, loadWeekPlan, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
+    loadTaxonomy, loadProjects, loadWeekPlan, loadUnfinishedBefore, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
     saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
@@ -34,7 +34,6 @@
   let projects = $state<Project[]>([]);
   let todos = $state<Todo[]>([]);
   let slots = $state<Slot[]>([]);
-  let carried = $state<Set<string>>(new Set());
   let entries = $state<TimeEntry[]>([]);
   let loading = $state(true);
   let error = $state("");
@@ -85,11 +84,11 @@
 
   async function load() {
     const id = ++request;
-    const [from, to, carry] = [start, end, isCurrent];
+    const [from, to] = [start, end];
     loading = true;
     try {
       const [plan, logged, p, review, thoughts] = await Promise.all([
-        loadWeekPlan(from, to, carry), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(),
+        loadWeekPlan(from, to), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(),
       ]);
       if (id !== request) return;
       projects = p;
@@ -97,7 +96,6 @@
       ideas = thoughts;
       todos = plan.todos;
       slots = plan.slots;
-      carried = plan.carried;
       entries = logged;
       error = "";
     } catch (e) {
@@ -204,7 +202,7 @@
       if (t.est_hours === null || t.est_hours === undefined) unknown += 1;
       else hours += Math.max(0, t.est_hours - loggedFor(t));
     }
-    return { hours, unknown, count: rows.length, carried: rows.filter((t) => carried.has(t.id)).length };
+    return { hours, unknown, count: rows.length };
   }
 
   /** Hours planned on a day: meetings' lengths and duties' hours for that day, leaving
@@ -232,7 +230,6 @@
   // Cancelled to-dos stay in their group, struck through, until restored or deleted.
   const unplaced = $derived(tasks.filter((t) => !onCalendar.has(t.id) && !pending(t)));
   const groups = $derived([
-    // to-dos carried over from earlier weeks sit with this week's, marked "from week of …"
     { key: "must", title: "Must do", rows: unplaced.filter((t) => (!t.is_done || t.is_cancelled) && t.must_this_week) },
     { key: "flex", title: "Flexible", rows: unplaced.filter((t) => (!t.is_done || t.is_cancelled) && !t.must_this_week) },
     { key: "done", title: "Done", rows: unplaced.filter((t) => t.is_done && !t.is_cancelled) },
@@ -500,6 +497,7 @@
     | { kind: "entry"; entry: TimeEntry | null; day: string }
     | { kind: "spread"; todo: Todo }
     | { kind: "email" }
+    | { kind: "forward" }
     | { kind: "outlook" }
     | { kind: "milestones" };
   let panel = $state<Panel | null>(null);
@@ -868,6 +866,54 @@
     panel = null;
   }
 
+  // ---- carrying unfinished to-dos forward, by hand ------------------------------------------
+  // Nothing comes along by itself: this lists the open to-dos from earlier weeks,
+  // none ticked, and files the ticked ones under the week on screen. A day planned
+  // for one in an earlier week and never logged is cancelled (kept, struck
+  // through), so it no longer holds hours that now belong to this week.
+  type FwdRow = { t: Todo; pick: boolean; week: string; loggedDays: number };
+  let fwdRows = $state<FwdRow[]>([]);
+  let fwdSlots = $state<Slot[]>([]);
+  let fwdLoading = $state(false);
+  const fwdWeeks = $derived([...new Set(fwdRows.map((r) => r.week))]);
+
+  async function openForward() {
+    panel = { kind: "forward" };
+    fwdLoading = true;
+    fwdRows = [];
+    try {
+      const plan = await loadUnfinishedBefore(start);
+      fwdSlots = plan.slots;
+      fwdRows = plan.todos.map((t) => ({
+        t, pick: false, week: weekStart(t.due_on),
+        loggedDays: plan.slots.filter((s) => s.todo_id === t.id && s.entry_id).length,
+      }));
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      fwdLoading = false;
+    }
+  }
+  async function forwardPicked() {
+    const picked = fwdRows.filter((r) => r.pick).map((r) => r.t);
+    if (!picked.length) return;
+    panel = null;
+    const n = picked.length;
+    await change(`Carried ${n} ${n === 1 ? "to-do" : "to-dos"} forward to the week of ${fmtDay(start)}`, async () => {
+      for (const t of picked) {
+        await saveTodo(t.id, { due_on: start });
+        for (const s of fwdSlots.filter((x) => x.todo_id === t.id && x.planned_on < start && !x.entry_id && !x.is_cancelled)) {
+          await saveSlot(s.id, { is_cancelled: true, cancelled_by_sync: false });
+        }
+      }
+    });
+  }
+  /** What a row in the carry-forward list says about its to-do. */
+  function fwdInfo(r: FwdRow): string {
+    const days = r.loggedDays ? `${r.loggedDays} ${r.loggedDays === 1 ? "day" : "days"} logged` : "";
+    return [label(r.t), r.t.est_hours ? `est. ${fmtHours(r.t.est_hours)}` : "", days].filter(Boolean).join(" · ");
+  }
+
   // ---- email checks: one to-do for the week, a card on each ticked day ---------------------
   // One to-do holding the week's email time, so a day's card moves (and merges)
   // like any other, and time logged on one day comes off the days still to do.
@@ -1025,7 +1071,7 @@
       <span class="wt-label">Flexible</span>
       <span class="wt-value">{fmtHours(weekTotals.flex.hours)}</span>
       <span class="wt-sub">
-        {weekTotals.flex.count} {weekTotals.flex.count === 1 ? "to-do" : "to-dos"}{weekTotals.flex.carried ? `, ${weekTotals.flex.carried} carried over` : ""}{weekTotals.flex.unknown ? ` · ${weekTotals.flex.unknown} without hours` : ""}
+        {weekTotals.flex.count} {weekTotals.flex.count === 1 ? "to-do" : "to-dos"}{weekTotals.flex.unknown ? ` · ${weekTotals.flex.unknown} without hours` : ""}
       </span>
     </div>
     <div class="wt">
@@ -1142,6 +1188,7 @@
   </div>
   <div class="below-days">
     <button onclick={openEmail}>✉ Create email checks (Mon–Fri)</button>
+    <button onclick={openForward}>↪ Carry forward unfinished to-dos…</button>
   </div>
 
   <!-- ================= to-do list ================= -->
@@ -1173,7 +1220,6 @@
                 <span class="t-meta muted">
                   {label(t)}{label(t) && (t.est_hours || lh) ? " · " : ""}
                   {#if lh}{fmtHours(lh)}{t.est_hours ? ` of ${fmtHours(t.est_hours)}` : ""} logged{:else if t.est_hours}est. {fmtHours(t.est_hours)}{/if}
-                  {#if carried.has(t.id)} · <span class="carried">from week of {fmtDay(weekStart(t.due_on))}</span>{/if}
                 </span>
                 {#if ts.length}
                   <span class="t-days">
@@ -1387,7 +1433,7 @@
                               {#if r.m.hard_deadline} · hard deadline{/if}
                               {#if r.info.remaining !== null} · {fmtHours(r.info.remaining)} left{:else} · no planned hours{/if}
                               {#if r.existing}
-                                <span class="ms-existing">· already a to-do this week: “{r.existing.title}”{carried.has(r.existing.id) ? " (carried over)" : ""} — tick to add another</span>
+                                <span class="ms-existing">· already a to-do this week: “{r.existing.title}” — tick to add another</span>
                               {/if}
                             </span>
                           </div>
@@ -1416,6 +1462,49 @@
       <h2>Outlook calendar</h2>
       <OutlookSettings oncancel={() => (panel = null)}
                        onsaved={async (changed) => { panel = null; feed = await loadFeed(); if (changed && feed?.ics_url) runSync(); }} />
+    {:else if panel.kind === "forward"}
+      <h2>Carry forward unfinished to-dos</h2>
+      <div class="pick">
+        <p class="muted small">
+          To-dos from earlier weeks that are neither done nor cancelled. Tick the ones to bring into the week of
+          {fmtDay(start)}; the rest stay where they are. A day planned for one earlier and never logged is cancelled
+          (it stays on its day, struck through), so its hours move with the to-do.
+        </p>
+        {#if fwdLoading}
+          <p class="muted">Loading…</p>
+        {:else if !fwdRows.length}
+          <p class="muted">Nothing unfinished from earlier weeks.</p>
+        {:else}
+          <div class="small">
+            <button class="link" onclick={() => fwdRows.forEach((r) => (r.pick = true))}>Tick all</button> ·
+            <button class="link" onclick={() => fwdRows.forEach((r) => (r.pick = false))}>none</button>
+          </div>
+          {#each fwdWeeks as w (w)}
+            <div class="fwd-week">
+              <h3>Week of {fmtDay(w)}</h3>
+              <ul class="fwd">
+                {#each fwdRows.filter((r) => r.week === w) as r (r.t.id)}
+                  <li>
+                    <label>
+                      <input type="checkbox" bind:checked={r.pick} />
+                      <span>{r.t.must_this_week ? "● " : ""}{r.t.is_core ? "🎯 " : ""}{r.t.title}</span>
+                      <span class="muted small">{fwdInfo(r)}</span>
+                    </label>
+                  </li>
+                {/each}
+              </ul>
+            </div>
+          {/each}
+        {/if}
+        <div class="pick-actions">
+          {#if fwdRows.some((r) => r.pick)}
+            <button class="primary" onclick={forwardPicked}>Carry {fwdRows.filter((r) => r.pick).length} forward</button>
+          {:else}
+            <button class="primary" disabled>Nothing ticked</button>
+          {/if}
+          <button onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </div>
     {:else if panel.kind === "email"}
       <h2>Create email checks</h2>
       <div class="pick">
@@ -1535,6 +1624,10 @@
   .pick-row { display: flex; flex-wrap: wrap; gap: 1rem; }
   .pick-hours { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); max-width: 16rem; }
   .pick-actions { display: flex; gap: 0.5rem; }
+  .fwd-week h3 { margin: 0.2rem 0 0.3rem; font-size: 0.82rem; color: var(--ink-soft); font-weight: 600; }
+  .fwd { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
+  .fwd label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; font-size: 0.88rem; cursor: pointer; }
+  .fwd input { width: auto; }
   .ms-groups { display: grid; gap: 0.4rem; max-height: 58vh; overflow-y: auto; padding-right: 0.2rem; }
   .ms-group { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.3rem 0.6rem; }
   .ms-group summary { cursor: pointer; display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; padding: 0.25rem 0; font-size: 0.9rem; }
@@ -1656,7 +1749,6 @@
   .todo.cancelled .t-title { text-decoration: line-through; color: var(--ink-soft); }
   .todo.cancelled .t-meta { opacity: 0.7; }
   .x-mark { color: var(--ink-soft); margin-top: 0.1rem; }
-  .carried { color: var(--accent); }
   .ideas { margin-top: 1.4rem; }
   .idea-add { display: flex; gap: 0.4rem; margin-bottom: 0.4rem; max-width: 46rem; }
   .idea-add input { flex: 1; }

@@ -301,25 +301,22 @@ const SLOT_COLS = "id,todo_id,planned_on,start_time,end_time,planned_hours,entry
 const asTodo = (t: Todo): Todo => ({ ...t, est_hours: num(t.est_hours) });
 const asSlot = (x: Slot): Slot => ({ ...x, planned_hours: num(x.planned_hours) });
 
-export type WeekPlan = { todos: Todo[]; slots: Slot[]; carried: Set<string> };
+export type WeekPlan = { todos: Todo[]; slots: Slot[] };
 
 /**
- * Everything planned for a week: to-dos due in it, to-dos with a sitting in
- * it, and — for the current week — open tasks left over from earlier weeks.
+ * Everything planned for a week: to-dos filed under it, and to-dos with a
+ * sitting in it. Unfinished to-dos from earlier weeks are not brought along by
+ * themselves: they are carried forward by hand (loadUnfinishedBefore).
  */
-export async function loadWeekPlan(from: string, to: string, carryOver: boolean): Promise<WeekPlan> {
-  const [due, slots, old] = await Promise.all([
+export async function loadWeekPlan(from: string, to: string): Promise<WeekPlan> {
+  const [due, slots] = await Promise.all([
     supabase.from("todo").select(TODO_COLS).gte("due_on", from).lte("due_on", to),
     supabase.from("todo_slot").select(SLOT_COLS).gte("planned_on", from).lte("planned_on", to),
-    carryOver
-      ? supabase.from("todo").select(TODO_COLS).lt("due_on", from).eq("kind", "task")
-          .eq("is_done", false).eq("is_cancelled", false)
-      : Promise.resolve({ data: [] as Todo[], error: null }),
   ]);
-  for (const r of [due, slots, old]) if (r.error) throw new Error(r.error.message);
+  for (const r of [due, slots]) if (r.error) throw new Error(r.error.message);
 
   const todos = new Map<string, Todo>();
-  for (const t of [...(due.data ?? []), ...(old.data ?? [])] as Todo[]) todos.set(t.id, asTodo(t));
+  for (const t of (due.data ?? []) as Todo[]) todos.set(t.id, asTodo(t));
   const missing = [...new Set((slots.data as Slot[]).map((x) => x.todo_id))].filter((id) => !todos.has(id));
   if (missing.length) {
     const extra = await check<Todo[]>(supabase.from("todo").select(TODO_COLS).in("id", missing));
@@ -329,11 +326,26 @@ export async function loadWeekPlan(from: string, to: string, carryOver: boolean)
   const allSlots = todos.size
     ? (await check<Slot[]>(supabase.from("todo_slot").select(SLOT_COLS).in("todo_id", [...todos.keys()]))) ?? []
     : [];
-  return {
-    todos: [...todos.values()],
-    slots: allSlots.map(asSlot),
-    carried: new Set((old.data as Todo[]).map((t) => t.id)),
-  };
+  return { todos: [...todos.values()], slots: allSlots.map(asSlot) };
+}
+
+/**
+ * To-dos that could be carried forward into the week from `from`: tasks filed
+ * under an earlier week, neither done nor cancelled, not from Outlook (their
+ * date follows the calendar), and not already planned on a day from `from` on.
+ * Latest week first, with their sittings.
+ */
+export async function loadUnfinishedBefore(from: string): Promise<WeekPlan> {
+  const todos = ((await check<Todo[]>(
+    supabase.from("todo").select(TODO_COLS).lt("due_on", from).eq("kind", "task")
+      .eq("is_done", false).eq("is_cancelled", false).is("source", null)
+      .order("due_on", { ascending: false }).order("sort_order"),
+  )) ?? []).map(asTodo);
+  const slots = todos.length
+    ? ((await check<Slot[]>(supabase.from("todo_slot").select(SLOT_COLS).in("todo_id", todos.map((t) => t.id)))) ?? []).map(asSlot)
+    : [];
+  const ahead = new Set(slots.filter((s) => s.planned_on >= from && !s.is_cancelled).map((s) => s.todo_id));
+  return { todos: todos.filter((t) => !ahead.has(t.id)), slots };
 }
 
 export async function saveTodo(id: string | null, fields: Partial<TodoFields>): Promise<string> {
