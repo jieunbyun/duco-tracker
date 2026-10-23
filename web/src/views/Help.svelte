@@ -191,10 +191,11 @@
   <dl>
     <dt>Targets</dt>
     <dd>
-      Each area has weekly hours for its own work and for email
-      {#if tax}— {tax.weeksPerYear} working weeks a year{/if}. A period's target spreads the year's total evenly
-      over the calendar, and a period still under way is judged only on the days so far. Changing a target applies
-      from a chosen date, so earlier periods keep the target they had.
+      Each area has weekly hours for its own work and for email. In the Time tab a period's target is those planned
+      hours, a seventh of a week's for each day, so a whole week's target is exactly its planned hours (email
+      included), and a period still under way is judged only on the days so far. Changing a target applies from a
+      chosen date, so earlier periods keep the target they had. The year's total in Planning uses
+      {#if tax}{tax.weeksPerYear}{:else}your{/if} working weeks a year.
     </dd>
 
     <dt>Email</dt>

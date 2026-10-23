@@ -58,9 +58,11 @@
   }
 
   // ---- plan vs actual ----------------------------------------------------
-  // Targets accrue day by day up to today: an annual allocation of
-  // (weekly + email) × weeks_per_year spread over 365 days. A period that runs
-  // into the future is judged on the days already lived.
+  // Targets accrue day by day: a seventh of the week's planned hours (the
+  // area's weekly time plus email, as set in Planning) for every day, so a
+  // whole week's target is exactly what was planned for it. Each day takes the
+  // target in force on it, so a change applies from its own date. A period that
+  // runs into the future is judged on the days already lived.
   const elapsed = $derived.by(() => {
     const end = range.to < today() ? range.to : today();
     return end < range.from ? 0 : daysIn({ from: range.from, to: end });
@@ -80,14 +82,17 @@
 
   const plan = $derived.by(() => {
     if (!tax) return [];
-    const perDay = tax.weeksPerYear / 365;
     return tax.areas.map((a) => {
-      const t = targetOn(tax!.targets, a.id, targetEnd);
+      let target = 0, emailTarget = 0;
+      for (let d = range.from; d <= targetUntil; d = addDays(d, 1)) {
+        const t = targetOn(tax!.targets, a.id, d);
+        if (!t) continue;
+        target += (t.weekly_hours + t.email_weekly_hours) / 7;
+        emailTarget += t.email_weekly_hours / 7;
+      }
       const rows = shared.filter((e) => e.area_id === a.id);
       const actual = rows.reduce((s, e) => s + e.hours, 0);
       const email = rows.filter((e) => e.category_kind === "email").reduce((s, e) => s + e.hours, 0);
-      const target = t ? (t.weekly_hours + t.email_weekly_hours) * perDay * targetDays : 0;
-      const emailTarget = t ? t.email_weekly_hours * perDay * targetDays : 0;
       return { area: a, actual, target, email, emailTarget };
     });
   });
