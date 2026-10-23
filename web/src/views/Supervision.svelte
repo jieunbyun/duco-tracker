@@ -236,7 +236,7 @@
           {/if}
           {#if !isMe && current.active}
             <button class="mini" onclick={() => { preview.as = current; location.hash = "#/logbook"; }}
-                    title="Their Logbook, Projects and Pathways, exactly as they see them (read-only)">See what they see</button>
+                    title="Their Logbook and Projects, exactly as they see them (read-only); their Reading list stays private">See what they see</button>
           {/if}
           <button class="mini" onclick={() => exportOne(current)}>Export logbook</button>
           {#if !isMe}

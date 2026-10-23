@@ -32,11 +32,11 @@
   type Route = keyof typeof views;
 
   // Who sees which tabs: the planner is yours alone; a member sees only their
-  // logbook, projects and Pathways chart. You keep a logbook too, for the
-  // projects you lead.
+  // logbook, projects and their own reading list. You keep a logbook too, for
+  // the projects you lead.
   const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv"];
   const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "supervision", "logbook"];
-  const MEMBER: Route[] = ["logbook", "projects", "chart"];
+  const MEMBER: Route[] = ["logbook", "projects", "reading"];
 
   let session = $state<Session | null>(null);
   let ready = $state(false);
@@ -155,6 +155,10 @@
     {:else}
       {#if viewError}
         <p class="error">{viewError}</p>
+      {:else if preview.as && route === "reading"}
+        <!-- a member's reading list is theirs alone: even you cannot read it -->
+        <p class="muted">{preview.as.display_name}'s Reading tab is private to them, so it can't be shown here.
+          It works as yours does: their own list of readings, notes and PDFs.</p>
       {:else if View}
         {#key undo.version}<View />{/key}
       {:else}

@@ -105,9 +105,8 @@
       goes into it substantially; it stands out on the map, bolder and shaded.
       Dates on Pathways are months: an item runs from the start of its first month to the end of its last
       (a linked Planning project keeps its exact days, but shows months here too).
-      An item can list its <em>contributors</em> from your group (in its editor). Each member then sees, in their
-      own Pathways tab, a read-only chart of the items they contribute to and the goals and objectives those lead
-      to — titles, dates and stages only, never your notes, costs or effort.
+      An item can list its <em>contributors</em> from your group (in its editor), to record who is involved;
+      members do not see Pathways.
       An <em>award</em> (in the Awards row) goes through the same stages as a grant.
       The <em>Grant Writing</em> row holds grant applications: writing period up to the deadline, stage
       (drafting, submitted, awarded, declined) and, if you like, the amount sought. Link a grant to whatever it
@@ -118,15 +117,16 @@
       inference algorithms; data, models &amp; simulators; others — with time running left to right by when each
       was developed. Each output has its contributors, the publications it belongs to (picked from Publications
       &amp; code/database), and a link to where its data or code lives. Drag an output's ○ onto another to connect
-      them; pick a contributor to bring their outputs forward. Every member sees this map (in their Pathways tab)
-      and adds their own outputs; an output can be changed by whoever added it, its contributors, and you.
+      them; pick a contributor to bring their outputs forward. An output can be changed by whoever added it, its
+      contributors, and you.
       “Copy catalogue” gives the cards as YAML, ready to seed a shared repository.
     </dd>
 
     <dt>Members</dt>
     <dd>
       Your group's members (students, collaborators) sign in to this same app and see only tabs of their own:
-      <em>Logbook</em>, <em>Projects</em> and <em>Pathways</em> (their own chart, and the group's outputs). Nothing else here — your planning, time, targets, Pathways — is
+      <em>Logbook</em>, <em>Projects</em> and <em>Reading</em> (their own reading list, private to them — you cannot see it
+      either). Nothing else here — your planning, time, targets, Pathways — is
       visible to them. To add a member: invite them in Supabase (<em>Authentication › Users › Invite user</em>; they
       get an email to choose a password), then <em>+ Add a member</em> here: pick them from your Planning projects
       under Research › Supervision (their name then follows Planning) or, for anyone else, type a name.
