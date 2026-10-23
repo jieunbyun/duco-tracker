@@ -343,7 +343,7 @@
   function setCancelled(s: Slot, cancelled: boolean) {
     const t = todoById.get(s.todo_id)!;
     return change(`${cancelled ? "Cancelled" : "Restored"} ${q(t)} on ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`,
-      () => saveSlot(s.id, { is_cancelled: cancelled }));
+      () => saveSlot(s.id, { is_cancelled: cancelled, cancelled_by_sync: false })); // yours: the Outlook sync leaves it be
   }
   function setDone(t: Todo, done: boolean) {
     return change(done ? `Marked ${q(t)} done` : `Reopened ${q(t)}`,

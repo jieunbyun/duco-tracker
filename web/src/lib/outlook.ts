@@ -6,7 +6,9 @@
 //   - new in Outlook            → added, unreviewed
 //   - moved/renamed in Outlook   → follows, unless that sitting is logged
 //   - gone/cancelled in Outlook  → removed if unreviewed; if kept, cancelled
-//                                  (struck through) unless already logged
+//                                  (struck through) unless already logged, and
+//                                  restored if it comes back — but a sitting
+//                                  you cancelled yourself stays cancelled
 //   - marked irrelevant here     → removed and never brought back
 import { supabase } from "./supabase";
 import { check, TODO_COLS, SLOT_COLS, asTodo, asSlot, saveTodo, saveSlot, deleteTodo } from "./data";
@@ -177,7 +179,8 @@ export async function syncOutlook(): Promise<SyncResult> {
     const moved = t.source_date !== m.date || hhmm(t.source_start) !== m.start || hhmm(t.source_end) !== m.end;
     const renamed = !t.reviewed && t.title !== m.title;
     const s = slotOf(t);
-    const reappeared = !!s?.is_cancelled && !s.entry_id;
+    // back in Outlook after the sync struck it through; one you cancelled stays so
+    const reappeared = !!s?.is_cancelled && s.cancelled_by_sync && !s.entry_id;
     // accepted or declined in Outlook since: the tentative mark follows (unless logged)
     const statusChanged = t.source_tentative !== m.tentative;
     if (!moved && !renamed && !reappeared && !statusChanged && t.source_free === m.free) continue;
@@ -190,7 +193,7 @@ export async function syncOutlook(): Promise<SyncResult> {
     });
     if (s && !s.entry_id && (moved || reappeared)) {
       await saveSlot(s.id, {
-        planned_on: m.date, is_cancelled: false,
+        planned_on: m.date, ...(reappeared ? { is_cancelled: false, cancelled_by_sync: false } : {}),
         ...(m.allDay ? {} : { start_time: m.start, end_time: m.end, planned_hours: len }),
       });
     }
@@ -208,7 +211,7 @@ export async function syncOutlook(): Promise<SyncResult> {
       await deleteTodo(t.id);
       result.removed += 1;
     } else if (s && !s.is_cancelled) {
-      await saveSlot(s.id, { is_cancelled: true });
+      await saveSlot(s.id, { is_cancelled: true, cancelled_by_sync: true });
       result.removed += 1;
     }
   }
