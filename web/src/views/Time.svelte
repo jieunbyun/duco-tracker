@@ -15,7 +15,9 @@
     return "this-month";
   }
   let preset = $state<Preset>(savedPreset());
-  let custom = $state<Range>({ from: addDays(today(), -29), to: today() });
+  // A custom period starts on 17 October 2026 unless changed, and runs to today.
+  const CUSTOM_FROM = "2026-10-17";
+  let custom = $state<Range>({ from: CUSTOM_FROM <= today() ? CUSTOM_FROM : addDays(today(), -29), to: today() });
   const range = $derived(presetRange(preset, custom));
 
   function choose(p: Preset) {
