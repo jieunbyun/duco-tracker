@@ -867,22 +867,26 @@
   }
 
   // ---- carrying unfinished to-dos forward, by hand ------------------------------------------
-  // Nothing comes along by itself: this lists the open to-dos from earlier weeks,
-  // none ticked, and files the ticked ones under the week on screen. A day planned
-  // for one in an earlier week and never logged is cancelled (kept, struck
-  // through), so it no longer holds hours that now belong to this week.
+  // Nothing comes along by itself: this lists the open to-dos filed before the
+  // week they go into — the week on screen, or the one after it (so this week's
+  // leftovers can be sent on) — none ticked, and files the ticked ones there. A
+  // day planned for one before that week and never logged is cancelled (kept,
+  // struck through), so it no longer holds hours that now belong to the new week.
   type FwdRow = { t: Todo; pick: boolean; week: string; loggedDays: number };
   let fwdRows = $state<FwdRow[]>([]);
   let fwdSlots = $state<Slot[]>([]);
   let fwdLoading = $state(false);
+  let fwdTo = $state(""); // the week they go into: the one on screen, or the next
   const fwdWeeks = $derived([...new Set(fwdRows.map((r) => r.week))]);
 
-  async function openForward() {
+  async function openForward(to: string = start) {
     panel = { kind: "forward" };
+    fwdTo = to;
     fwdLoading = true;
     fwdRows = [];
     try {
-      const plan = await loadUnfinishedBefore(start);
+      const plan = await loadUnfinishedBefore(to);
+      if (fwdTo !== to) return; // the choice changed while this was loading
       fwdSlots = plan.slots;
       fwdRows = plan.todos.map((t) => ({
         t, pick: false, week: weekStart(t.due_on),
@@ -899,10 +903,11 @@
     if (!picked.length) return;
     panel = null;
     const n = picked.length;
-    await change(`Carried ${n} ${n === 1 ? "to-do" : "to-dos"} forward to the week of ${fmtDay(start)}`, async () => {
+    const to = fwdTo;
+    await change(`Carried ${n} ${n === 1 ? "to-do" : "to-dos"} forward to the week of ${fmtDay(to)}`, async () => {
       for (const t of picked) {
-        await saveTodo(t.id, { due_on: start });
-        for (const s of fwdSlots.filter((x) => x.todo_id === t.id && x.planned_on < start && !x.entry_id && !x.is_cancelled)) {
+        await saveTodo(t.id, { due_on: to });
+        for (const s of fwdSlots.filter((x) => x.todo_id === t.id && x.planned_on < to && !x.entry_id && !x.is_cancelled)) {
           await saveSlot(s.id, { is_cancelled: true, cancelled_by_sync: false });
         }
       }
@@ -1188,7 +1193,7 @@
   </div>
   <div class="below-days">
     <button onclick={openEmail}>✉ Create email checks (Mon–Fri)</button>
-    <button onclick={openForward}>↪ Carry forward unfinished to-dos…</button>
+    <button onclick={() => openForward()}>↪ Carry forward unfinished to-dos…</button>
   </div>
 
   <!-- ================= to-do list ================= -->
@@ -1465,15 +1470,22 @@
     {:else if panel.kind === "forward"}
       <h2>Carry forward unfinished to-dos</h2>
       <div class="pick">
+        <label class="pick-hours">Into the week of
+          <select value={fwdTo} onchange={(ev) => openForward((ev.target as HTMLSelectElement).value)}>
+            <option value={start}>{fmtDay(start)} (on screen)</option>
+            <option value={addDays(start, 7)}>{fmtDay(addDays(start, 7))} (the week after)</option>
+          </select>
+        </label>
         <p class="muted small">
-          To-dos from earlier weeks that are neither done nor cancelled. Tick the ones to bring into the week of
-          {fmtDay(start)}; the rest stay where they are. A day planned for one earlier and never logged is cancelled
-          (it stays on its day, struck through), so its hours move with the to-do.
+          To-dos filed under any week before that one, neither done nor cancelled — choose the week after to send on
+          the week on screen's leftovers. Tick the ones to bring; the rest stay where they are. A day planned for one
+          before that week and never logged is cancelled (it stays on its day, struck through), so its hours move with
+          the to-do.
         </p>
         {#if fwdLoading}
           <p class="muted">Loading…</p>
         {:else if !fwdRows.length}
-          <p class="muted">Nothing unfinished from earlier weeks.</p>
+          <p class="muted">Nothing unfinished before the week of {fmtDay(fwdTo)}.</p>
         {:else}
           <div class="small">
             <button class="link" onclick={() => fwdRows.forEach((r) => (r.pick = true))}>Tick all</button> ·
