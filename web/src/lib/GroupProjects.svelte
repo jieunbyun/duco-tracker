@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    saveGroupProject, deleteGroupProject, addProjectMember, removeProjectMember,
+    saveGroupProject, startGroupProject, deleteGroupProject, addProjectMember, removeProjectMember,
   } from "./group";
   import type { GroupProject, GroupMilestone, Member } from "./group";
   import { fromMonth, fmtMonth } from "./pathways";
@@ -13,7 +13,7 @@
     milestones: GroupMilestone[];
     members: Member[];
     activity?: Map<string, number>; // comments on each project's actions this week
-    supervisor: boolean; // creates projects, assigns people
+    supervisor: boolean; // you: takes people off projects and deletes them (everyone starts projects and adds collaborators)
     newFor?: string | null; // when set, "+ Project" puts this person on the new project
     readonly?: boolean; // previewing what a member sees
     onchanged: () => Promise<void>;
@@ -27,31 +27,35 @@
   };
   const nameOf = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "—";
   const assignable = $derived(members.filter((m) => m.active));
-  const leads = $derived(members.filter((m) => m.active));
 
   // ---- a project's details (new or edited) ------------------------------------------
-  type Draft = { id: string | null; title: string; aim: string; status: GroupProject["status"]; start: string; end: string; lead: string; folder: string };
+  // Everyone on a project is a collaborator: no lead is set here (one set earlier is kept, unseen).
+  type Draft = { id: string | null; title: string; aim: string; status: GroupProject["status"]; start: string; end: string; folder: string };
   let draft = $state<Draft | null>(null);
   function edit(p: GroupProject | null) {
     draft = p
-      ? { id: p.id, title: p.title, aim: p.aim ?? "", status: p.status, start: (p.start_on ?? "").slice(0, 7), end: (p.end_on ?? "").slice(0, 7), lead: p.lead_id ?? "", folder: p.folder_url ?? "" }
-      : { id: null, title: "", aim: "", status: "active", start: today().slice(0, 7), end: "", lead: newFor ?? "", folder: "" };
+      ? { id: p.id, title: p.title, aim: p.aim ?? "", status: p.status, start: (p.start_on ?? "").slice(0, 7), end: (p.end_on ?? "").slice(0, 7), folder: p.folder_url ?? "" }
+      : { id: null, title: "", aim: "", status: "active", start: today().slice(0, 7), end: "", folder: "" };
   }
   async function saveDraft(ev: SubmitEvent) {
     ev.preventDefault();
     const d = draft;
     if (!d || !d.title.trim()) return;
     const was = d.id ? projects.find((p) => p.id === d.id) : null;
+    const fields = {
+      title: d.title.trim(), aim: d.aim.trim() || null, status: d.status,
+      start_on: fromMonth(d.start, false, was?.start_on ?? null), end_on: fromMonth(d.end, true, was?.end_on ?? null),
+    };
     await act(async () => {
-      const id = await saveGroupProject(d.id, {
-        title: d.title.trim(), aim: d.aim.trim() || null, status: d.status,
-        start_on: fromMonth(d.start, false, was?.start_on ?? null), end_on: fromMonth(d.end, true, was?.end_on ?? null),
-        ...(supervisor ? { lead_id: d.lead || null } : {}),
-        ...(d.folder.trim() || was?.folder_url ? { folder_url: d.folder.trim() || null } : {}),
-      });
-      if (!d.id && newFor) await addProjectMember(id, newFor);
-      // whoever leads it is on it
-      if (supervisor && d.lead && d.lead !== newFor && !was?.members.includes(d.lead)) await addProjectMember(id, d.lead);
+      if (!d.id && !supervisor) {
+        // a member starts one: they are on it from the start
+        await startGroupProject({ ...fields, folder_url: d.folder.trim() || null });
+      } else {
+        const id = await saveGroupProject(d.id, {
+          ...fields, ...(d.folder.trim() || was?.folder_url ? { folder_url: d.folder.trim() || null } : {}),
+        });
+        if (!d.id && newFor) await addProjectMember(id, newFor);
+      }
       draft = null;
     });
   }
@@ -59,7 +63,7 @@
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
-{#if supervisor && !draft}<button class="add" onclick={() => edit(null)}>+ Project</button>{/if}
+{#if !readonly && !draft}<button class="add" onclick={() => edit(null)}>+ Project</button>{/if}
 
 {#snippet editor()}
   {#if draft}
@@ -71,14 +75,6 @@
       </label>
       <label>From <input type="month" bind:value={draft.start} /></label>
       <label>To <input type="month" bind:value={draft.end} min={draft.start || undefined} /></label>
-      {#if supervisor}
-        <label>Lead
-          <select bind:value={draft.lead}>
-            <option value="">—</option>
-            {#each leads as m (m.user_id)}<option value={m.user_id}>{m.display_name}</option>{/each}
-          </select>
-        </label>
-      {/if}
       <label class="wide">OneDrive folder (link) <input type="url" bind:value={draft.folder} placeholder="https://…sharepoint.com/…" /></label>
       <div class="wide actions">
         <button class="primary" type="submit">{draft.id ? "Save" : "Add project"}</button>
@@ -98,28 +94,29 @@
       <header>
         <h3>{p.title}<FolderLink url={p.folder_url} /></h3>
         <span class="muted small">
-          {p.status}{p.lead_id ? ` · led by ${nameOf(p.lead_id)}` : ""}{p.start_on ? ` · ${fmtMonth(p.start_on)} → ${p.end_on ? fmtMonth(p.end_on) : "…"}` : ""}
+          {p.status}{p.start_on ? ` · ${fmtMonth(p.start_on)} → ${p.end_on ? fmtMonth(p.end_on) : "…"}` : ""}
           · {activity.get(p.id) ?? 0} {(activity.get(p.id) ?? 0) === 1 ? "comment" : "comments"} this week
         </span>
         <span class="spacer"></span>
         {#if !readonly}<button class="mini" onclick={() => edit(p)}>Edit</button>{/if}
         {#if supervisor}
-          <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”? Its members' actions stay, without a project.`) && act(() => deleteGroupProject(p.id))}>Delete</button>
+          <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”? Its collaborators' actions stay, without a project.`) && act(() => deleteGroupProject(p.id))}>Delete</button>
         {/if}
       </header>
       {#if p.aim}<p class="aim">{p.aim}</p>{/if}
     {/if}
 
     <div class="people small">
-      <span class="muted">People:</span>
+      <span class="muted">Collaborators:</span>
       {#each p.members as uid (uid)}
         <span class="person">{nameOf(uid)}{#if supervisor}<button class="x" aria-label="Take off the project" onclick={() => act(() => removeProjectMember(p.id, uid))}>✕</button>{/if}</span>
       {:else}<span class="muted">nobody yet</span>{/each}
-      {#if supervisor}
+      {#if !readonly}
+        <!-- any collaborator adds others; only you take people off -->
         {@const others = assignable.filter((s) => !p.members.includes(s.user_id))}
         {#if others.length}
           <select aria-label="Add someone" onchange={(ev) => { const v = (ev.target as HTMLSelectElement).value; if (v) act(() => addProjectMember(p.id, v)); }}>
-            <option value="">+ add someone…</option>
+            <option value="">+ add a collaborator…</option>
             {#each others as s (s.user_id)}<option value={s.user_id}>{s.display_name}</option>{/each}
           </select>
         {/if}
@@ -129,7 +126,7 @@
     <GroupMilestones project={p} milestones={ms} {readonly} {act} />
   </section>
 {:else}
-  <p class="muted">{supervisor ? "No projects yet." : "No projects yet: your supervisor adds them."}</p>
+  <p class="muted">{readonly ? "No projects yet." : "No projects yet: start one with + Project."}</p>
 {/each}
 
 <style>

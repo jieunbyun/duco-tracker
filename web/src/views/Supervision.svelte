@@ -188,7 +188,7 @@
           <span class="name">{m.user_id === me ? `You (${m.display_name})` : m.display_name}</span>
           <span class="meta">
             {#if m.user_id === me}
-              {projects.filter((p) => p.lead_id === me).length} led · {weekOf(m.user_id)} comments this week
+              {projects.filter((p) => p.members.includes(me) || p.lead_id === me).length} projects · {weekOf(m.user_id)} comments this week
             {:else}
               {m.active ? `${weekOf(m.user_id)} this week` : "not in the group"}
               {#if unanswered(m.user_id)} · <strong>{unanswered(m.user_id)} to read</strong>{/if}

@@ -125,7 +125,7 @@
 {:else if role === "none"}
   <main class="waiting">
     <h1>Almost there</h1>
-    <p>You're signed in as <strong>{session.user.email}</strong>, but your supervisor hasn't added you to the group yet.
+    <p>You're signed in as <strong>{session.user.email}</strong>, but you haven't been added to the group yet.
       Once they have, reload this page.</p>
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
   </main>

@@ -103,6 +103,19 @@ export async function loadGroupProjects(): Promise<GroupProject[]> {
   )) ?? [];
   return rows.map(({ group_project_member, ...p }) => ({ ...p, members: group_project_member.map((m) => m.user_id) }));
 }
+/**
+ * Start a shared project as a member (0035): you are put on it as a collaborator
+ * in the same step, so you can see what you have just made.
+ */
+export async function startGroupProject(fields: {
+  title: string; aim: string | null; status: GroupProject["status"]; start_on: string | null; end_on: string | null; folder_url: string | null;
+}): Promise<string> {
+  const id = await check<string>(supabase.rpc("create_group_project", {
+    p_title: fields.title, p_aim: fields.aim, p_status: fields.status,
+    p_start: fields.start_on, p_end: fields.end_on, p_folder: fields.folder_url,
+  }));
+  return id!;
+}
 export async function saveGroupProject(id: string | null, fields: Partial<Omit<GroupProject, "id" | "members">>): Promise<string> {
   if (id) {
     await check(supabase.from("group_project").update(fields).eq("id", id));

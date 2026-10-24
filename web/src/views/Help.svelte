@@ -133,12 +133,14 @@
       visible to them. To add a member: invite them in Supabase (<em>Authentication › Users › Invite user</em>; they
       get an email to choose a password), then <em>+ Add a member</em> here: pick them from your Planning projects
       under Research › Supervision (their name then follows Planning) or, for anyone else, type a name.
-      You come first in the list, with the projects you lead.
+      You come first in the list, with the projects you are on.
       The <em>Logbook</em> is built on actions: each project's actions, milestone by milestone, each with its own dated
       thread of comments and links. Tick off what is done, add what comes up under a milestone, drag the ⠿ handle to
       put them in order, click an action to rename it, and use <em>comment / link</em> to add to its thread. Your
-      Logbook covers the projects you lead and your Planning projects; a member's covers their shared projects. Under
-      each member are their projects (several each; you create them and choose who leads). You and they set a
+      Logbook covers the shared projects you are on and your Planning projects; a member's covers their shared projects. Under
+      each member are their projects (several each). Everyone on a project is a collaborator: you or any member can start
+      a project (whoever starts it is on it), and any collaborator can add others from the group; only you take people
+      off a project or delete it. You and they set a
       project's milestones the way you set yours in Planning — start and due dates, what each comes after (dates it
       does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off. Then
       come their Logbook, where you read their threads and reply. A comment can be taken back on the day it
