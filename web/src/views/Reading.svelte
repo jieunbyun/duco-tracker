@@ -44,7 +44,13 @@
     STATUSES.map((s) => ({ ...s, rows: shown.filter((r) => r.status === s.key) })).filter((g) => g.rows.length),
   );
   const storageUsed = $derived(items.reduce((s, r) => s + (r.pdf_size ?? 0), 0));
-  const projectName = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? "" : "");
+  /** "Project › Milestone", or just the project. */
+  function linkOf(r: Reading): string {
+    const p = r.project_id ? projects.find((x) => x.id === r.project_id) : null;
+    if (!p) return "";
+    const m = r.milestone_id ? p.milestone.find((x) => x.id === r.milestone_id) : null;
+    return m ? `${p.name} › ${m.title}` : p.name;
+  }
   const kindLabel = (k: string) => KINDS.find((x) => x.key === k)?.label ?? k;
   const noteCount = (r: Reading) => r.reading_note?.[0]?.count ?? 0;
 
@@ -225,7 +231,7 @@
               {kindLabel(r.kind)}{period(r) ? ` · ${period(r)}` : ""}
               {#if noteCount(r)} · {noteCount(r)} {noteCount(r) === 1 ? "note" : "notes"}{/if}
               {#if r.pdf_url || r.pdf_path} · PDF{/if}
-              {#if r.project_id} · {projectName(r.project_id)}{/if}
+              {#if linkOf(r)} · {linkOf(r)}{/if}
             </span>
           </button>
 

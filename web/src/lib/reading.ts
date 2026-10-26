@@ -35,6 +35,7 @@ export type Reading = {
   started_on: string | null;
   finished_on: string | null;
   project_id: string | null;
+  milestone_id?: string | null; // one of that project's milestones (0036)
   pdf_path: string | null; // a copy stored here (before PDFs moved to OneDrive)
   pdf_size: number | null;
   pdf_url?: string | null; // the PDF on OneDrive

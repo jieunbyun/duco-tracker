@@ -33,6 +33,7 @@
     started_on: r0?.started_on ?? (r0 ? "" : today()),
     finished_on: r0?.finished_on ?? "",
     project_id: r0?.project_id ?? "",
+    milestone_id: r0?.milestone_id ?? "",
   });
   let busy = $state(false);
   let looking = $state(false);
@@ -42,6 +43,15 @@
   const projectOptions = $derived(
     projects.filter((p) => LIVE_STATUSES.has(p.status) || p.id === r0?.project_id).sort((a, b) => a.name.localeCompare(b.name)),
   );
+  // the chosen project's milestones (dropped ones only if already chosen)
+  const milestoneOptions = $derived(
+    (projects.find((p) => p.id === f.project_id)?.milestone ?? [])
+      .filter((m) => m.status !== "dropped" || m.id === r0?.milestone_id),
+  );
+  // a milestone belongs to its project: changing the project lets it go
+  $effect(() => {
+    if (f.milestone_id && !milestoneOptions.some((m) => m.id === f.milestone_id)) f.milestone_id = "";
+  });
   const venueLabel = $derived(f.kind === "article" ? "Journal" : f.kind === "chapter" ? "Book title" : "Series / venue");
 
   // dates follow the status, unless you have set them
@@ -91,6 +101,8 @@
         pages: blank(f.pages), doi: blank(f.doi), url: blank(f.url), citation: blank(f.citation),
         status: f.status, started_on: f.started_on || null, finished_on: f.finished_on || null,
         project_id: f.project_id || null,
+        // only sent when there is one to set or clear, so saving works before 0036 is run
+        ...(f.milestone_id || r0?.milestone_id ? { milestone_id: (f.project_id && f.milestone_id) || null } : {}),
       };
       onsaved(await saveReading(r0?.id ?? null, fields));
     } catch (e) {
@@ -146,6 +158,14 @@
       {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
     </select>
   </label>
+  {#if f.project_id && milestoneOptions.length}
+    <label class="span2">Milestone (optional)
+      <select bind:value={f.milestone_id}>
+        <option value="">— the project as a whole —</option>
+        {#each milestoneOptions as m (m.id)}<option value={m.id}>{m.title}{m.status === "done" ? " (done)" : ""}</option>{/each}
+      </select>
+    </label>
+  {/if}
   <label class="wide">Your own citation (optional — used instead of the generated one)
     <textarea rows="2" bind:value={f.citation}></textarea>
   </label>
