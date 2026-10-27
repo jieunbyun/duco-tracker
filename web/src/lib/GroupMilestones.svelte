@@ -11,6 +11,7 @@
   import { impliedDates } from "./plan";
   import type { DateSource } from "./plan";
   import { fmtDay, today } from "./dates";
+  import Sortable from "./Sortable.svelte";
 
   type Props = {
     project: GroupProject; milestones: GroupMilestone[]; members?: Member[]; readonly?: boolean;
@@ -70,6 +71,15 @@
   async function remove(m: GroupMilestone) {
     if (!confirm(`Delete the milestone “${m.title}”?`)) return;
     if (await act(() => deleteMilestone(m.id))) editing = null;
+  }
+  // drag the ⠿ handle to put them in order (saved as 10, 20, 30…; only those that moved)
+  async function reorder(ids: string[]) {
+    await act(async () => {
+      for (const [i, id] of ids.entries()) {
+        const order = (i + 1) * 10;
+        if (milestones.find((x) => x.id === id)?.sort_order !== order) await saveMilestone(id, { sort_order: order });
+      }
+    });
   }
   const tick = (m: GroupMilestone) => act(() => saveMilestone(m.id, { done: !m.done, done_on: m.done ? null : today() }));
 
@@ -147,17 +157,13 @@
   </form>
 {/snippet}
 
-<div class="milestones">
-  {#if milestones.length}
-    <ul>
-      {#each milestones as m (m.id)}
-        <li>
+{#snippet line(m: GroupMilestone)}
           {#if editing === m.id}
             {@render form(m)}
           {:else}
             {@const d = datesOf(m)}
             <div class="ms-line" class:complete={m.done}>
-              <button class="ms-row" onclick={() => open(m)} disabled={readonly}>
+              <button class="ms-row" onclick={() => open(m)} disabled={readonly} title={readonly ? "" : "Click to edit"}>
                 <span class="title">
                   {#if m.is_private}<span class="lock" title="Private — only you see it">🔒</span>{/if}
                   {m.title}
@@ -172,6 +178,7 @@
                   –
                   <span class:implied={d.dueFrom !== "own"} title={why(d.dueFrom, m, "due")}>{d.due ? fmtDay(d.due) : "…"}</span>
                   {#if m.my_hours !== null && !readonly}<span class="mine" title="Your hours — only you see them">· {fmtHours(m.my_hours)}</span>{/if}
+                  {#if !readonly}<span class="pen" aria-hidden="true">✎</span>{/if}
                 </span>
               </button>
               <input type="checkbox" class="done-tick" checked={m.done} disabled={readonly}
@@ -179,9 +186,11 @@
                      aria-label={`${m.title} done`} onchange={() => tick(m)} />
             </div>
           {/if}
-        </li>
-      {/each}
-    </ul>
+{/snippet}
+
+<div class="milestones">
+  {#if milestones.length}
+    <Sortable items={milestones} row={line} onreorder={reorder} disabled={readonly || editing !== null} />
   {:else}
     <p class="muted empty">No milestones yet.</p>
   {/if}
@@ -197,7 +206,6 @@
 
 <style>
   .milestones { margin-top: 0.4rem; font-family: var(--font-ui); }
-  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
   .ms-row {
     width: 100%;
     display: grid;
@@ -226,6 +234,8 @@
   .after .check { padding-bottom: 0; }
   .hint { font-size: 0.75rem; }
   .lock { font-size: 0.75rem; margin-right: 0.15rem; }
+  .pen { margin-left: 0.5rem; color: var(--ink-soft); opacity: 0.5; }
+  .ms-row:hover .pen { opacity: 1; }
   .mine { margin-left: 0.3rem; }
   .kind { margin: 0; font-size: 0.8rem; color: var(--ink-soft); }
   .kind-pick { border: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 1rem; }

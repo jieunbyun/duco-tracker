@@ -33,6 +33,10 @@
   <span class="eyebrow">Projects</span>
   <h1>My projects</h1>
   {#if error}<p class="error">{error}</p>{/if}
+  {#if preview.as}
+    <p class="muted small">Preview: read-only here. {preview.as.display_name} can click a milestone (✎) to edit it — dates,
+      what it comes after, lead, notes — tick it done, and add one with + Milestone.</p>
+  {/if}
   {#if loading}<p class="muted">Loading…</p>{:else}
     <GroupProjects {projects} {milestones} {members} {activity} supervisor={false} readonly={!!preview.as} onchanged={load} />
   {/if}
