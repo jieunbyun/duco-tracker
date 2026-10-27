@@ -90,8 +90,8 @@
     <dt>Planning</dt>
     <dd>
       Projects under each project-based category, with dates, planned hours and milestones, against the hours
-      logged. Above them, how much of the planning horizon is still free per area. Below, the weekly targets and
-      settings. A Planning project can stand for a shared project (<em>Shared project</em> in its details; marked ⇄),
+      logged. Drag a milestone's ⠿ handle to put a project's milestones in order. Above them, how much of the planning
+      horizon is still free per area. Below, the weekly targets and settings. A Planning project can stand for a shared project (<em>Shared project</em> in its details; marked ⇄),
       so its milestones are kept in one list, in step both ways: the shared project's public milestones come in
       (⇄), and the Planning project's own go over as private ones (🔒, only you see them there) — those it had when
       linked, and any you add after, here or there. Editing one here edits it there (a public one, for everyone on
@@ -155,7 +155,8 @@
       a project (whoever starts it is on it), and any collaborator can add others from the group; only you take people
       off a project or delete it. You and they set a
       project's milestones the way you set yours in Planning — start and due dates, what each comes after (dates it
-      does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off. Each
+      does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off, and
+      put them in order by dragging the ⠿ handle. Each
       person sets <em>Your hours</em> on a milestone: the hours they plan to put in, seen by nobody else. Anyone
       on a project chooses, when making a milestone, whether everyone on the project sees it or only they do (🔒). A
       private milestone is hidden from everyone else, you included when a member makes it, and so are the actions,

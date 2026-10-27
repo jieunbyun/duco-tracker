@@ -183,6 +183,13 @@ export async function saveMilestone(id: string | null, fields: MilestoneFields):
   const row = await check<{ id: string }>(supabase.from("milestone").insert(fields).select("id").single());
   return row!.id;
 }
+/** A new order for a project's milestones (10, 20, 30…; only those that moved). */
+export async function saveMilestoneOrder(ids: string[], before: Map<string, number>): Promise<void> {
+  for (const [i, id] of ids.entries()) {
+    const order = (i + 1) * 10;
+    if (before.get(id) !== order) await check(supabase.from("milestone").update({ sort_order: order }).eq("id", id));
+  }
+}
 export async function setMilestoneStatus(id: string, status: string): Promise<void> {
   await check(supabase.from("milestone").update({ status }).eq("id", id));
 }

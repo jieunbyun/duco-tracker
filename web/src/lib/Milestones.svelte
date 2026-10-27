@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { MILESTONE_STATUSES, saveMilestone, deleteMilestone, setMilestoneStatus, fmtHours } from "./data";
+  import { MILESTONE_STATUSES, saveMilestone, deleteMilestone, setMilestoneStatus, saveMilestoneOrder, fmtHours } from "./data";
+  import Sortable from "./Sortable.svelte";
   import type { Milestone, Project } from "./data";
   import { fmtDay } from "./dates";
   import { plannedOf } from "./horizon";
@@ -80,6 +81,17 @@
       error = (e as Error).message;
     } finally {
       busy = false;
+    }
+  }
+
+  // drag the ⠿ handle to put them in order
+  async function reorder(ids: string[]) {
+    error = "";
+    try {
+      await saveMilestoneOrder(ids, new Map(project.milestone.map((m) => [m.id, m.sort_order])));
+      onchange();
+    } catch (e) {
+      error = (e as Error).message;
     }
   }
 
@@ -173,9 +185,7 @@
   </div>
 
   {#if project.milestone.length}
-    <ul>
-      {#each project.milestone as m (m.id)}
-        <li>
+    {#snippet line(m: Milestone)}
           {#if editing === m.id}
             {@render form(m)}
           {:else}
@@ -207,9 +217,8 @@
                    onchange={(ev) => setDone(m, (ev.target as HTMLInputElement).checked)} />
             </div>
           {/if}
-        </li>
-      {/each}
-    </ul>
+    {/snippet}
+    <Sortable items={project.milestone} row={line} onreorder={reorder} disabled={editing !== null || busy} />
   {:else}
     <p class="muted empty">No milestones yet.</p>
   {/if}
@@ -226,7 +235,6 @@
   .head { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap; }
   .head .muted { font-size: 0.8rem; }
   h3 { font-size: 0.95rem; margin: 0 0 0.4rem; }
-  ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
   .ms-row {
     width: 100%;
     display: grid;
