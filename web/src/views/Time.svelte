@@ -143,13 +143,14 @@
     sub: string;
     hours: number;
     count: number;
+    items: EntryHours[]; // the entries behind it, for the ≡ list
     areaId: string;
     none: boolean; // the "No project" / "No milestone" remainder
     children: Map<string, Node>;
   };
 
   function node(key: string, label: string, sub: string, areaId: string, none = false): Node {
-    return { key, label, sub, hours: 0, count: 0, areaId, none, children: new Map() };
+    return { key, label, sub, hours: 0, count: 0, items: [], areaId, none, children: new Map() };
   }
 
   const tree = $derived.by(() => {
@@ -171,7 +172,7 @@
         path.push(getOr(proj, mKey, () =>
           node(mKey, e.milestone_title ?? "No milestone", e.milestone_id ? "milestone" : "", e.area_id, !e.milestone_id)));
       }
-      for (const n of path) { n.hours += e.hours; n.count += 1; }
+      for (const n of path) { n.hours += e.hours; n.count += 1; n.items.push(e); }
     }
     return root;
   });
@@ -209,6 +210,24 @@
   }
   function upTo(i: number) {
     path = trail.slice(1, i + 1).map((t) => t.key);
+  }
+
+  // ---- the entries behind a row, in a scrollable window ----------------------------
+  let listing = $state<Node | null>(null);
+  let listDialog = $state<HTMLDialogElement | null>(null);
+  $effect(() => {
+    if (!listDialog) return;
+    if (listing && !listDialog.open) listDialog.showModal();
+    if (!listing && listDialog.open) listDialog.close();
+  });
+  const listed = $derived(
+    listing ? [...listing.items].sort((a, b) => b.entry_date.localeCompare(a.entry_date) || b.hours - a.hours) : [],
+  );
+  const catLabel = $derived(new Map((tax?.allCategories ?? []).map((c) => [c.id, c.label])));
+  /** Where an entry went: project › milestone, or its category when it has no project. */
+  function whereOf(e: EntryHours): string {
+    if (e.project_name) return e.milestone_title ? `${e.project_name} › ${e.milestone_title}` : e.project_name;
+    return catLabel.get(e.category_id) ?? "";
   }
 
   function pct(part: number, whole: number): string {
@@ -367,7 +386,7 @@
       <ol class="rows">
         {#each rows as r (r.key)}
           {@const canDrill = drillable(r)}
-          <li>
+          <li class="row-line">
             <button
               class="row"
               class:none={r.none}
@@ -385,12 +404,38 @@
               <span class="value"><strong>{fmtHours(r.hours)}</strong> <span class="muted">· {pct(r.hours, current.hours)}</span></span>
               <span class="chev" aria-hidden="true">{canDrill ? "›" : ""}</span>
             </button>
+            <button class="list-btn" onclick={() => (listing = r)}
+                    title={`List the ${r.count} ${r.count === 1 ? "entry" : "entries"} behind ${r.label}`}
+                    aria-label={`List the entries behind ${r.label}`}>≡ {r.count}</button>
           </li>
         {/each}
       </ol>
     {/if}
   {/if}
 </section>
+
+<dialog bind:this={listDialog} class="entries" onclose={() => (listing = null)}>
+  {#if listing}
+    <header class="list-head">
+      <h2>{listing.label}</h2>
+      <span class="muted">{listing.count} {listing.count === 1 ? "entry" : "entries"} · {fmtHours(listing.hours)} · {fmtDay(range.from)} – {fmtDay(range.to)}</span>
+      <button class="close" onclick={() => (listing = null)} aria-label="Close">✕</button>
+    </header>
+    <ol class="entry-list">
+      {#each listed as e, i (e.id + i)}
+        <li>
+          <span class="e-date">{fmtDay(e.entry_date)}</span>
+          <span class="e-hours">{fmtHours(e.hours)}</span>
+          <span class="e-what">
+            {#if whereOf(e)}<span class="e-where">{whereOf(e)}</span>{/if}
+            {#if e.description}<span class="e-note">{e.description}</span>{/if}
+            {#if e.is_core}<span class="e-core" title="Core">🎯</span>{/if}
+          </span>
+        </li>
+      {/each}
+    </ol>
+  {/if}
+</dialog>
 
 <style>
   .time h2 { margin-top: 2.2rem; }
@@ -505,6 +550,34 @@
   .row.none .bar { opacity: 0.45; }
   .row .value { font-variant-numeric: tabular-nums; text-align: right; }
   .chev { color: var(--ink-soft); }
+  .row-line { display: flex; align-items: center; gap: 0.3rem; }
+  .row-line .row { flex: 1; min-width: 0; }
+  .list-btn { flex: none; font-family: var(--font-ui); font-size: 0.75rem; padding: 0.2rem 0.45rem; color: var(--ink-soft); }
+
+  dialog.entries {
+    width: min(44rem, calc(100vw - 32px));
+    max-height: min(36rem, calc(100vh - 32px));
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    background: var(--paper);
+    color: var(--ink);
+    padding: 0;
+    font-family: var(--font-ui);
+  }
+  dialog.entries[open] { display: flex; flex-direction: column; }
+  dialog.entries::backdrop { background: rgb(0 0 0 / 0.35); }
+  .list-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.8rem; padding: 0.9rem 1.1rem 0.6rem; border-bottom: 1px solid var(--rule); }
+  .list-head h2 { margin: 0; font-size: 1.05rem; }
+  .list-head .muted { font-size: 0.8rem; }
+  .list-head .close { margin-left: auto; background: none; border: none; font-size: 0.9rem; color: var(--ink-soft); }
+  .entry-list { list-style: none; margin: 0; padding: 0.4rem 1.1rem 0.9rem; overflow-y: auto; }
+  .entry-list li { display: grid; grid-template-columns: 6.5rem 3.2rem 1fr; gap: 0.6rem; padding: 0.35rem 0; border-bottom: 1px solid var(--rule); font-size: 0.85rem; }
+  .entry-list li:last-child { border-bottom: none; }
+  .e-date { color: var(--ink-soft); font-variant-numeric: tabular-nums; }
+  .e-hours { text-align: right; font-variant-numeric: tabular-nums; }
+  .e-what { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; min-width: 0; }
+  .e-where { color: var(--ink-soft); }
+  .e-note { color: var(--ink); }
 
   @media (max-width: 40rem) {
     .plan-row {

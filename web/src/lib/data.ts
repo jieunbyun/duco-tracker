@@ -35,6 +35,7 @@ export type EntryHours = {
   project_name: string | null;
   milestone_id: string | null;
   milestone_title: string | null;
+  description: string | null; // the entry's note
 };
 
 const PAGE = 1000; // PostgREST's default row cap per request
@@ -87,7 +88,7 @@ export async function loadEntryHours(from: string, to: string): Promise<EntryHou
   const rows = await fetchAll<EntryHours>((a, b) =>
     supabase
       .from("entry_hours")
-      .select("id,entry_date,hours,is_core,area_id,category_id,category_kind,project_id,project_name,milestone_id,milestone_title")
+      .select("id,entry_date,hours,is_core,area_id,category_id,category_kind,project_id,project_name,milestone_id,milestone_title,description")
       .gte("entry_date", from)
       .lte("entry_date", to)
       .order("started_at")
