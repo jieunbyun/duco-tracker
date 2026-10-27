@@ -23,6 +23,7 @@ export type GroupMilestone = {
   start_on: string | null; hard_deadline: boolean; notes: string | null; after_ids: string[];
   // private: seen only by the person who made it, and set when it is made (0037)
   is_private: boolean; owner_id?: string | null;
+  my_hours: number | null; // the hours you plan to put in: yours alone, never seen by others (0038)
 };
 export type EntryKind = "entry" | "weekly";
 export type Entry = {
@@ -138,15 +139,30 @@ export async function removeProjectMember(projectId: string, userId: string): Pr
 
 export async function loadMilestones(): Promise<GroupMilestone[]> {
   // every column, so the ones added by 0034 are simply absent until its SQL is run
-  return ((await check<GroupMilestone[]>(
-    supabase.from("group_milestone").select("*").order("sort_order").order("due_on"),
-  )) ?? []).map((m) => ({
+  const [rows, hours] = await Promise.all([
+    check<GroupMilestone[]>(supabase.from("group_milestone").select("*").order("sort_order").order("due_on")),
+    // only your own rows come back; none at all before 0038 is run
+    supabase.from("group_milestone_hours").select("milestone_id,planned_hours"),
+  ]);
+  const mine = new Map((hours.data ?? []).map((h) => [h.milestone_id as string, Number(h.planned_hours)]));
+  return (rows ?? []).map((m) => ({
     ...m, start_on: m.start_on ?? null, hard_deadline: m.hard_deadline ?? false, notes: m.notes ?? null, after_ids: m.after_ids ?? [],
-    is_private: m.is_private ?? false,
+    is_private: m.is_private ?? false, my_hours: mine.get(m.id) ?? null,
   }));
 }
-export async function saveMilestone(id: string | null, fields: Partial<Omit<GroupMilestone, "id">>): Promise<void> {
-  await check(id ? supabase.from("group_milestone").update(fields).eq("id", id) : supabase.from("group_milestone").insert(fields));
+export async function saveMilestone(id: string | null, fields: Partial<Omit<GroupMilestone, "id" | "my_hours">>): Promise<string> {
+  if (id) {
+    await check(supabase.from("group_milestone").update(fields).eq("id", id));
+    return id;
+  }
+  const row = await check<{ id: string }>(supabase.from("group_milestone").insert(fields).select("id").single());
+  return row!.id;
+}
+/** Set (or, with null, clear) the hours you plan to put into a milestone. */
+export async function saveMyMilestoneHours(milestoneId: string, hours: number | null): Promise<void> {
+  await check(hours === null
+    ? supabase.from("group_milestone_hours").delete().eq("milestone_id", milestoneId)
+    : supabase.from("group_milestone_hours").upsert({ milestone_id: milestoneId, planned_hours: hours }));
 }
 export async function deleteMilestone(id: string): Promise<void> {
   await check(supabase.from("group_milestone").delete().eq("id", id));

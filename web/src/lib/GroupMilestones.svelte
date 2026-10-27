@@ -1,11 +1,12 @@
 <script lang="ts">
   // A member's project's milestones, set the way your Planning milestones are:
   // start and due dates, what each comes after (dates it does not set itself are
-  // implied from those, then from the project), a hard deadline and notes. There
-  // are no planned hours: members do not log time here. A milestone is public
+  // implied from those, then from the project), a hard deadline and notes. Each
+  // person sets the hours they plan to put in, seen by nobody else. A milestone is public
   // (everyone on the project) or private (only whoever made it), chosen when it
   // is made; it comes after milestones of its own kind only.
-  import { saveMilestone, deleteMilestone } from "./group";
+  import { saveMilestone, deleteMilestone, saveMyMilestoneHours } from "./group";
+  import { fmtHours } from "./data";
   import type { GroupProject, GroupMilestone } from "./group";
   import { impliedDates } from "./plan";
   import type { DateSource } from "./plan";
@@ -20,7 +21,8 @@
   let error = $state("");
 
   function blank() {
-    return { title: "", start_on: "", due_on: "", hard_deadline: false, notes: "", after: [] as string[], is_private: false };
+    return { title: "", start_on: "", due_on: "", hard_deadline: false, notes: "", after: [] as string[], is_private: false,
+             hours: null as number | null };
   }
   function open(m: GroupMilestone | null) {
     if (readonly) return;
@@ -28,7 +30,8 @@
     editing = m?.id ?? "new";
     draft = m
       ? { title: m.title, start_on: m.start_on ?? "", due_on: m.due_on ?? "", hard_deadline: m.hard_deadline,
-          notes: m.notes ?? "", after: m.after_ids.filter((id) => milestones.some((x) => x.id === id)), is_private: m.is_private }
+          notes: m.notes ?? "", after: m.after_ids.filter((id) => milestones.some((x) => x.id === id)), is_private: m.is_private,
+          hours: m.my_hours }
       : blank();
   }
 
@@ -39,7 +42,9 @@
     if (before) return (error = `It is due before “${before.title}”, which it comes after.`);
     error = "";
     const order = m?.sort_order ?? Math.max(0, ...milestones.map((x) => x.sort_order)) + 10;
-    const ok = await act(() => saveMilestone(m?.id ?? null, {
+    const hours = typeof draft.hours === "number" && !Number.isNaN(draft.hours) ? draft.hours : null;
+    const ok = await act(async () => {
+      const id = await saveMilestone(m?.id ?? null, {
       project_id: project.id,
       ...(!m && draft.is_private ? { is_private: true } : {}),
       title: draft.title.trim(),
@@ -49,7 +54,9 @@
       notes: draft.notes.trim() || null,
       after_ids: draft.after,
       sort_order: order,
-    }));
+      });
+      if (hours !== (m?.my_hours ?? null)) await saveMyMilestoneHours(id, hours);
+    });
     if (ok) editing = null; // on failure the form stays, with what was typed
   }
   async function remove(m: GroupMilestone) {
@@ -94,6 +101,7 @@
     <label class="wide">Title <input bind:value={draft.title} required /></label>
     <label>Start <input type="date" bind:value={draft.start_on} /></label>
     <label>Due <input type="date" bind:value={draft.due_on} min={draft.start_on || undefined} /></label>
+    <label title="Only you see this">Your hours <input type="number" min="0" step="0.5" bind:value={draft.hours} /></label>
     <label class="check"><input type="checkbox" bind:checked={draft.hard_deadline} /> Hard deadline</label>
     {#if m}
       <p class="kind wide">{m.is_private ? "🔒 Private — only you see it, and what you link to it." : "Public — everyone on the project sees it."}</p>
@@ -146,6 +154,7 @@
                   <span class:implied={d.startFrom !== "own"} title={why(d.startFrom, m, "start")}>{d.start ? fmtDay(d.start) : "…"}</span>
                   –
                   <span class:implied={d.dueFrom !== "own"} title={why(d.dueFrom, m, "due")}>{d.due ? fmtDay(d.due) : "…"}</span>
+                  {#if m.my_hours !== null && !readonly}<span class="mine" title="Your hours — only you see them">· {fmtHours(m.my_hours)}</span>{/if}
                 </span>
               </button>
               <input type="checkbox" class="done-tick" checked={m.done} disabled={readonly}
@@ -175,7 +184,7 @@
   .ms-row {
     width: 100%;
     display: grid;
-    grid-template-columns: 1fr 13rem;
+    grid-template-columns: 1fr 15rem;
     gap: 0.75rem;
     align-items: center;
     text-align: left;
@@ -200,6 +209,7 @@
   .after .check { padding-bottom: 0; }
   .hint { font-size: 0.75rem; }
   .lock { font-size: 0.75rem; margin-right: 0.15rem; }
+  .mine { margin-left: 0.3rem; }
   .kind { margin: 0; font-size: 0.8rem; color: var(--ink-soft); }
   .kind-pick { border: none; padding: 0; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.2rem 1rem; }
   .kind-pick legend { font-size: 0.8rem; color: var(--ink-soft); padding: 0; margin-bottom: 0.2rem; }

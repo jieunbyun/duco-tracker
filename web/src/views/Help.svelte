@@ -145,7 +145,8 @@
       a project (whoever starts it is on it), and any collaborator can add others from the group; only you take people
       off a project or delete it. You and they set a
       project's milestones the way you set yours in Planning — start and due dates, what each comes after (dates it
-      does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off. Anyone
+      does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off. Each
+      person sets <em>Your hours</em> on a milestone: the hours they plan to put in, seen by nobody else. Anyone
       on a project chooses, when making a milestone, whether everyone on the project sees it or only they do (🔒). A
       private milestone is hidden from everyone else, you included when a member makes it, and so are the actions,
       comments and logbook entries on it. The choice stays once made, and a milestone comes after milestones of its
