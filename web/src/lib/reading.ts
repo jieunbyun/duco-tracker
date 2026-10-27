@@ -43,7 +43,10 @@ export type Reading = {
   reading_note?: { count: number }[];
 };
 export type ReadingFields = Omit<Reading, "id" | "created_at" | "reading_note">;
-export type Note = { id: string; reading_id: string; noted_on: string; page: string | null; body: string };
+// a note on its own, or a quote (the words as written) with a note attached (0039)
+export type Note = { id: string; reading_id: string; noted_on: string; page: string | null; body: string | null; quote?: string | null };
+/** A quote, with the reading it is from. */
+export type QuoteRow = Note & { reading: Pick<Reading, "id" | "title" | "authors" | "year"> | null };
 
 const BUCKET = "reading-pdfs";
 
@@ -68,16 +71,33 @@ export async function deleteReading(r: Reading): Promise<void> {
 
 export async function loadNotes(readingId: string): Promise<Note[]> {
   return (await check<Note[]>(
-    supabase.from("reading_note").select("id,reading_id,noted_on,page,body")
+    supabase.from("reading_note").select("*") // every column, so this works before 0039 too
       .eq("reading_id", readingId).order("noted_on", { ascending: false }).order("created_at", { ascending: false }),
   )) ?? [];
 }
-export async function saveNote(id: string | null, fields: Omit<Note, "id">): Promise<void> {
+export async function saveNote(id: string | null, fields: Partial<Omit<Note, "id">>): Promise<void> {
   await check(id ? supabase.from("reading_note").update(fields).eq("id", id)
                  : supabase.from("reading_note").insert(fields));
 }
 export async function deleteNote(id: string): Promise<void> {
   await check(supabase.from("reading_note").delete().eq("id", id));
+}
+/** Every quote, from every reading, newest first. */
+export async function loadQuotes(): Promise<QuoteRow[]> {
+  return (await check<QuoteRow[]>(
+    supabase.from("reading_note").select("*, reading(id,title,authors,year)").not("quote", "is", null)
+      .order("noted_on", { ascending: false }).order("created_at", { ascending: false }),
+  )) ?? [];
+}
+/** "Smith & Jones, 2020, p. 12" — the reading's title when it has no authors. */
+export function shortCite(r: Pick<Reading, "title" | "authors" | "year"> | null, page: string | null): string {
+  const names = (r?.authors ?? "").split(";").map((s) => s.split(",")[0].trim()).filter(Boolean);
+  const who = names.length > 2 ? `${names[0]} et al.` : names.join(" & ") || r?.title || "?";
+  return [who, r?.year, page ? `p. ${page}` : null].filter(Boolean).join(", ");
+}
+/** A quote as text to paste: “…” (Smith, 2020, p. 12), with the note under it. */
+export function quoteText(n: Note, r: Pick<Reading, "title" | "authors" | "year"> | null): string {
+  return `“${n.quote!.trim()}” (${shortCite(r, n.page)})` + (n.body?.trim() ? `\n— ${n.body.trim()}` : "");
 }
 
 // ---- PDFs ----------------------------------------------------------------------

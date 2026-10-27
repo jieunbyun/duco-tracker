@@ -172,9 +172,11 @@
     <dt>Reading</dt>
     <dd>
       Journal articles, books, chapters and reports you read: details (a DOI fills them in from Crossref), status —
-      reading, to read, finished, abandoned — with start and finish dates, an optional project, dated notes (with a
-      page if you like), a citation and BibTeX to copy, and a link to its PDF on OneDrive. (PDFs uploaded here before still
-      open; once a PDF is on OneDrive and linked, its stored copy can be removed.)
+      reading, to read, finished, abandoned — with start and finish dates, an optional project, dated notes and quotes (with a
+      page if you like: a quote is the words as written, with your note on it attached), a citation and BibTeX to copy, and a link to its PDF on OneDrive. (PDFs uploaded here before still
+      open; once a PDF is on OneDrive and linked, its stored copy can be removed.) <em>Quotes</em> lists every quote
+      from every reading, newest first, to search and copy — each as “…” (Author, year, p. 12) with its note under it;
+      click where one is from to open that reading.
     </dd>
 
     <dt>CV</dt>

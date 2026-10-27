@@ -3,9 +3,9 @@
   import type { Project } from "../lib/data";
   import {
     STATUSES, KINDS, loadReadings, loadNotes, saveNote, deleteNote, setPdfUrl, pdfLink, removePdf, prunePdfs,
-    citationOf, bibtexOf, fmtSize,
+    citationOf, bibtexOf, fmtSize, loadQuotes, shortCite, quoteText,
   } from "../lib/reading";
-  import type { Reading, Note } from "../lib/reading";
+  import type { Reading, Note, QuoteRow } from "../lib/reading";
   import { fmtDay, today } from "../lib/dates";
   import ReadingForm from "../lib/ReadingForm.svelte";
 
@@ -20,6 +20,7 @@
   let editing = $state(false);
   let filter = $state("all");
   let search = $state("");
+  let view = $state<"items" | "quotes">("items"); // the reading list, or every quote across it
 
   async function load() {
     try {
@@ -87,23 +88,35 @@
     }
   }
 
-  // ---- notes -------------------------------------------------------------------------
+  // ---- notes and quotes ---------------------------------------------------------------
+  // A note on its own, or a quote (the words as written) with a note attached.
   let notes = $state<Note[]>([]);
   let noteDate = $state(today());
   let notePage = $state("");
+  let noteQuote = $state("");
   let noteBody = $state("");
   let noteEditing = $state<string | null>(null);
   let noteBusy = $state(false);
+  const hasQuote = (n: Note) => !!n.quote?.trim();
 
+  function clearNote() {
+    noteEditing = null;
+    noteQuote = "";
+    noteBody = "";
+    notePage = "";
+    noteDate = today();
+  }
   async function addNote(r: Reading) {
-    if (!noteBody.trim()) return;
+    const quote = noteQuote.trim();
+    if (!noteBody.trim() && !quote) return;
+    const was = noteEditing ? notes.find((n) => n.id === noteEditing) : null;
     noteBusy = true;
     try {
-      await saveNote(noteEditing, { reading_id: r.id, noted_on: noteDate || today(), page: notePage.trim() || null, body: noteBody.trim() });
-      noteBody = "";
-      notePage = "";
-      noteDate = today();
-      noteEditing = null;
+      await saveNote(noteEditing, {
+        reading_id: r.id, noted_on: noteDate || today(), page: notePage.trim() || null, body: noteBody.trim() || null,
+        ...(quote || was?.quote ? { quote: quote || null } : {}), // (no quote column before 0039)
+      });
+      clearNote();
       notes = await loadNotes(r.id);
       await load();
     } catch (e) {
@@ -116,10 +129,11 @@
     noteEditing = n.id;
     noteDate = n.noted_on;
     notePage = n.page ?? "";
-    noteBody = n.body;
+    noteQuote = n.quote ?? "";
+    noteBody = n.body ?? "";
   }
   async function removeNote(r: Reading, n: Note) {
-    if (!confirm("Delete this note?")) return;
+    if (!confirm(hasQuote(n) ? "Delete this quote and its note?" : "Delete this note?")) return;
     try {
       await deleteNote(n.id);
       notes = await loadNotes(r.id);
@@ -127,6 +141,35 @@
     } catch (e) {
       error = (e as Error).message;
     }
+  }
+
+  // ---- every quote ---------------------------------------------------------------------
+  let quotes = $state<QuoteRow[]>([]);
+  let quotesLoading = $state(false);
+  async function showQuotes() {
+    view = "quotes";
+    adding = false;
+    quotesLoading = true;
+    try {
+      quotes = await loadQuotes();
+      error = "";
+    } catch (e) {
+      error = (e as Error).message;
+    } finally {
+      quotesLoading = false;
+    }
+  }
+  const shownQuotes = $derived.by(() => {
+    const q = search.trim().toLowerCase();
+    return quotes.filter((x) => !q || [x.quote, x.body, x.page, x.reading?.title, x.reading?.authors].some((v) => v?.toLowerCase().includes(q)));
+  });
+  /** Back to the list, with the reading a quote is from open. */
+  function goTo(readingId: string) {
+    view = "items";
+    filter = "all";
+    search = "";
+    const r = items.find((x) => x.id === readingId);
+    if (r && open !== r.id) toggle(r);
   }
 
   // ---- PDF ---------------------------------------------------------------------------
@@ -191,13 +234,20 @@
   <h1>Reading</h1>
 
   <div class="toolbar">
-    {#if !adding}<button class="primary" onclick={() => { adding = true; open = null; }}>+ Add reading</button>{/if}
-    <div class="filters" role="group" aria-label="Show">
-      {#each [{ key: "all", label: "All" }, ...STATUSES] as s (s.key)}
-        <button class:on={filter === s.key} aria-pressed={filter === s.key} onclick={() => (filter = s.key)}>{s.label}</button>
-      {/each}
+    {#if !adding && view === "items"}<button class="primary" onclick={() => { adding = true; open = null; }}>+ Add reading</button>{/if}
+    <div class="filters" role="group" aria-label="View">
+      <button class:on={view === "items"} aria-pressed={view === "items"} onclick={() => (view = "items")}>Readings</button>
+      <button class:on={view === "quotes"} aria-pressed={view === "quotes"} onclick={showQuotes}>Quotes</button>
     </div>
-    <input class="search" type="search" bind:value={search} placeholder="Search title, authors, journal, DOI" aria-label="Search" />
+    {#if view === "items"}
+      <div class="filters" role="group" aria-label="Show">
+        {#each [{ key: "all", label: "All" }, ...STATUSES] as s (s.key)}
+          <button class:on={filter === s.key} aria-pressed={filter === s.key} onclick={() => (filter = s.key)}>{s.label}</button>
+        {/each}
+      </div>
+    {/if}
+    <input class="search" type="search" bind:value={search} aria-label="Search"
+           placeholder={view === "quotes" ? "Search quotes, notes, titles, authors" : "Search title, authors, journal, DOI"} />
   </div>
   {#if storageUsed}
     <p class="muted small">PDFs: {fmtSize(storageUsed)} of 1 GB free storage ({Math.round((100 * storageUsed) / FREE_STORAGE)}%)</p>
@@ -209,7 +259,34 @@
     <div class="card"><ReadingForm reading={null} {projects} onsaved={saved} oncancel={() => (adding = false)} /></div>
   {/if}
 
-  {#if loading}
+  {#if view === "quotes"}
+    {#if quotesLoading}
+      <p class="muted">Loading…</p>
+    {:else if !quotes.length}
+      <p class="muted">No quotes yet. Open a reading and add one under <em>Notes and quotes</em>.</p>
+    {:else if !shownQuotes.length}
+      <p class="muted">Nothing matches.</p>
+    {:else}
+      <div class="quote-acts">
+        <span class="muted small">{shownQuotes.length} {shownQuotes.length === 1 ? "quote" : "quotes"}</span>
+        <button class="mini" onclick={() => copy(shownQuotes.map((x) => quoteText(x, x.reading)).join("\n\n"), "all-quotes")}>
+          {copied === "all-quotes" ? "Copied" : search.trim() ? "Copy these" : "Copy all"}</button>
+      </div>
+      <ul class="quotes">
+        {#each shownQuotes as x (x.id)}
+          <li class="note">
+            <blockquote>{x.quote}</blockquote>
+            {#if x.body}<p class="on-quote">{x.body}</p>{/if}
+            <div class="note-head">
+              <button class="link muted" onclick={() => goTo(x.reading_id)} title={x.reading?.title ?? ""}>
+                {shortCite(x.reading, x.page)} · {fmtDay(x.noted_on)}</button>
+              <button class="mini" onclick={() => copy(quoteText(x, x.reading), x.id)}>{copied === x.id ? "Copied" : "Copy"}</button>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    {/if}
+  {:else if loading}
     <p class="muted">Loading…</p>
   {:else if !items.length && !adding}
     <p class="muted">Nothing recorded yet. Add a journal article or book — a DOI fills in the details.</p>
@@ -217,7 +294,7 @@
     <p class="muted">Nothing matches.</p>
   {/if}
 
-  {#each groups as g (g.key)}
+  {#each view === "items" ? groups : [] as g (g.key)}
     <h2>{g.label} <span class="muted count">{g.rows.length}</span></h2>
     <ul class="items">
       {#each g.rows as r (r.id)}
@@ -280,24 +357,34 @@
                 </div>
 
                 <div class="notes">
-                  <h3>Notes</h3>
+                  <h3>Notes and quotes
+                    {#if notes.some(hasQuote)}
+                      <button class="mini" onclick={() => copy(notes.filter(hasQuote).map((n) => quoteText(n, r)).join("\n\n"), "quotes")}>
+                        {copied === "quotes" ? "Copied" : "Copy its quotes"}</button>
+                    {/if}
+                  </h3>
                   <form class="note-form" onsubmit={(ev) => { ev.preventDefault(); addNote(r); }}>
                     <input type="date" bind:value={noteDate} aria-label="Date" />
                     <input class="page" bind:value={notePage} placeholder="page" aria-label="Page" />
-                    <textarea rows="3" bind:value={noteBody} placeholder="What you took from it…" aria-label="Note"></textarea>
+                    <textarea class="quote-in" rows="2" bind:value={noteQuote} placeholder="A quote, word for word (optional)" aria-label="Quote"></textarea>
+                    <textarea rows="3" bind:value={noteBody} aria-label="Note"
+                              placeholder={noteQuote.trim() ? "Your note on the quote (optional)…" : "What you took from it…"}></textarea>
                     <div class="note-acts">
-                      <button class="primary" type="submit" disabled={noteBusy || !noteBody.trim()}>{noteEditing ? "Save note" : "Add note"}</button>
-                      {#if noteEditing}<button type="button" onclick={() => { noteEditing = null; noteBody = ""; notePage = ""; noteDate = today(); }}>Cancel</button>{/if}
+                      <button class="primary" type="submit" disabled={noteBusy || (!noteBody.trim() && !noteQuote.trim())}>
+                        {noteEditing ? "Save" : noteQuote.trim() ? "Add quote" : "Add note"}</button>
+                      {#if noteEditing}<button type="button" onclick={clearNote}>Cancel</button>{/if}
                     </div>
                   </form>
                   {#each notes as n (n.id)}
                     <div class="note" class:editing={noteEditing === n.id}>
                       <div class="note-head">
                         <span class="muted">{fmtDay(n.noted_on)}{n.page ? ` · p. ${n.page}` : ""}</span>
+                        {#if hasQuote(n)}<button class="mini" onclick={() => copy(quoteText(n, r), n.id)}>{copied === n.id ? "Copied" : "Copy"}</button>{/if}
                         <button class="mini" onclick={() => editNote(n)}>Edit</button>
                         <button class="mini danger" onclick={() => removeNote(r, n)}>Delete</button>
                       </div>
-                      <p>{n.body}</p>
+                      {#if hasQuote(n)}<blockquote>{n.quote}</blockquote>{/if}
+                      {#if n.body}<p class:on-quote={hasQuote(n)}>{n.body}</p>{/if}
                     </div>
                   {:else}
                     <p class="muted small">No notes yet.</p>
@@ -353,5 +440,17 @@
   .note-head { display: flex; gap: 0.4rem; align-items: center; font-size: 0.8rem; }
   .note-head .muted { margin-right: auto; }
   .note p { margin: 0.2rem 0 0; white-space: pre-line; font-size: 0.9rem; }
+  .note-form .quote-in { font-family: var(--font); font-style: italic; }
+  blockquote {
+    margin: 0.3rem 0 0; padding: 0.1rem 0 0.1rem 0.7rem; border-left: 3px solid var(--rule);
+    font-family: var(--font); font-style: italic; font-size: 0.95rem; white-space: pre-line;
+  }
+  .note p.on-quote { padding-left: 0.85rem; color: var(--ink-soft); }
+  .notes h3 { display: flex; gap: 0.6rem; align-items: center; }
+  .quote-acts { display: flex; gap: 0.6rem; align-items: center; margin-bottom: 0.4rem; }
+  .quotes { list-style: none; margin: 0; padding: 0; font-family: var(--font-ui); }
+  .quotes .note-head { margin-top: 0.3rem; }
+  .link { background: none; border: none; padding: 0; text-align: left; font-size: 0.8rem; margin-right: auto; cursor: pointer; }
+  .link:hover { text-decoration: underline; }
   @media (max-width: 40rem) { .note-form { grid-template-columns: 1fr 1fr; } }
 </style>
