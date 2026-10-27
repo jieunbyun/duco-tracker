@@ -14,7 +14,7 @@
   import Logbook from "../lib/Logbook.svelte";
   import ActionLog from "../lib/ActionLog.svelte";
   import ActionHistory from "../lib/ActionHistory.svelte";
-  import { loadMyActions, loadMemberActions, loadDoneActions, loadActionComments, actionsMarkdown } from "../lib/actions";
+  import { loadMyActions, loadSharedActions, loadMemberActions, loadDoneActions, loadActionComments, actionsMarkdown } from "../lib/actions";
   import type { Action, ActionComment } from "../lib/actions";
   import { preview } from "../lib/preview.svelte";
 
@@ -37,7 +37,9 @@
       const id = preview.as?.user_id ?? (await myId()); // previewing: their logbook
       const [m, p, ms, acts, es] = await Promise.all([
         loadMembers(), loadGroupProjects(), loadMilestones().catch(() => [] as GroupMilestone[]),
-        preview.as ? loadMemberActions(id) : loadMyActions(), loadEntries(id).catch(() => [] as Entry[]),
+        // yours, and everyone else's on public milestones of your shared projects (read-only)
+        preview.as ? loadMemberActions(id) : Promise.all([loadMyActions(), loadSharedActions()]).then(([a, b]) => [...a, ...b]),
+        loadEntries(id).catch(() => [] as Entry[]),
       ]);
       const [th, cs, ed] = await Promise.all([
         loadActionComments(acts.map((a) => a.id)), loadComments(es.map((e) => e.id)), revisionCounts(es.map((e) => e.id)),

@@ -29,11 +29,18 @@ const asAction = (a: Action) => ({ ...a, links: a.links ?? [], sort_order: a.sor
 /** Your order first (dragging sets it), then oldest first. */
 export const byOrder = (a: Action, b: Action) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at);
 
+// Others' actions on public milestones of your shared projects can be read too
+// (0042), so "yours" is asked for by name.
+async function myUserId(): Promise<string> {
+  const { data } = await supabase.auth.getSession();
+  return data.session?.user.id ?? "";
+}
+
 /** Your open actions, and those done in the last two weeks. None before 0026 is run. */
 export async function loadMyActions(): Promise<Action[]> {
   const since = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
   const { data, error } = await supabase.from("todo").select(COLS)
-    .eq("kind", "action").eq("is_cancelled", false)
+    .eq("kind", "action").eq("is_cancelled", false).eq("user_id", await myUserId())
     .or(`is_done.eq.false,done_at.gte.${since}`)
     .order("sort_order").order("created_at");
   if (error) return [];
@@ -42,8 +49,22 @@ export async function loadMyActions(): Promise<Action[]> {
 /** Every action you have ticked off, most recent first: the Logbook's history. */
 export async function loadDoneActions(): Promise<Action[]> {
   const { data, error } = await supabase.from("todo").select(COLS)
-    .eq("kind", "action").eq("is_done", true).eq("is_cancelled", false)
+    .eq("kind", "action").eq("is_done", true).eq("is_cancelled", false).eq("user_id", await myUserId())
     .order("done_at", { ascending: false }).limit(1000);
+  if (error) return [];
+  return ((data ?? []) as Action[]).map(asAction);
+}
+/**
+ * Everyone else's actions on the public milestones of your shared projects: open,
+ * and done in the last two weeks. Read-only; none before 0042 is run.
+ */
+export async function loadSharedActions(): Promise<Action[]> {
+  const since = new Date(Date.now() - RECENT_DAYS * 86_400_000).toISOString();
+  const { data, error } = await supabase.from("todo").select(COLS)
+    .eq("kind", "action").eq("is_cancelled", false).neq("user_id", await myUserId())
+    .not("group_milestone_id", "is", null)
+    .or(`is_done.eq.false,done_at.gte.${since}`)
+    .order("sort_order").order("created_at");
   if (error) return [];
   return ((data ?? []) as Action[]).map(asAction);
 }

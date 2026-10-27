@@ -147,7 +147,10 @@
       The <em>Logbook</em> is built on actions: each project's actions, milestone by milestone, each with its own dated
       thread of comments and links. Tick off what is done, add what comes up under a milestone, drag the ⠿ handle to
       put them in order, click an action to rename it, and use <em>comment / link</em> to add to its thread. Your
-      Logbook covers the shared projects you are on and your Planning projects; a member's covers their shared projects. Under
+      Logbook covers the shared projects you are on and your Planning projects; a member's covers their shared projects.
+      On a public milestone of a shared project, everyone on the project sees every action and its thread, and can
+      comment on any of them, but ticks off, renames, reorders and deletes only the actions they logged themselves.
+      Actions on a private milestone, or on no milestone, stay their author's (and, for a member's, yours). Under
       each member are their projects (several each). Everyone on a project is a collaborator: you or any member can start
       a project (whoever starts it is on it), and any collaborator can add others from the group; only you take people
       off a project or delete it. You and they set a

@@ -309,7 +309,8 @@ export type WeekPlan = { todos: Todo[]; slots: Slot[] };
  */
 export async function loadWeekPlan(from: string, to: string): Promise<WeekPlan> {
   const [due, slots] = await Promise.all([
-    supabase.from("todo").select(TODO_COLS).gte("due_on", from).lte("due_on", to),
+    // (actions are never on Week's lists, and others' can be read since 0042)
+    supabase.from("todo").select(TODO_COLS).gte("due_on", from).lte("due_on", to).neq("kind", "action"),
     supabase.from("todo_slot").select(SLOT_COLS).gte("planned_on", from).lte("planned_on", to),
   ]);
   for (const r of [due, slots]) if (r.error) throw new Error(r.error.message);

@@ -17,8 +17,12 @@ const PAGE = 1000;
 
 async function allRows(table: string): Promise<unknown[]> {
   const rows: unknown[] = [];
+  // others' actions on shared projects can be read (0042), but are not yours to keep
+  const me = table === "todo" ? (await supabase.auth.getSession()).data.session?.user.id : undefined;
   for (let from = 0; ; from += PAGE) {
-    const { data, error } = await supabase.from(table).select("*").range(from, from + PAGE - 1);
+    let q = supabase.from(table).select("*");
+    if (me) q = q.eq("user_id", me);
+    const { data, error } = await q.range(from, from + PAGE - 1);
     if (error) throw new Error(error.message);
     rows.push(...(data ?? []));
     if (!data || data.length < PAGE) return rows;

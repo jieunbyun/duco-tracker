@@ -1,7 +1,8 @@
 <script lang="ts">
   // The Logbook: a project's actions by milestone, each with its dated thread of
   // comments and links. Tick off what is done, add what comes up, drag to put
-  // them in order. Members write on their own actions; the supervisor replies.
+  // them in order. Each person changes only the actions they logged; on a public
+  // milestone of a shared project everyone there sees them all, and comments.
   import {
     addAction, saveAction, setActionDone, deleteAction, saveActionOrder, addActionComment, editActionComment, deleteActionComment,
     commentDeletable, byOrder,
@@ -32,6 +33,8 @@
     try { error = ""; await f(); await onchanged(); } catch (e) { error = (e as Error).message; }
   };
   const nameOf = (uid: string) => (uid === me ? "you" : members.find((m) => m.user_id === uid)?.display_name ?? "—");
+  /** Yours to tick off, rename, reorder and delete: only the actions you logged. */
+  const own = (a: Action) => canWrite && a.user_id === me;
   const keyOf = (a: Action) => (a.project_id ? `p:${a.project_id}` : a.group_project_id ? `g:${a.group_project_id}` : "");
   const msOf = (a: Action) => a.milestone_id ?? a.group_milestone_id ?? "";
   const projectName = (key: string) => key.startsWith("p:")
@@ -80,8 +83,10 @@
     renaming = null;
     if (r && r.title.trim()) await act(() => saveAction(r.id, { title: r.title.trim() }));
   }
+  // the order is each person's own: only your actions are saved in it
   const reorder = (s: Section) => (ids: string[]) =>
-    act(() => saveActionOrder(ids, new Map(s.open.map((a) => [a.id, a.sort_order]))));
+    act(() => saveActionOrder(ids.filter((id) => s.open.some((a) => a.id === id && own(a))),
+                              new Map(s.open.map((a) => [a.id, a.sort_order]))));
 
   // ---- the new-action box in the overview (choose the project) ------------------------------
   let newTitle = $state("");
@@ -140,13 +145,13 @@
 {#snippet card(a: Action)}
   <div class="action" class:done={a.is_done}>
     <div class="a-head">
-      <input type="checkbox" checked={a.is_done} disabled={!canWrite}
+      <input type="checkbox" checked={a.is_done} disabled={!own(a)}
              onchange={() => act(() => setActionDone(a.id, !a.is_done))} aria-label={`${a.is_done ? "Reopen" : "Done"}: ${a.title}`} />
       {#if renaming?.id === a.id}
         <input class="rename" bind:value={renaming.title} onblur={rename}
                onkeydown={(ev) => { if (ev.key === "Enter") rename(); if (ev.key === "Escape") renaming = null; }} aria-label="Action" />
       {:else}
-        <button class="a-title" disabled={!canWrite} title={canWrite ? "Click to rename" : ""}
+        <button class="a-title" disabled={!own(a)} title={own(a) ? "Click to rename" : ""}
                 onclick={() => (renaming = { id: a.id, title: a.title })}>{a.title}</button>
       {/if}
       {#if a.group_project_id}
@@ -157,7 +162,7 @@
       {#each a.links as l (l)}<a class="chip" href={l} target="_blank" rel="noopener noreferrer" title={l}>↗ {linkName(l)}</a>{/each}
       <span class="spacer"></span>
       {#if canComment}<button class="link" onclick={() => { open = open === a.id ? null : a.id; body = links = ""; }}>comment / link</button>{/if}
-      {#if canWrite}<button class="x" aria-label={`Delete ${a.title}`} title="Delete this action"
+      {#if own(a)}<button class="x" aria-label={`Delete ${a.title}`} title="Delete this action"
                             onclick={() => confirm(`Delete the action “${a.title}” and its comments?`) && act(() => deleteAction(a.id))}>✕</button>{/if}
     </div>
     {#if threadOf(a).length}
