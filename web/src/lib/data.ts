@@ -379,6 +379,12 @@ export async function saveSlot(id: string | null, fields: Partial<SlotFields>): 
 export async function deleteSlot(id: string): Promise<void> {
   await check(supabase.from("todo_slot").delete().eq("id", id));
 }
+/** Hours logged on these time entries (by id), however far back they are. */
+export async function loggedHoursOf(entryIds: string[]): Promise<number> {
+  if (!entryIds.length) return 0;
+  const rows = (await check<{ minutes: number }[]>(supabase.from("time_entry").select("minutes").in("id", entryIds))) ?? [];
+  return rows.reduce((s, r) => s + (Number(r.minutes) || 0), 0) / 60;
+}
 
 /** Time entries that started within [from, to] (whole days). */
 export async function loadEntriesBetween(from: string, to: string): Promise<TimeEntry[]> {

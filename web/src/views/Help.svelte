@@ -58,7 +58,9 @@
       A day that passes without being logged hands its hours on to the days still to come (its card says so); only
       when none is left does it keep them. If no day is left to take the rest, a partly logged day offers to move it to the next day.
       <em>✉ Create email checks</em>, under the calendar, adds one “Email check” to-do for the week — 1.5 hours on
-      each ticked weekday, 7.5 hours for all five — so a day's card moves to another day like any to-do. The bar that appears at the bottom
+      each ticked weekday, 7.5 hours for all five — so a day's card moves to another day like any to-do. Days added
+      later join the week's email check; separate checks made earlier can be joined into one from the same button;
+      and an email check carried forward into a week that has one adds its unspent hours to it. The bar that appears at the bottom
       after a change offers to undo it.
     </dd>
 

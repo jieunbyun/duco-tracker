@@ -1,6 +1,6 @@
 <script lang="ts">
   import {
-    loadTaxonomy, loadProjects, loadWeekPlan, loadUnfinishedBefore, loadEntriesBetween, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
+    loadTaxonomy, loadProjects, loadWeekPlan, loadUnfinishedBefore, loadEntriesBetween, loggedHoursOf, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
     saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
@@ -905,12 +905,29 @@
     panel = null;
     const n = picked.length;
     const to = fwdTo;
+    // an email check folds into the one already in that week, if there is one
+    const targetEmail = picked.some(isEmail)
+      ? (await loadWeekPlan(to, addDays(to, 6)).catch(() => null))?.todos
+          .find((x) => isEmail(x) && x.kind === "task" && !x.is_cancelled && !x.is_done && !picked.includes(x)) ?? null
+      : null;
     await change(`Carried ${n} ${n === 1 ? "to-do" : "to-dos"} forward to the week of ${fmtDay(to)}`, async () => {
+      let added = 0;
       for (const t of picked) {
-        await saveTodo(t.id, { due_on: to });
-        for (const s of fwdSlots.filter((x) => x.todo_id === t.id && x.planned_on < to && !x.entry_id && !x.is_cancelled)) {
+        const old = fwdSlots.filter((x) => x.todo_id === t.id);
+        for (const s of old.filter((x) => x.planned_on < to && !x.entry_id && !x.is_cancelled)) {
           await saveSlot(s.id, { is_cancelled: true, cancelled_by_sync: false });
         }
+        if (targetEmail && isEmail(t)) {
+          // its unspent hours join that week's email check; it closes on what was logged
+          const logged = await loggedHoursOf(old.filter((x) => x.entry_id).map((x) => x.entry_id!));
+          added += Math.max(0, (t.est_hours ?? 0) - logged);
+          await saveTodo(t.id, { est_hours: Math.round(logged * 100) / 100, is_done: true, done_at: new Date().toISOString() });
+        } else {
+          await saveTodo(t.id, { due_on: to });
+        }
+      }
+      if (targetEmail && added > 0) {
+        await saveTodo(targetEmail.id, { est_hours: Math.round(((targetEmail.est_hours ?? 0) + added) * 100) / 100 });
       }
     });
   }
@@ -929,9 +946,42 @@
   let emailHours = $state(1.5);
   let emailCategory = $state("");
 
+  const isEmail = (t: { title: string } | undefined) => t?.title.trim().toLowerCase() === EMAIL_TITLE.toLowerCase();
   function hasEmailCheck(d: string): boolean {
-    return weekSlots.some((x) => x.planned_on === d && !x.is_cancelled &&
-      todoById.get(x.todo_id)?.title.trim().toLowerCase() === EMAIL_TITLE.toLowerCase());
+    return weekSlots.some((x) => x.planned_on === d && !x.is_cancelled && isEmail(todoById.get(x.todo_id)));
+  }
+  // this week's email-check to-dos, earliest first: one, or several made separately before checks were joined
+  const emailTodos = $derived(
+    tasks.filter((t) => isEmail(t) && !t.is_cancelled && weekSlots.some((s) => s.todo_id === t.id))
+      .sort((a, b) => a.due_on.localeCompare(b.due_on) || a.id.localeCompare(b.id)),
+  );
+
+  /**
+   * Join separate email checks into one to-do: every day's card (logged ones
+   * too) moves under the first, whose total becomes the sum of theirs. A card
+   * without hours of its own takes its old to-do's estimate as its share.
+   */
+  async function joinEmailChecks() {
+    const list = emailTodos;
+    if (list.length < 2) return;
+    const [keep, ...rest] = list;
+    const total = list.reduce((s, t) => s + (t.est_hours ?? 0), 0);
+    const weightOf = (t: Todo, s: Slot) =>
+      s.planned_hours === null && t.est_hours !== null && slotsOf(t).filter((x) => !x.is_cancelled).length === 1
+        ? { planned_hours: t.est_hours } : {};
+    panel = null;
+    await change(`Joined ${list.length} email checks into one`, async () => {
+      for (const s of slotsOf(keep)) {
+        const w = weightOf(keep, s);
+        if ("planned_hours" in w) await saveSlot(s.id, w);
+      }
+      for (const t of rest) {
+        for (const s of slotsOf(t)) await saveSlot(s.id, { todo_id: keep.id, ...weightOf(t, s) });
+        await deleteTodo(t.id);
+      }
+      const done = list.every((t) => t.is_done);
+      await saveTodo(keep.id, { est_hours: total || null, is_done: done, done_at: done ? keep.done_at : null });
+    });
   }
   function openEmail() {
     emailPick = Object.fromEntries(weekdays.map((d) => [d, !hasEmailCheck(d)]));
@@ -942,11 +992,15 @@
   }
   async function createEmailChecks() {
     const picked = weekdays.filter((d) => emailPick[d]);
+    // days added to a week that already has one email check join it, rather than starting another
+    const into = emailTodos.length === 1 ? emailTodos[0] : null;
     if (picked.length) await change(`Added ${picked.length} email ${picked.length === 1 ? "check" : "checks"}`, async () => {
-      const id = await saveTodo(null, {
-        kind: "task", title: EMAIL_TITLE, due_on: picked[0], category_id: emailCategory || null,
-        est_hours: emailHours * picked.length, must_this_week: false,
-      });
+      const id = into
+        ? (await saveTodo(into.id, { est_hours: (into.est_hours ?? 0) + emailHours * picked.length, is_done: false, done_at: null }))
+        : await saveTodo(null, {
+            kind: "task", title: EMAIL_TITLE, due_on: picked[0], category_id: emailCategory || null,
+            est_hours: emailHours * picked.length, must_this_week: false,
+          });
       for (const d of picked) await saveSlot(null, { todo_id: id, planned_on: d, planned_hours: emailHours });
     });
     panel = null;
@@ -1526,6 +1580,13 @@
           to-do; time logged on one day comes off (or, if under, goes on to) the days still to do. Email time counts in
           equal shares to Teaching, Admin and Outreach, whichever Email category it is logged under.
         </p>
+        {#if emailTodos.length > 1}
+          <div class="join">
+            <span class="small">This week's {emailTodos.length} email checks are separate to-dos, so their hours don't carry
+              between days. Join them into one ({fmtHours(emailTodos.reduce((s, t) => s + (t.est_hours ?? 0), 0))} for the week)?</span>
+            <button onclick={joinEmailChecks}>Join them into one</button>
+          </div>
+        {/if}
         <div class="pick-days">
           {#each weekdays as d (d)}
             {@const exists = hasEmailCheck(d)}
@@ -1637,6 +1698,9 @@
   .pick-row { display: flex; flex-wrap: wrap; gap: 1rem; }
   .pick-hours { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); max-width: 16rem; }
   .pick-actions { display: flex; gap: 0.5rem; }
+  .join { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.8rem; padding: 0.6rem 0.7rem;
+          border: 1px solid var(--rule); border-radius: var(--radius); background: var(--panel); }
+  .join button { font-size: 0.82rem; }
   .fwd-week h3 { margin: 0.2rem 0 0.3rem; font-size: 0.82rem; color: var(--ink-soft); font-weight: 600; }
   .fwd { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
   .fwd label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; font-size: 0.88rem; cursor: pointer; }
