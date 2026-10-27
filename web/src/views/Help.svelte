@@ -91,12 +91,14 @@
     <dd>
       Projects under each project-based category, with dates, planned hours and milestones, against the hours
       logged. Above them, how much of the planning horizon is still free per area. Below, the weekly targets and
-      settings. A Planning project can stand for a shared project (<em>Shared project</em> in its details; marked ⇄):
-      the shared project's milestones — the public ones and your own private ones — then come in as its milestones,
-      marked ⇄. Their title, dates, hard deadline and what they come after follow the shared project; their planned
-      hours are your hours on it there (the same figure in both places, seen by nobody else); ticking one done ticks
-      it there too. They work like any milestone: in the plan, in <em>+ From milestones</em> in Week, and for logging
-      time. If the shared milestone is deleted, or the link removed, the milestone stays here as an ordinary one.
+      settings. A Planning project can stand for a shared project (<em>Shared project</em> in its details; marked ⇄),
+      so its milestones are kept in one list, in step both ways: the shared project's public milestones come in
+      (⇄), and the Planning project's own go over as private ones (🔒, only you see them there) — those it had when
+      linked, and any you add after, here or there. Editing one here edits it there (a public one, for everyone on
+      the project); its planned hours are your hours on it there (seen by nobody else); ticking it done ticks it
+      there too. A private one deleted in either place is deleted in both; a public one is deleted on the shared
+      project. A milestone comes after milestones of its own kind only. They work like any milestone: in the plan,
+      in <em>+ From milestones</em> in Week, and for logging time; logged time stays when one is deleted.
     </dd>
 
     <dt>Pathways</dt>

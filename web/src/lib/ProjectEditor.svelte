@@ -112,7 +112,8 @@
           <option value={s.id} disabled={s.taken && s.id !== initial?.group_project_id}>{s.title}{s.taken && s.id !== initial?.group_project_id ? " (linked to another project)" : ""}</option>
         {/each}
       </select>
-      <span class="hint">Its milestones come in here, kept in step with it; the planned hours on them are your hours there. Only you see this.</span>
+      <span class="hint">Its milestones come in here, and this project's go there as private ones (🔒, only you): one list,
+        kept in step both ways. Planned hours are your hours there; only you see them.</span>
     </label>
   {/if}
   {#if error}<p class="error wide">{error}</p>{/if}

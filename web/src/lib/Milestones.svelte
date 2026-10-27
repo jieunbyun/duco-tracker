@@ -6,8 +6,11 @@
   import { milestoneDates } from "./plan";
   import type { DateSource } from "./plan";
 
-  type Props = { project: Project; actualByMilestone: Map<string, number>; onchange: () => void };
-  let { project, actualByMilestone, onchange }: Props = $props();
+  type Props = {
+    project: Project; actualByMilestone: Map<string, number>; onchange: () => void;
+    privateShared?: Map<string, boolean>; // shared milestone id → whether it is private (only you)
+  };
+  let { project, actualByMilestone, onchange, privateShared = new Map() }: Props = $props();
 
   // Which row is open for editing: a milestone id, "new", or nothing.
   let editing = $state<string | null>(null);
@@ -58,9 +61,13 @@
     }
   }
 
-  // a milestone brought in from the shared project: its title, dates, order and what it
-  // comes after follow that project; its hours, status and notes are set here
+  // In a project that stands for a shared project, every milestone is on the shared
+  // project too: one of its public ones, or a private one of yours (one added here goes
+  // over as private). Edits here reach it there; it comes after its own kind only.
+  const linked = $derived(!!project.group_project_id);
   const fromShared = (m: Milestone | null) => !!m?.group_milestone_id;
+  /** Private (only you) on the shared project: those added here, and your 🔒 ones there. */
+  const isPrivate = (m: Milestone | null) => !m?.group_milestone_id || (privateShared.get(m.group_milestone_id) ?? true);
 
   async function remove(m: Milestone) {
     if (!confirm(`Delete milestone “${m.title}”? Logged time stays on the project.`)) return;
@@ -97,7 +104,8 @@
   }
   const candidates = (m: Milestone | null) => {
     const later = m ? laterThan(m.id) : new Set<string>();
-    return project.milestone.filter((x) => x.id !== m?.id && !later.has(x.id) && (x.status !== "dropped" || draft.after.includes(x.id)));
+    return project.milestone.filter((x) => x.id !== m?.id && !later.has(x.id) && (x.status !== "dropped" || draft.after.includes(x.id))
+      && (!linked || isPrivate(x) === isPrivate(m)));
   };
   const titleOf = (id: string) => project.milestone.find((x) => x.id === id)?.title ?? "";
   const why = (from: DateSource, m: Milestone, end: "start" | "due") =>
@@ -112,22 +120,25 @@
 
 {#snippet form(m: Milestone | null)}
   <form class="ms-form" onsubmit={(e) => save(e, m)}>
-    {#if fromShared(m)}
-      <p class="wide shared-note">⇄ From the shared project: its title, dates, hard deadline and what it comes after are set there.
-        Planned hours here are your hours on it there (only you see them); ticking it done ticks it there too.</p>
+    {#if linked}
+      <p class="wide shared-note">
+        {#if isPrivate(m)}🔒 Also on the shared project, private: only you see it there.
+        {:else}⇄ A public milestone of the shared project: changes here change it there, for everyone on the project.{/if}
+        Planned hours are your hours on it there (only you see them); ticking it done ticks it there too.
+        It comes after {isPrivate(m) ? "your private" : "public"} milestones only.</p>
     {/if}
-    <label class="wide">Title <input bind:value={draft.title} required disabled={fromShared(m)} /></label>
+    <label class="wide">Title <input bind:value={draft.title} required /></label>
     <label>
       Status
       <select bind:value={draft.status}>
         {#each MILESTONE_STATUSES as s (s)}<option value={s}>{s}</option>{/each}
       </select>
     </label>
-    <label>Start <input type="date" bind:value={draft.start_on} disabled={fromShared(m)} /></label>
-    <label>Due <input type="date" bind:value={draft.due_on} min={draft.start_on || undefined} disabled={fromShared(m)} /></label>
+    <label>Start <input type="date" bind:value={draft.start_on} /></label>
+    <label>Due <input type="date" bind:value={draft.due_on} min={draft.start_on || undefined} /></label>
     <label>Planned hours <input type="number" min="0" step="0.5" bind:value={draft.planned} /></label>
-    <label class="check"><input type="checkbox" bind:checked={draft.hard_deadline} disabled={fromShared(m)} /> Hard deadline</label>
-    {#if candidates(m).length && !fromShared(m)}
+    <label class="check"><input type="checkbox" bind:checked={draft.hard_deadline} /> Hard deadline</label>
+    {#if candidates(m).length}
       <fieldset class="wide after">
         <legend>Comes after <span class="hint">— with no start date, it starts when the last of these is due</span></legend>
         {#each candidates(m) as x (x.id)}
@@ -140,7 +151,8 @@
     <div class="actions wide">
       <button class="primary" type="submit" disabled={busy || !draft.title.trim()}>{m ? "Save" : "Add milestone"}</button>
       <button type="button" onclick={() => (editing = null)} disabled={busy}>Cancel</button>
-      {#if m && !fromShared(m)}<button type="button" class="danger" onclick={() => remove(m)} disabled={busy}>Delete</button>{/if}
+      <!-- a public shared one is deleted on the shared project; a private one, in either place -->
+      {#if m && !(fromShared(m) && !isPrivate(m))}<button type="button" class="danger" onclick={() => remove(m)} disabled={busy}>Delete</button>{/if}
     </div>
   </form>
 {/snippet}
@@ -172,7 +184,7 @@
             <div class="ms-line" class:complete={m.status === "done"}>
             <button class="ms-row" onclick={() => open(m)}>
               <span class="title">
-                {#if fromShared(m)}<span class="shared" title="From the shared project">⇄</span>{/if}
+                {#if linked}<span class="shared" title={isPrivate(m) ? "On the shared project, private: only you see it" : "A public milestone of the shared project"}>{isPrivate(m) ? "🔒" : "⇄"}</span>{/if}
                 {m.title}
                 {#if m.hard_deadline}<small class="hard">hard deadline</small>{/if}
                 {#if m.after_ids.some(titleOf)}<small class="after-of">after {m.after_ids.map(titleOf).filter(Boolean).join(", ")}</small>{/if}

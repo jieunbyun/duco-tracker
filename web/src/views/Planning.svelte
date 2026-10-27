@@ -12,21 +12,24 @@
   import Settings from "../lib/Settings.svelte";
   import CategoryNotes from "../lib/CategoryNotes.svelte";
   import { shareEmail } from "../lib/email";
-  import { loadGroupProjects } from "../lib/group";
+  import { loadGroupProjects, loadMilestones as loadSharedMilestones } from "../lib/group";
   import type { GroupProject } from "../lib/group";
 
   let tax = $state<Taxonomy | null>(null);
   let projects = $state<Project[]>([]);
   let hours = $state<HourRow[]>([]);
   let groupProjects = $state<GroupProject[]>([]); // shared projects a Planning project can stand for
+  let privateShared = $state(new Map<string, boolean>()); // their milestones: private (only you) or public
   let loading = $state(true);
   let error = $state("");
 
   async function load() {
     try {
-      const [t, p, h, g] = await Promise.all([
+      const [t, p, h, g, gm] = await Promise.all([
         loadTaxonomy(), loadProjects(), loadAllHours(), loadGroupProjects().catch(() => [] as GroupProject[]),
+        loadSharedMilestones().catch(() => []),
       ]);
+      privateShared = new Map(gm.map((m) => [m.id, m.is_private]));
       tax = t;
       projects = p;
       hours = h;
@@ -352,7 +355,7 @@
                 <div class="p-body">
                   <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id} shared={sharedChoices}
                                  onsaved={changed} oncancel={() => (expanded = null)} />
-                  <Milestones project={p} {actualByMilestone} onchange={load} />
+                  <Milestones project={p} {actualByMilestone} {privateShared} onchange={load} />
                 </div>
               {/if}
             </div>
