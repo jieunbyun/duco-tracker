@@ -43,6 +43,8 @@
         loadActionComments(acts.map((a) => a.id)), loadComments(es.map((e) => e.id)), revisionCounts(es.map((e) => e.id)),
       ]);
       [me, members, projects, groupMilestones, actions, thread, entries, comments, edits] = [id, m, p, ms, acts, th, es, cs, ed];
+      // previewing: only their projects, as they see them (you see every project)
+      if (preview.as) projects = p.filter((x) => x.members.includes(id) || x.lead_id === id);
       // your own Planning projects have actions too (only the planner's owner has any)
       if (!preview.as && m.find((x) => x.user_id === id)?.role === "supervisor") {
         const used = new Set(acts.map((a) => a.project_id).filter(Boolean));
