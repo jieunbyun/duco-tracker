@@ -12,19 +12,25 @@
   import Settings from "../lib/Settings.svelte";
   import CategoryNotes from "../lib/CategoryNotes.svelte";
   import { shareEmail } from "../lib/email";
+  import { loadGroupProjects } from "../lib/group";
+  import type { GroupProject } from "../lib/group";
 
   let tax = $state<Taxonomy | null>(null);
   let projects = $state<Project[]>([]);
   let hours = $state<HourRow[]>([]);
+  let groupProjects = $state<GroupProject[]>([]); // shared projects a Planning project can stand for
   let loading = $state(true);
   let error = $state("");
 
   async function load() {
     try {
-      const [t, p, h] = await Promise.all([loadTaxonomy(), loadProjects(), loadAllHours()]);
+      const [t, p, h, g] = await Promise.all([
+        loadTaxonomy(), loadProjects(), loadAllHours(), loadGroupProjects().catch(() => [] as GroupProject[]),
+      ]);
       tax = t;
       projects = p;
       hours = h;
+      groupProjects = g;
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -158,6 +164,11 @@
     addingTo = categoryId;
     expanded = null;
   }
+  const sharedChoices = $derived(groupProjects.map((g) => ({
+    id: g.id, title: g.title, taken: projects.some((p) => p.group_project_id === g.id),
+  })));
+  const sharedTitle = (p: Project) => groupProjects.find((g) => g.id === p.group_project_id)?.title ?? "";
+
   async function changed() {
     addingTo = null;
     await load();
@@ -317,6 +328,7 @@
               <button class="p-row" onclick={() => toggle(p.id)} aria-expanded={expanded === p.id}>
                 <span class="p-name">
                   {#if p.is_important}<span class="star" title="Important">★</span>{/if}{p.name}<FolderLink url={p.folder_url} />
+                  {#if p.group_project_id}<span class="shared" title={`Stands for the shared project “${sharedTitle(p)}”`}>⇄</span>{/if}
                   <span class="chip status-{p.status}">{p.status}</span>
                 </span>
                 <span class="p-dates muted">{period(p)}</span>
@@ -338,7 +350,7 @@
               </div>
               {#if expanded === p.id}
                 <div class="p-body">
-                  <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id}
+                  <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id} shared={sharedChoices}
                                  onsaved={changed} oncancel={() => (expanded = null)} />
                   <Milestones project={p} {actualByMilestone} onchange={load} />
                 </div>
@@ -355,7 +367,7 @@
             </div>
             {#if addingTo === c.id}
               <div class="p-body new">
-                <ProjectEditor project={null} categories={editorCategories} categoryId={c.id}
+                <ProjectEditor project={null} categories={editorCategories} categoryId={c.id} shared={sharedChoices}
                                onsaved={changed} oncancel={() => (addingTo = null)} />
               </div>
             {/if}
@@ -545,6 +557,7 @@
   .p-row:hover { background: var(--panel); }
   .p-name { grid-area: name; }
   .star { color: var(--ink); margin-right: 0.3rem; }
+  .shared { color: var(--ink-soft); font-size: 0.8rem; margin-left: 0.3rem; }
   .p-dates { grid-area: dates; font-size: 0.8rem; }
   .meter { grid-area: meter; position: relative; display: block; height: 8px; background: var(--track); border-radius: 0 4px 4px 0; }
   .fill { position: absolute; inset: 0 auto 0 0; background: var(--area); border-radius: 0 4px 4px 0; min-width: 2px; }

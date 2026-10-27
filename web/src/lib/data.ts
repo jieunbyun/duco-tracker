@@ -114,6 +114,7 @@ export type Milestone = {
   sort_order: number;
   notes: string | null;
   after_ids: string[]; // milestones of the same project that come before this one
+  group_milestone_id?: string | null; // brought in from the shared project this project stands for (0040)
 };
 
 export type Project = {
@@ -127,18 +128,15 @@ export type Project = {
   is_important: boolean;
   notes: string | null;
   folder_url: string | null; // its folder on OneDrive
+  group_project_id?: string | null; // the shared project it stands for: its milestones come in (0040)
   milestone: Milestone[];
 };
 
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadProjects(): Promise<Project[]> {
-  const cols = (folder: boolean) =>
-    `id,category_id,name,status,start_on,end_on,planned_hours,is_important,notes${folder ? ",folder_url" : ""},` +
-    "milestone(*)"; // all its columns, so a newer one (after_ids, 0032) is simply absent until its SQL is run
-  let { data, error } = await supabase.from("project").select(cols(true)).order("name");
-  // before 0019_folders.sql is run there is no folder column: everything else still works
-  if (error && /folder_url/.test(error.message)) ({ data, error } = await supabase.from("project").select(cols(false)).order("name"));
+  // all their columns, so a newer one (folder_url, after_ids, group links) is simply absent until its SQL is run
+  const { data, error } = await supabase.from("project").select("*,milestone(*)").order("name");
   if (error) throw new Error(error.message);
   return ((data ?? []) as unknown as Project[]).map((p) => ({
     ...p,

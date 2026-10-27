@@ -9,10 +9,11 @@
     project: Project | null; // null = new project
     categories: { category: Category; areaLabel: string }[];
     categoryId: string;
+    shared?: { id: string; title: string; taken: boolean }[]; // shared projects it can stand for (taken: by another of yours)
     onsaved: () => void;
     oncancel: () => void;
   };
-  let { project, categories, categoryId, onsaved, oncancel }: Props = $props();
+  let { project, categories, categoryId, shared = [], onsaved, oncancel }: Props = $props();
 
   // A local draft, copied once when the editor opens: nothing reaches the
   // database until Save, and a reload behind it does not overwrite typing.
@@ -26,6 +27,7 @@
   let is_important = $state(initial?.is_important ?? false);
   let notes = $state(initial?.notes ?? "");
   let folder = $state(initial?.folder_url ?? "");
+  let groupProject = $state(initial?.group_project_id ?? "");
   let busy = $state(false);
   let error = $state("");
 
@@ -45,6 +47,8 @@
         is_important,
         notes: notes.trim() || null,
         folder_url: folder.trim() || null,
+        // only sent when there is something to say, so saving works before 0040 is run
+        ...(groupProject || initial?.group_project_id ? { group_project_id: groupProject || null } : {}),
       });
       onsaved();
     } catch (e) {
@@ -99,6 +103,18 @@
   <label class="check"><input type="checkbox" bind:checked={is_important} /> Important</label>
   <label class="wide">Notes <textarea rows="3" bind:value={notes}></textarea></label>
   <label class="wide">OneDrive folder (link) <input type="url" bind:value={folder} placeholder="https://…sharepoint.com/…" /></label>
+  {#if shared.length || groupProject}
+    <label class="wide">
+      Shared project
+      <select bind:value={groupProject}>
+        <option value="">— none —</option>
+        {#each shared as s (s.id)}
+          <option value={s.id} disabled={s.taken && s.id !== initial?.group_project_id}>{s.title}{s.taken && s.id !== initial?.group_project_id ? " (linked to another project)" : ""}</option>
+        {/each}
+      </select>
+      <span class="hint">Its milestones come in here, kept in step with it; the planned hours on them are your hours there. Only you see this.</span>
+    </label>
+  {/if}
   {#if error}<p class="error wide">{error}</p>{/if}
   <div class="actions wide">
     <button class="primary" type="submit" disabled={busy || !name.trim()}>{project ? "Save" : "Add project"}</button>
@@ -117,6 +133,7 @@
   label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .wide { grid-column: 1 / -1; }
   .override { font-size: 0.75rem; color: var(--accent); }
+  .hint { font-size: 0.75rem; }
   .check { display: flex; align-items: center; gap: 0.45rem; align-self: end; padding-bottom: 0.5rem; color: var(--ink); }
   .check input { width: auto; }
   .actions { display: flex; gap: 0.5rem; }

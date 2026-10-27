@@ -58,6 +58,10 @@
     }
   }
 
+  // a milestone brought in from the shared project: its title, dates, order and what it
+  // comes after follow that project; its hours, status and notes are set here
+  const fromShared = (m: Milestone | null) => !!m?.group_milestone_id;
+
   async function remove(m: Milestone) {
     if (!confirm(`Delete milestone “${m.title}”? Logged time stays on the project.`)) return;
     busy = true;
@@ -108,18 +112,22 @@
 
 {#snippet form(m: Milestone | null)}
   <form class="ms-form" onsubmit={(e) => save(e, m)}>
-    <label class="wide">Title <input bind:value={draft.title} required /></label>
+    {#if fromShared(m)}
+      <p class="wide shared-note">⇄ From the shared project: its title, dates, hard deadline and what it comes after are set there.
+        Planned hours here are your hours on it there (only you see them); ticking it done ticks it there too.</p>
+    {/if}
+    <label class="wide">Title <input bind:value={draft.title} required disabled={fromShared(m)} /></label>
     <label>
       Status
       <select bind:value={draft.status}>
         {#each MILESTONE_STATUSES as s (s)}<option value={s}>{s}</option>{/each}
       </select>
     </label>
-    <label>Start <input type="date" bind:value={draft.start_on} /></label>
-    <label>Due <input type="date" bind:value={draft.due_on} min={draft.start_on || undefined} /></label>
+    <label>Start <input type="date" bind:value={draft.start_on} disabled={fromShared(m)} /></label>
+    <label>Due <input type="date" bind:value={draft.due_on} min={draft.start_on || undefined} disabled={fromShared(m)} /></label>
     <label>Planned hours <input type="number" min="0" step="0.5" bind:value={draft.planned} /></label>
-    <label class="check"><input type="checkbox" bind:checked={draft.hard_deadline} /> Hard deadline</label>
-    {#if candidates(m).length}
+    <label class="check"><input type="checkbox" bind:checked={draft.hard_deadline} disabled={fromShared(m)} /> Hard deadline</label>
+    {#if candidates(m).length && !fromShared(m)}
       <fieldset class="wide after">
         <legend>Comes after <span class="hint">— with no start date, it starts when the last of these is due</span></legend>
         {#each candidates(m) as x (x.id)}
@@ -132,7 +140,7 @@
     <div class="actions wide">
       <button class="primary" type="submit" disabled={busy || !draft.title.trim()}>{m ? "Save" : "Add milestone"}</button>
       <button type="button" onclick={() => (editing = null)} disabled={busy}>Cancel</button>
-      {#if m}<button type="button" class="danger" onclick={() => remove(m)} disabled={busy}>Delete</button>{/if}
+      {#if m && !fromShared(m)}<button type="button" class="danger" onclick={() => remove(m)} disabled={busy}>Delete</button>{/if}
     </div>
   </form>
 {/snippet}
@@ -164,6 +172,7 @@
             <div class="ms-line" class:complete={m.status === "done"}>
             <button class="ms-row" onclick={() => open(m)}>
               <span class="title">
+                {#if fromShared(m)}<span class="shared" title="From the shared project">⇄</span>{/if}
                 {m.title}
                 {#if m.hard_deadline}<small class="hard">hard deadline</small>{/if}
                 {#if m.after_ids.some(titleOf)}<small class="after-of">after {m.after_ids.map(titleOf).filter(Boolean).join(", ")}</small>{/if}
@@ -231,6 +240,8 @@
   .after legend { font-size: 0.8rem; color: var(--ink-soft); padding: 0; margin-bottom: 0.2rem; }
   .after .check { padding-bottom: 0; }
   .hint { font-size: 0.75rem; }
+  .shared { font-size: 0.8rem; color: var(--ink-soft); margin-right: 0.2rem; }
+  .shared-note { margin: 0; font-size: 0.78rem; color: var(--ink-soft); }
   .hours { text-align: right; font-variant-numeric: tabular-nums; }
   .empty { font-size: 0.85rem; margin: 0.2rem 0 0.5rem; }
   .add { margin-top: 0.5rem; font-size: 0.85rem; }
