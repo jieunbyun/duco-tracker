@@ -21,6 +21,8 @@ export type GroupMilestone = {
   id: string; project_id: string; title: string; due_on: string | null; done: boolean; done_on: string | null; sort_order: number;
   // set the way Planning milestones are (0034)
   start_on: string | null; hard_deadline: boolean; notes: string | null; after_ids: string[];
+  // private: seen only by the person who made it, and set when it is made (0037)
+  is_private: boolean; owner_id?: string | null;
 };
 export type EntryKind = "entry" | "weekly";
 export type Entry = {
@@ -140,6 +142,7 @@ export async function loadMilestones(): Promise<GroupMilestone[]> {
     supabase.from("group_milestone").select("*").order("sort_order").order("due_on"),
   )) ?? []).map((m) => ({
     ...m, start_on: m.start_on ?? null, hard_deadline: m.hard_deadline ?? false, notes: m.notes ?? null, after_ids: m.after_ids ?? [],
+    is_private: m.is_private ?? false,
   }));
 }
 export async function saveMilestone(id: string | null, fields: Partial<Omit<GroupMilestone, "id">>): Promise<void> {

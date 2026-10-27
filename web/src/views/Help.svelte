@@ -145,7 +145,11 @@
       a project (whoever starts it is on it), and any collaborator can add others from the group; only you take people
       off a project or delete it. You and they set a
       project's milestones the way you set yours in Planning — start and due dates, what each comes after (dates it
-      does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off. Then
+      does not set itself are implied, in italics), a hard deadline and notes — and both of you tick them off. Anyone
+      on a project chooses, when making a milestone, whether everyone on the project sees it or only they do (🔒). A
+      private milestone is hidden from everyone else, you included when a member makes it, and so are the actions,
+      comments and logbook entries on it. The choice stays once made, and a milestone comes after milestones of its
+      own kind only: public after public, private after your own private ones. Then
       come their Logbook, where you read their threads and reply. A comment can be taken back on the day it
       was written; after that it stays. You can edit your own comments at any time with ✎; an edited comment keeps
       its date and is marked <em>(edited)</em>. Actions are not to-dos and never appear on Week's lists, but the same actions
