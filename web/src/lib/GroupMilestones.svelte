@@ -7,13 +7,19 @@
   // is made; it comes after milestones of its own kind only.
   import { saveMilestone, deleteMilestone, saveMyMilestoneHours } from "./group";
   import { fmtHours } from "./data";
-  import type { GroupProject, GroupMilestone } from "./group";
+  import type { GroupProject, GroupMilestone, Member } from "./group";
   import { impliedDates } from "./plan";
   import type { DateSource } from "./plan";
   import { fmtDay, today } from "./dates";
 
-  type Props = { project: GroupProject; milestones: GroupMilestone[]; readonly?: boolean; act: (f: () => Promise<unknown>) => Promise<boolean> };
-  let { project, milestones, readonly = false, act }: Props = $props();
+  type Props = {
+    project: GroupProject; milestones: GroupMilestone[]; members?: Member[]; readonly?: boolean;
+    act: (f: () => Promise<unknown>) => Promise<boolean>;
+  };
+  let { project, milestones, members = [], readonly = false, act }: Props = $props();
+  // a public milestone's lead: one of the people on the project (a label only)
+  const nameOf = (id: string) => members.find((x) => x.user_id === id)?.display_name ?? "—";
+  const people = $derived(members.filter((x) => project.members.includes(x.user_id) || x.role === "supervisor"));
 
   // Which row is open for editing: a milestone id, "new", or nothing.
   let editing = $state<string | null>(null);
@@ -22,7 +28,7 @@
 
   function blank() {
     return { title: "", start_on: "", due_on: "", hard_deadline: false, notes: "", after: [] as string[], is_private: false,
-             hours: null as number | null };
+             hours: null as number | null, lead: "" };
   }
   function open(m: GroupMilestone | null) {
     if (readonly) return;
@@ -31,7 +37,7 @@
     draft = m
       ? { title: m.title, start_on: m.start_on ?? "", due_on: m.due_on ?? "", hard_deadline: m.hard_deadline,
           notes: m.notes ?? "", after: m.after_ids.filter((id) => milestones.some((x) => x.id === id)), is_private: m.is_private,
-          hours: m.my_hours }
+          hours: m.my_hours, lead: m.lead_id ?? "" }
       : blank();
   }
 
@@ -53,6 +59,8 @@
       hard_deadline: draft.hard_deadline,
       notes: draft.notes.trim() || null,
       after_ids: draft.after,
+      // only sent when there is something to say, so saving works before 0043 is run
+      ...(draft.lead || m?.lead_id ? { lead_id: draft.is_private ? null : draft.lead || null } : {}),
       sort_order: order,
       });
       if (hours !== (m?.my_hours ?? null)) await saveMyMilestoneHours(id, hours);
@@ -103,6 +111,14 @@
     <label>Due <input type="date" bind:value={draft.due_on} min={draft.start_on || undefined} /></label>
     <label title="Only you see this">Your hours <input type="number" min="0" step="0.5" bind:value={draft.hours} /></label>
     <label class="check"><input type="checkbox" bind:checked={draft.hard_deadline} /> Hard deadline</label>
+    {#if !draft.is_private && people.length}
+      <label>Lead
+        <select bind:value={draft.lead}>
+          <option value="">— none —</option>
+          {#each people as x (x.user_id)}<option value={x.user_id}>{x.display_name}</option>{/each}
+        </select>
+      </label>
+    {/if}
     {#if m}
       <p class="kind wide">{m.is_private ? "🔒 Private — only you see it, and what you link to it." : "Public — everyone on the project sees it."}</p>
     {:else}
@@ -145,6 +161,7 @@
                 <span class="title">
                   {#if m.is_private}<span class="lock" title="Private — only you see it">🔒</span>{/if}
                   {m.title}
+                  {#if m.lead_id && !m.is_private}<small class="after-of">lead: {nameOf(m.lead_id)}</small>{/if}
                   {#if m.hard_deadline}<small class="hard">hard deadline</small>{/if}
                   {#if m.after_ids.some(titleOf)}<small class="after-of">after {m.after_ids.map(titleOf).filter(Boolean).join(", ")}</small>{/if}
                   {#if m.done && m.done_on}<small class="after-of">done {fmtDay(m.done_on)}</small>{/if}

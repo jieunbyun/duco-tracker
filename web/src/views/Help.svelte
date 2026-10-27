@@ -160,7 +160,9 @@
       on a project chooses, when making a milestone, whether everyone on the project sees it or only they do (🔒). A
       private milestone is hidden from everyone else, you included when a member makes it, and so are the actions,
       comments and logbook entries on it. The choice stays once made, and a milestone comes after milestones of its
-      own kind only: public after public, private after your own private ones. Then
+      own kind only: public after public, private after your own private ones. A public milestone can name a
+      <em>Lead</em> — anyone on the project, a member or you — shown on its line and in the Logbook; it is a label
+      only, and everyone on the project still edits the milestone. Then
       come their Logbook, where you read their threads and reply. A comment can be taken back on the day it
       was written; after that it stays. You can edit your own comments at any time with ✎; an edited comment keeps
       its date and is marked <em>(edited)</em>. Actions are not to-dos and never appear on Week's lists, but the same actions

@@ -61,6 +61,8 @@
     return out;
   });
   const threadOf = (a: Action) => comments.filter((c) => c.action_id === a.id);
+  /** A shared milestone's lead (a label), if it names one. */
+  const leadOf = (s: Section) => (s.project.startsWith("g:") ? groupMilestones.find((m) => m.id === s.ms)?.lead_id ?? null : null);
 
   // ---- adding, renaming, ordering --------------------------------------------------------
   let adding = $state<Record<string, string>>({});
@@ -207,7 +209,7 @@
 {#each sections as s, i (`${s.project}|${s.ms}`)}
   {#if !filter && (i === 0 || sections[i - 1].project !== s.project)}<h2 class="proj">{projectName(s.project)}</h2>{/if}
   <section class="ms">
-    <h3>{s.label} <span class="muted">{s.open.length}</span></h3>
+    <h3>{s.label} <span class="muted">{s.open.length}</span>{#if leadOf(s)}<span class="lead"> · lead: {nameOf(leadOf(s)!)}</span>{/if}</h3>
     <Sortable items={s.open} row={card} onreorder={reorder(s)} disabled={!canWrite} />
     {#each s.done as a (a.id)}{@render card(a)}{/each}
     {#if canWrite}
@@ -228,6 +230,7 @@
   .ms { margin: 0 0 0.9rem; font-family: var(--font-ui); }
   .ms h3 { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 0.6rem 0 0.25rem; }
   .ms h3 .muted { font-weight: 400; }
+  .ms h3 .lead { font-weight: 400; text-transform: none; letter-spacing: 0; }
   .action { padding: 0.3rem 0; border-top: 1px solid var(--rule); }
   .a-head { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
   .a-head input[type="checkbox"] { width: auto; }

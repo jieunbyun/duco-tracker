@@ -24,6 +24,7 @@ export type GroupMilestone = {
   // private: seen only by the person who made it, and set when it is made (0037)
   is_private: boolean; owner_id?: string | null;
   my_hours: number | null; // the hours you plan to put in: yours alone, never seen by others (0038)
+  lead_id?: string | null; // a public one's lead, one of the people on the project: a label only (0043)
 };
 export type EntryKind = "entry" | "weekly";
 export type Entry = {

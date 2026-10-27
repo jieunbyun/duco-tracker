@@ -123,7 +123,7 @@
       {/if}
     </div>
 
-    <GroupMilestones project={p} milestones={ms} {readonly} {act} />
+    <GroupMilestones project={p} milestones={ms} {members} {readonly} {act} />
   </section>
 {:else}
   <p class="muted">{readonly ? "No projects yet." : "No projects yet: start one with + Project."}</p>
