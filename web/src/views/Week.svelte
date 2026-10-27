@@ -215,8 +215,9 @@
       const t = todoById.get(s.todo_id);
       if (!t || uncounted(t) || t.is_done) continue;
       const h = t.kind === "meeting" ? s.planned_hours : cardHours(s, t);
-      if (h) hours += h;
-      else unknown += 1;
+      // 0 is known (a missed day whose hours moved on); only no figure at all is unknown
+      if (h === null || h === undefined) unknown += 1;
+      else hours += h;
     }
     return { hours, unknown };
   }
@@ -961,7 +962,7 @@
     for (const t of todos) {
       if (t.kind !== "task") continue;
       const open = slotsOf(t).filter((x) => !x.entry_id && !x.is_cancelled);
-      for (const [id, h] of shareRemaining(t.est_hours, loggedFor(t), open)) out.set(id, h);
+      for (const [id, h] of shareRemaining(t.est_hours, loggedFor(t), open, today())) out.set(id, h);
     }
     return out;
   });
@@ -1169,7 +1170,7 @@
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
               {#if label(t) || h}<span class="sub">{label(t)}{label(t) && h ? " · " : ""}{h ? fmtHours(h) : ""}</span>{/if}
-              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{:else if tentative(t)}<span class="off">tentative</span>{:else if t.is_done}<span class="ok">done</span>{/if}
+              {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{:else if tentative(t)}<span class="off">tentative</span>{:else if t.is_done}<span class="ok">done</span>{:else if d < today() && h === 0 && t.est_hours !== null}<span class="off">not logged — hours moved on</span>{/if}
             </button>
           </div>
         {/each}
