@@ -388,6 +388,15 @@ export async function deleteIdeaNote(id: string): Promise<void> {
   await check(supabase.from("idea_note").delete().eq("id", id));
 }
 
+/** A to-do's open card (not logged, not cancelled) on a day, other than `except` — any week. */
+export async function openSlotOn(todoId: string, day: string, except: string): Promise<Slot | null> {
+  const rows = await check<Slot[]>(
+    supabase.from("todo_slot").select(SLOT_COLS).eq("todo_id", todoId).eq("planned_on", day)
+      .is("entry_id", null).eq("is_cancelled", false).neq("id", except),
+  );
+  return rows?.length ? asSlot(rows[0]) : null;
+}
+
 export async function deleteTodo(id: string): Promise<void> {
   await check(supabase.from("todo").delete().eq("id", id));
 }

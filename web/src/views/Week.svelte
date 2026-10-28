@@ -1,7 +1,7 @@
 <script lang="ts">
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadUnfinishedBefore, loadEntriesBetween, loggedHoursOf, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
-    saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas, loadIdeaNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote,
+    saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas, openSlotOn, loadIdeaNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields, IdeaNote } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
@@ -287,20 +287,43 @@
 
   // Moving a card onto a day that already holds the same to-do merges the two
   // into one card with their hours added.
-  function move(s: Slot, by: number) {
+  const move = (s: Slot, by: number) => moveTo(s, addDays(s.planned_on, by));
+  /** A card to any day, in this week or another. A to-do with no other open card
+   *  goes along to that day's week (as carrying forward does); one already on that
+   *  day takes the card's hours. */
+  async function moveTo(s: Slot, to: string) {
     const t = todoById.get(s.todo_id)!;
-    const to = addDays(s.planned_on, by);
-    const there = openCardOn(t.id, to, s.id);
-    if (!there) {
-      return change(`Moved ${q(t)} to ${dayName(to)} ${dayNum(to)}`,
-        () => saveSlot(s.id, { planned_on: to }));
+    if (to === s.planned_on) return;
+    const shown = to >= start && to <= end;
+    const where = shown ? `${dayName(to)} ${dayNum(to)}` : fmtDay(to);
+    let there: Slot | null | undefined;
+    try {
+      there = shown ? openCardOn(t.id, to, s.id) : await openSlotOn(t.id, to, s.id);
+    } catch (e) {
+      error = (e as Error).message;
+      return;
     }
-    const merged = sumHours(there.planned_hours, s.planned_hours);
-    return change(`Merged ${q(t)} into ${dayName(to)} ${dayNum(to)}${merged ? ` (${fmtHours(merged)})` : ""}`,
+    const week = weekStart(to);
+    const refile = week !== weekStart(t.due_on) && !slotsOf(t).some((x) => x.id !== s.id && !x.entry_id && !x.is_cancelled);
+    const filed = refile ? ` — now in the week of ${fmtDay(week)}` : "";
+    const merged = there ? sumHours(there.planned_hours, s.planned_hours) : null;
+    return change(there
+      ? `Merged ${q(t)} into ${where}${merged ? ` (${fmtHours(merged)})` : ""}${filed}`
+      : `Moved ${q(t)} to ${where}${filed}`,
       async () => {
-        await saveSlot(there.id, { planned_hours: merged });
-        await deleteSlot(s.id);
+        if (there) {
+          await saveSlot(there.id, { planned_hours: merged });
+          await deleteSlot(s.id);
+        } else {
+          await saveSlot(s.id, { planned_on: to });
+        }
+        if (refile) await saveTodo(t.id, { due_on: week });
       });
+  }
+  let moveDate = $state("");
+  function openMoveTo(t: Todo, s: Slot) {
+    moveDate = s.planned_on;
+    panel = { kind: "moveTo", todo: t, slot: s };
   }
 
   /** Hours of a logged card's to-do with no day left to go to: what is left of the
@@ -460,6 +483,7 @@
       : [
           { label: "‹ Move to the day before", run: () => move(s, -1) },
           { label: "Move to the day after ›", run: () => move(s, 1) },
+          { label: "Move to a date…", run: () => openMoveTo(t, s) },
         ];
     return [
       ...(t.is_tentative ? [tentativeItem] : []),
@@ -502,6 +526,7 @@
     | { kind: "log"; todo: Todo; slot: Slot | null; day: string }
     | { kind: "entry"; entry: TimeEntry | null; day: string }
     | { kind: "spread"; todo: Todo }
+    | { kind: "moveTo"; todo: Todo; slot: Slot }
     | { kind: "email" }
     | { kind: "forward" }
     | { kind: "outlook" }
@@ -1601,6 +1626,20 @@
           <button onclick={() => (panel = null)}>Cancel</button>
         </div>
       </div>
+    {:else if panel.kind === "moveTo"}
+      {@const mv = panel}
+      <h2>Move “{mv.todo.title}”</h2>
+      <form class="move-to" onsubmit={(ev) => { ev.preventDefault(); panel = null; moveTo(mv.slot, moveDate); }}>
+        <label>To <input type="date" bind:value={moveDate} required /></label>
+        <p class="muted small">
+          Now on {fmtDay(mv.slot.planned_on)}. Any day will do, in this week or another; a to-do with no other day
+          planned goes along to that week. If it is already planned on that day, the two join.
+        </p>
+        <div class="pick-actions">
+          <button class="primary" type="submit" disabled={!moveDate || moveDate === mv.slot.planned_on}>Move</button>
+          <button type="button" onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </form>
     {:else if panel.kind === "outlook"}
       <h2>Outlook calendar</h2>
       <OutlookSettings oncancel={() => (panel = null)}
