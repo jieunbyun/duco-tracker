@@ -1629,7 +1629,7 @@
     {:else if panel.kind === "moveTo"}
       {@const mv = panel}
       <h2>Move “{mv.todo.title}”</h2>
-      <form class="move-to" onsubmit={(ev) => { ev.preventDefault(); panel = null; moveTo(mv.slot, moveDate); }}>
+      <form class="move-to" onsubmit={(ev) => { ev.preventDefault(); const s = mv.slot; panel = null; moveTo(s, moveDate); }}>
         <label>To <input type="date" bind:value={moveDate} required /></label>
         <p class="muted small">
           Now on {fmtDay(mv.slot.planned_on)}. Any day will do, in this week or another; a to-do with no other day
