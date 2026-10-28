@@ -135,14 +135,18 @@
     showToast(label, true);
   }
   /** Run a change as one undoable action. */
-  async function change(label: string, run: () => Promise<unknown>) {
+  /** Run a change, then reload; false if it failed (its error stays shown: the reload must not clear it). */
+  async function change(label: string, run: () => Promise<unknown>): Promise<boolean> {
+    let failed = "";
     try {
       await undoable(label, run);
       showToast(label, true);
     } catch (e) {
-      error = (e as Error).message;
+      failed = (e as Error).message;
     }
     await load();
+    if (failed) error = failed;
+    return !failed;
   }
   const q = (t: { title: string }) => `“${t.title}”`;
 
@@ -758,13 +762,22 @@
 
   function editIdea(t: Todo) {
     ideaEditing = t.id;
+    ideaError = "";
     ideaDraft = { title: t.title, note: t.note ?? "" };
   }
+  // the editor stays open (with what you wrote) until the save has gone through
+  let ideaError = $state("");
   async function saveIdea(t: Todo) {
     const title = ideaDraft.title.trim();
     if (!title) return;
-    ideaEditing = null;
-    await change(`Edited ${q(t)}`, () => saveTodo(t.id, { title, note: ideaDraft.note.trim() || null }));
+    ideaError = "";
+    if (await change(`Edited ${q(t)}`, () => saveTodo(t.id, { title, note: ideaDraft.note.trim() || null }))) ideaEditing = null;
+    else ideaError = error;
+  }
+  // Ctrl+Enter (⌘+Enter) saves, Escape cancels
+  function ideaKeys(ev: KeyboardEvent, t: Todo) {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); saveIdea(t); }
+    if (ev.key === "Escape") ideaEditing = null;
   }
   function ideaDone(t: Todo) {
     return change(`Thought through ${q(t)}`,
@@ -1328,11 +1341,15 @@
         <li class="idea" class:dragging={dragId === t.id} data-id={t.id}>
           {#if ideaEditing === t.id}
             <div class="idea-edit">
-              <input bind:value={ideaDraft.title} aria-label="Idea" />
-              <textarea rows="3" bind:value={ideaDraft.note} placeholder="Develop it — notes, options, who to ask…" aria-label="Notes"></textarea>
+              <input bind:value={ideaDraft.title} aria-label="Idea"
+                     onkeydown={(ev) => { if (ev.key === "Enter") saveIdea(t); else ideaKeys(ev, t); }} />
+              <textarea rows="3" bind:value={ideaDraft.note} placeholder="Develop it — notes, options, who to ask…" aria-label="Notes"
+                        onkeydown={(ev) => ideaKeys(ev, t)}></textarea>
+              {#if ideaError}<p class="error">Not saved: {ideaError}</p>{/if}
               <div class="t-acts">
                 <button class="mini primary" onclick={() => saveIdea(t)}>Save</button>
                 <button class="mini" onclick={() => (ideaEditing = null)}>Cancel</button>
+                <span class="muted small">the note shows under the idea once saved · Ctrl+Enter saves</span>
               </div>
             </div>
           {:else}
