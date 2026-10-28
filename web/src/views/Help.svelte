@@ -36,7 +36,9 @@
       <em>To think about</em>, at the end of the to-do list, holds ideas jotted down as they come — a conference
       title, an angle to explore: not tied to a week and never counted as planned time. A web address pasted into an
       idea or its notes shows as a short underlined “link”. Ideas are listed oldest first; drag the ⠿ handle (or
-      press ↑ ↓ on it) to rearrange them. Edit one to develop it with notes; turn it into a to-do, mark it done once thought through, or delete it.
+      press ↑ ↓ on it) to rearrange them. Develop one with <em>+ Note</em> — as many notes as you like, each dated,
+      listed under it and each editable or deletable; <em>Edit</em> renames it. Turn it into a to-do, mark it done
+      once thought through, or delete it.
       <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
       more days; mark them must-do or flexible. Once a to-do is on a day it shows on the calendar only, and the list

@@ -1,9 +1,9 @@
 <script lang="ts">
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadUnfinishedBefore, loadEntriesBetween, loggedHoursOf, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
-    saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas,
+    saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas, loadIdeaNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote,
   } from "../lib/data";
-  import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields } from "../lib/data";
+  import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields, IdeaNote } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
   import { shareRemaining } from "../lib/share";
   import type { MilestoneWeek } from "../lib/plan";
@@ -87,13 +87,14 @@
     const [from, to] = [start, end];
     loading = true;
     try {
-      const [plan, logged, p, review, thoughts] = await Promise.all([
-        loadWeekPlan(from, to), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(),
+      const [plan, logged, p, review, thoughts, thoughtNotes] = await Promise.all([
+        loadWeekPlan(from, to), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(), loadIdeaNotes(),
       ]);
       if (id !== request) return;
       projects = p;
       inbox = review;
       ideas = thoughts;
+      ideaNotes = thoughtNotes;
       todos = plan.todos;
       slots = plan.slots;
       entries = logged;
@@ -665,7 +666,14 @@
   let ideas = $state<Todo[]>([]);
   let ideaText = $state("");
   let ideaEditing = $state<string | null>(null);
-  let ideaDraft = $state({ title: "", note: "" });
+  let ideaDraft = $state({ title: "", note: "" }); // note: an idea's one note from before 0044
+  // each idea's notes, dated, added one at a time as the thought develops
+  let ideaNotes = $state<IdeaNote[]>([]);
+  const notesOf = (t: Todo) => ideaNotes.filter((n) => n.todo_id === t.id);
+  let noteFor = $state<string | null>(null); // the idea being given a new note
+  let noteEditing = $state<string | null>(null); // or the note being edited
+  let noteText = $state("");
+  let noteError = $state("");
 
   async function addIdea(event: SubmitEvent) {
     event.preventDefault();
@@ -778,6 +786,34 @@
   function ideaKeys(ev: KeyboardEvent, t: Todo) {
     if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); saveIdea(t); }
     if (ev.key === "Escape") ideaEditing = null;
+  }
+  function startNote(t: Todo, n?: IdeaNote) {
+    noteFor = n ? null : t.id;
+    noteEditing = n?.id ?? null;
+    noteText = n?.body ?? "";
+    noteError = "";
+  }
+  const stopNote = () => { noteFor = noteEditing = null; };
+  // the box stays open (with what you wrote) until the save has gone through
+  async function saveNote(t: Todo) {
+    const body = noteText.trim();
+    if (!body) return;
+    noteError = "";
+    const editingId = noteEditing;
+    const ok = editingId
+      ? await change(`Edited a note on ${q(t)}`, () => saveIdeaNote(editingId, body))
+      : await change(`Added a note to ${q(t)}`, () => addIdeaNote(t.id, body));
+    if (ok) stopNote();
+    else noteError = error;
+  }
+  // Ctrl+Enter (⌘+Enter) saves, Escape cancels
+  function noteKeys(ev: KeyboardEvent, t: Todo) {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); saveNote(t); }
+    if (ev.key === "Escape") stopNote();
+  }
+  function deleteNote(t: Todo, n: IdeaNote) {
+    if (!confirm("Delete this note?")) return;
+    return change(`Deleted a note on ${q(t)}`, () => deleteIdeaNote(n.id));
   }
   function ideaDone(t: Todo) {
     return change(`Thought through ${q(t)}`,
@@ -1330,6 +1366,18 @@
 
   <!-- ================= to think about ================= -->
   {#snippet linked(text: string)}{#each linkParts(text) as part, i (i)}{#if part.url}<a class="ulink" href={part.url} target="_blank" rel="noopener" title={part.url}>link</a>{:else}{part.text}{/if}{/each}{/snippet}
+  {#snippet noteBox(t: Todo)}
+    <div class="note-box">
+      <textarea rows="3" bind:value={noteText} placeholder="Develop it — notes, options, who to ask…" aria-label="Note"
+                onkeydown={(ev) => noteKeys(ev, t)}></textarea>
+      {#if noteError}<p class="error">Not saved: {noteError}</p>{/if}
+      <div class="t-acts">
+        <button class="mini primary" onclick={() => saveNote(t)} disabled={!noteText.trim()}>Save</button>
+        <button class="mini" onclick={stopNote}>Cancel</button>
+        <span class="muted small">Ctrl+Enter saves</span>
+      </div>
+    </div>
+  {/snippet}
   <div class="group ideas">
     <h3>To think about {#if ideas.length}<span class="muted small">{ideas.length}</span>{/if}</h3>
     <form class="idea-add" onsubmit={addIdea}>
@@ -1343,13 +1391,13 @@
             <div class="idea-edit">
               <input bind:value={ideaDraft.title} aria-label="Idea"
                      onkeydown={(ev) => { if (ev.key === "Enter") saveIdea(t); else ideaKeys(ev, t); }} />
-              <textarea rows="3" bind:value={ideaDraft.note} placeholder="Develop it — notes, options, who to ask…" aria-label="Notes"
-                        onkeydown={(ev) => ideaKeys(ev, t)}></textarea>
+              {#if t.note}
+                <textarea rows="3" bind:value={ideaDraft.note} aria-label="Note" onkeydown={(ev) => ideaKeys(ev, t)}></textarea>
+              {/if}
               {#if ideaError}<p class="error">Not saved: {ideaError}</p>{/if}
               <div class="t-acts">
                 <button class="mini primary" onclick={() => saveIdea(t)}>Save</button>
                 <button class="mini" onclick={() => (ideaEditing = null)}>Cancel</button>
-                <span class="muted small">the note shows under the idea once saved · Ctrl+Enter saves</span>
               </div>
             </div>
           {:else}
@@ -1360,9 +1408,27 @@
               <span class="idea-title">{@render linked(t.title)}</span>
               {#if t.note}<span class="idea-note">{@render linked(t.note)}</span>{/if}
               <span class="t-meta muted">jotted {fmtDay(t.due_on)}</span>
+              {#if notesOf(t).length}
+                <ul class="inotes">
+                  {#each notesOf(t) as n (n.id)}
+                    <li>
+                      {#if noteEditing === n.id}
+                        {@render noteBox(t)}
+                      {:else}
+                        <span class="idea-note">{@render linked(n.body)}</span>
+                        <span class="t-meta muted">{fmtDay(n.created_at.slice(0, 10))}</span>
+                        <button class="link" onclick={() => startNote(t, n)}>edit</button>
+                        <button class="link danger" aria-label="Delete note" title="Delete note" onclick={() => deleteNote(t, n)}>✕</button>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+              {#if noteFor === t.id}{@render noteBox(t)}{/if}
             </div>
             <div class="t-acts">
-              <button class="mini" title="Edit the idea and its notes" onclick={() => editIdea(t)}>Edit</button>
+              <button class="mini" title="Add a note to develop it" onclick={() => startNote(t)}>+ Note</button>
+              <button class="mini" title="Edit the idea" onclick={() => editIdea(t)}>Edit</button>
               <button class="mini" title="Make it a to-do for this week" onclick={() => ideaToTodo(t)}>→ To-do</button>
               <button class="mini" title="Thought through — take it off the list" onclick={() => ideaDone(t)}>Done</button>
               <button class="mini danger" aria-label="Delete" title="Delete" onclick={() => deleteIdea(t)}>✕</button>
@@ -1855,6 +1921,11 @@
   .grip:active { cursor: grabbing; }
   li.idea:hover { background: var(--panel); }
   .idea-note { font-size: 0.82rem; white-space: pre-line; color: var(--ink); }
+  .inotes { list-style: none; margin: 0.15rem 0 0; padding: 0 0 0 0.6rem; border-left: 2px solid var(--rule); display: grid; gap: 0.2rem; }
+  .inotes li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.45rem; }
+  .inotes .link { background: none; border: none; padding: 0; font-size: 0.75rem; color: var(--ink-soft); text-decoration: underline; cursor: pointer; }
+  .inotes .link.danger { color: var(--danger); text-decoration: none; }
+  .note-box { display: grid; gap: 0.3rem; width: 100%; max-width: 46rem; margin-top: 0.2rem; }
   .idea-title { font-size: 0.92rem; overflow-wrap: anywhere; }
   .ulink { text-decoration: underline; color: var(--accent); }
   .idea-edit { grid-column: 1 / -1; display: grid; gap: 0.4rem; max-width: 46rem; }

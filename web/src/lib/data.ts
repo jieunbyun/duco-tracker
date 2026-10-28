@@ -371,6 +371,23 @@ export async function loadIdeas(): Promise<Todo[]> {
   )) ?? []).map(asTodo);
 }
 
+/** A note on an idea: an idea gathers several, dated, as the thought develops (0044). */
+export type IdeaNote = { id: string; todo_id: string; body: string; created_at: string };
+/** All your ideas' notes, oldest first — none until 0044 is run. */
+export async function loadIdeaNotes(): Promise<IdeaNote[]> {
+  const { data, error } = await supabase.from("idea_note").select("id,todo_id,body,created_at").order("created_at");
+  return error ? [] : (data as IdeaNote[]);
+}
+export async function addIdeaNote(todo_id: string, body: string): Promise<void> {
+  await check(supabase.from("idea_note").insert({ todo_id, body }));
+}
+export async function saveIdeaNote(id: string, body: string): Promise<void> {
+  await check(supabase.from("idea_note").update({ body }).eq("id", id));
+}
+export async function deleteIdeaNote(id: string): Promise<void> {
+  await check(supabase.from("idea_note").delete().eq("id", id));
+}
+
 export async function deleteTodo(id: string): Promise<void> {
   await check(supabase.from("todo").delete().eq("id", id));
 }
