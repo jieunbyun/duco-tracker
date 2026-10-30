@@ -5,6 +5,7 @@
 // before it.
 import { supabase } from "./supabase";
 import { check } from "./data";
+import { quietly } from "./undo.svelte";
 import type { ActionStep } from "./actions";
 
 export type Role = "supervisor" | "member";
@@ -16,6 +17,8 @@ export type GroupProject = {
   id: string; title: string; aim: string | null; status: "active" | "paused" | "done";
   start_on: string | null; end_on: string | null; lead_id: string | null; members: string[]; // user ids
   folder_url?: string | null; // its folder on OneDrive
+  deleted_at?: string | null; // in your bin: deleted by someone on it (0045)
+  deleted_by?: string | null;
 };
 export type GroupMilestone = {
   id: string; project_id: string; title: string; due_on: string | null; done: boolean; done_on: string | null; sort_order: number;
@@ -101,11 +104,13 @@ export async function saveMember(userId: string, fields: Partial<Pick<Member, "d
 }
 
 // ---- projects and milestones -------------------------------------------------------
-export async function loadGroupProjects(): Promise<GroupProject[]> {
+/** The projects you can see; `binned` adds those in your bin (only you can read them). */
+export async function loadGroupProjects(binned = false): Promise<GroupProject[]> {
   const rows = (await check<(Omit<GroupProject, "members"> & { group_project_member: { user_id: string }[] })[]>(
     supabase.from("group_project").select("*,group_project_member(user_id)").order("created_at"),
   )) ?? [];
-  return rows.map(({ group_project_member, ...p }) => ({ ...p, members: group_project_member.map((m) => m.user_id) }));
+  const all = rows.map(({ group_project_member, ...p }) => ({ ...p, members: group_project_member.map((m) => m.user_id) }));
+  return binned ? all : all.filter((p) => !p.deleted_at);
 }
 /**
  * Start a shared project as a member (0035): you are put on it as a collaborator
@@ -127,6 +132,22 @@ export async function saveGroupProject(id: string | null, fields: Partial<Omit<G
   }
   const row = await check<{ id: string }>(supabase.from("group_project").insert(fields).select("id").single());
   return row!.id;
+}
+/** The projects you keep minimised on your list — none until 0046 is run. */
+export async function loadMinimised(): Promise<Set<string>> {
+  const { data, error } = await supabase.from("project_minimised").select("project_id");
+  return new Set(error ? [] : (data as { project_id: string }[]).map((x) => x.project_id));
+}
+/** A view preference, not a change to undo. */
+export async function setMinimised(projectId: string, on: boolean): Promise<void> {
+  const user_id = await myId();
+  await quietly(() => check(on
+    ? supabase.from("project_minimised").upsert({ user_id, project_id: projectId })
+    : supabase.from("project_minimised").delete().eq("user_id", user_id).eq("project_id", projectId)));
+}
+/** Someone on a project deletes it: it goes to your bin, gone for everyone on it (0045). */
+export async function binGroupProject(id: string): Promise<void> {
+  await check(supabase.rpc("bin_group_project", { p: id }));
 }
 export async function deleteGroupProject(id: string): Promise<void> {
   await check(supabase.from("group_project").delete().eq("id", id));

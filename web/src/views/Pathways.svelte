@@ -86,7 +86,8 @@
       me = id;
       // students' shared projects and their logbooks (none before 0015, or without a group)
       [groupProjects, groupActivity, groupMembers, contributors] = await Promise.all([
-        loadGroupProjects().catch(() => [] as GroupProject[]),
+        // (with any in the bin: saving an item must not unlink it)
+        loadGroupProjects(true).catch(() => [] as GroupProject[]),
         loadProjectActivity(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)),
         loadMembers().catch(() => [] as Member[]), loadContributors(),
       ]);

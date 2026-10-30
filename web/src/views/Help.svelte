@@ -147,7 +147,12 @@
       visible to them. To add a member: invite them in Supabase (<em>Authentication › Users › Invite user</em>; they
       get an email to choose a password), then <em>+ Add a member</em> here: pick them from your Planning projects
       under Research › Supervision (their name then follows Planning) or, for anyone else, type a name.
-      You come first in the list, with the projects you are on.
+      You come first in the list, with the projects you are on. Everyone can minimise a project with its ▾ — remembered
+      for them from one log-on to the next, on any computer. <em>Show</em> lists the current projects, the done ones, all,
+      or just one. Everyone on a project can mark it <em>Done</em>, which moves it to the done list (<em>Reopen</em> brings
+      it back), and delete it. A member's delete puts it in the <em>Bin</em> at the top of this tab: it goes for
+      everyone on it, with its milestones and actions, but nothing is lost until you choose — <em>Restore</em> brings
+      it all back, <em>Delete for good</em> removes it, private milestones included.
       The <em>Logbook</em> is built on actions: each project's actions, milestone by milestone, each with its own dated
       thread of comments and links. Tick off what is done, add what comes up under a milestone, drag the ⠿ handle to
       put them in order, click an action to rename it, and use <em>comment / link</em> to add to its thread. Your

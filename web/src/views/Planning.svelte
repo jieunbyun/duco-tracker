@@ -26,7 +26,7 @@
   async function load() {
     try {
       const [t, p, h, g, gm] = await Promise.all([
-        loadTaxonomy(), loadProjects(), loadAllHours(), loadGroupProjects().catch(() => [] as GroupProject[]),
+        loadTaxonomy(), loadProjects(), loadAllHours(), loadGroupProjects(true).catch(() => [] as GroupProject[]),
         loadSharedMilestones().catch(() => []),
       ]);
       privateShared = new Map(gm.map((m) => [m.id, m.is_private]));
@@ -167,9 +167,10 @@
     addingTo = categoryId;
     expanded = null;
   }
+  // one in the bin stays listed while it is linked: saving must not unlink it
   const sharedChoices = $derived(groupProjects.map((g) => ({
-    id: g.id, title: g.title, taken: projects.some((p) => p.group_project_id === g.id),
-  })));
+    id: g.id, title: g.title, taken: projects.some((p) => p.group_project_id === g.id), binned: !!g.deleted_at,
+  })).filter((g) => g.taken || !g.binned));
   const sharedTitle = (p: Project) => groupProjects.find((g) => g.id === p.group_project_id)?.title ?? "";
 
   async function changed() {

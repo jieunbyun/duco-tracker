@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
-    saveGroupProject, startGroupProject, deleteGroupProject, addProjectMember, removeProjectMember,
+    saveGroupProject, startGroupProject, deleteGroupProject, binGroupProject, addProjectMember, removeProjectMember,
+    loadMinimised, setMinimised,
   } from "./group";
   import type { GroupProject, GroupMilestone, Member } from "./group";
   import { fromMonth, fmtMonth } from "./pathways";
@@ -13,7 +14,7 @@
     milestones: GroupMilestone[];
     members: Member[];
     activity?: Map<string, number>; // comments on each project's actions this week
-    supervisor: boolean; // you: takes people off projects and deletes them (everyone starts projects and adds collaborators)
+    supervisor: boolean; // you: takes people off projects and deletes them for good (everyone starts projects, adds collaborators, and deletes into your bin)
     newFor?: string | null; // when set, "+ Project" puts this person on the new project
     readonly?: boolean; // previewing what a member sees
     onchanged: () => Promise<void>;
@@ -27,6 +28,41 @@
   };
   const nameOf = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "—";
   const assignable = $derived(members.filter((m) => m.active));
+
+  // ---- what to show: the current projects, the done ones, all, or just one ------------
+  let show = $state("");
+  const doneOnes = $derived(projects.filter((p) => p.status === "done"));
+  const shown = $derived(
+    show === "done" ? doneOnes
+      : show === "all" ? projects
+      : projects.some((p) => p.id === show) ? projects.filter((p) => p.id === show)
+      : projects.filter((p) => p.status !== "done"),
+  );
+
+  // ---- minimised projects: each person's own, kept with their account (0046) ----------
+  // (previewing, it only folds them here: what a member keeps minimised is theirs)
+  let minimised = $state(new Set<string>());
+  $effect(() => {
+    if (!readonly) loadMinimised().then((s) => (minimised = s));
+  });
+  async function toggle(p: GroupProject) {
+    const on = !minimised.has(p.id);
+    const set = (v: boolean) => {
+      const s = new Set(minimised);
+      if (v) s.add(p.id);
+      else s.delete(p.id);
+      minimised = s;
+    };
+    set(on);
+    if (readonly) return;
+    try {
+      error = "";
+      await setMinimised(p.id, on);
+    } catch (e) {
+      set(!on);
+      error = (e as Error).message;
+    }
+  }
 
   // ---- a project's details (new or edited) ------------------------------------------
   // Everyone on a project is a collaborator: no lead is set here (one set earlier is kept, unseen).
@@ -63,7 +99,19 @@
 </script>
 
 {#if error}<p class="error">{error}</p>{/if}
-{#if !readonly && !draft}<button class="add" onclick={() => edit(null)}>+ Project</button>{/if}
+<div class="bar">
+  {#if !readonly && !draft}<button onclick={() => edit(null)}>+ Project</button>{/if}
+  {#if projects.length > 1 || doneOnes.length}
+    <label class="small">Show
+      <select bind:value={show}>
+        <option value="">current projects</option>
+        <option value="done">done ({doneOnes.length})</option>
+        <option value="all">all</option>
+        <optgroup label="Per project">{#each projects as p (p.id)}<option value={p.id}>{p.title}</option>{/each}</optgroup>
+      </select>
+    </label>
+  {/if}
+</div>
 
 {#snippet editor()}
   {#if draft}
@@ -85,27 +133,36 @@
 {/snippet}
 {#if draft && !draft.id}{@render editor()}{/if}
 
-{#each projects as p (p.id)}
+{#each shown as p (p.id)}
   {@const ms = milestones.filter((m) => m.project_id === p.id)}
+  {@const small = minimised.has(p.id)}
   <section class="gp" class:quiet={p.status !== "active"}>
     {#if draft?.id === p.id}
       {@render editor()}
     {:else}
       <header>
+        <button class="fold" aria-expanded={!small} aria-label={`${small ? "Open" : "Minimise"} “${p.title}”`}
+                title={small ? "Open" : "Minimise"} onclick={() => toggle(p)}>{small ? "▸" : "▾"}</button>
         <h3>{p.title}<FolderLink url={p.folder_url} /></h3>
         <span class="muted small">
           {p.status}{p.start_on ? ` · ${fmtMonth(p.start_on)} → ${p.end_on ? fmtMonth(p.end_on) : "…"}` : ""}
           · {activity.get(p.id) ?? 0} {(activity.get(p.id) ?? 0) === 1 ? "comment" : "comments"} this week
         </span>
         <span class="spacer"></span>
-        {#if !readonly}<button class="mini" onclick={() => edit(p)}>Edit</button>{/if}
+        {#if !readonly}
+          <button class="mini" onclick={() => edit(p)}>Edit</button>
+          <button class="mini" onclick={() => act(() => saveGroupProject(p.id, { status: p.status === "done" ? "active" : "done" }))}>{p.status === "done" ? "Reopen" : "Done"}</button>
+        {/if}
         {#if supervisor}
-          <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”? Its collaborators' actions stay, without a project.`) && act(() => deleteGroupProject(p.id))}>Delete</button>
+          <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”?`) && act(() => deleteGroupProject(p.id))}>Delete</button>
+        {:else if !readonly}
+          <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”?`) && act(() => binGroupProject(p.id))}>Delete</button>
         {/if}
       </header>
-      {#if p.aim}<p class="aim">{p.aim}</p>{/if}
+      {#if p.aim && !small}<p class="aim">{p.aim}</p>{/if}
     {/if}
 
+    {#if !small}
     <div class="people small">
       <span class="muted">Collaborators:</span>
       {#each p.members as uid (uid)}
@@ -124,13 +181,20 @@
     </div>
 
     <GroupMilestones project={p} milestones={ms} {members} {readonly} {act} />
+    {/if}
   </section>
 {:else}
-  <p class="muted">{readonly ? "No projects yet." : "No projects yet: start one with + Project."}</p>
+  {#if projects.length}
+    <p class="muted">Nothing here: choose another list under Show.</p>
+  {:else}
+    <p class="muted">{readonly ? "No projects yet." : "No projects yet: start one with + Project."}</p>
+  {/if}
 {/each}
 
 <style>
-  .add { margin-bottom: 0.7rem; }
+  .bar { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.7rem; font-family: var(--font-ui); }
+  .bar select { width: auto; }
+  .fold { background: none; border: none; padding: 0 0.1rem; color: var(--ink-soft); font-size: 0.85rem; cursor: pointer; }
   .gp { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem 0.9rem; margin-bottom: 0.8rem; font-family: var(--font-ui); }
   .gp.quiet { opacity: 0.7; }
   .gp header { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; }

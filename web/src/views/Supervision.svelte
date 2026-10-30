@@ -4,12 +4,13 @@
   // projects under Research › Supervision, which already name them.
   import {
     loadMembers, addMember, saveMember, loadGroupProjects, loadMilestones, loadEntries, loadComments, revisionCounts,
-    logbookMarkdown, download, myId,
+    logbookMarkdown, download, myId, saveGroupProject, deleteGroupProject,
   } from "../lib/group";
   import type { Member, GroupProject, GroupMilestone, Entry, Comment, PlanningRef } from "../lib/group";
   import { loadProjects, loadTaxonomy } from "../lib/data";
   import type { Project } from "../lib/data";
   import { LIVE_STATUSES } from "../lib/plan";
+  import { fmtDay } from "../lib/dates";
   import { quietly } from "../lib/undo.svelte";
   import Logbook from "../lib/Logbook.svelte";
   import ActionLog from "../lib/ActionLog.svelte";
@@ -39,7 +40,7 @@
   async function load() {
     try {
       const [id, m, p, ms, es, planning, tax] = await Promise.all([
-        myId(), loadMembers(), loadGroupProjects(), loadMilestones(), loadEntries(), loadProjects(), loadTaxonomy(),
+        myId(), loadMembers(), loadGroupProjects(true), loadMilestones(), loadEntries(), loadProjects(), loadTaxonomy(),
       ]);
       const ids = es.map((e) => e.id);
       const [cs, ed] = await Promise.all([loadComments(ids), revisionCounts(ids)]);
@@ -84,7 +85,25 @@
   const isMe = $derived(!!current && current.user_id === me);
   let tab = $state<"projects" | "logbook">("projects");
 
-  const theirProjects = $derived(current ? projects.filter((p) => p.members.includes(current.user_id) || p.lead_id === current.user_id) : []);
+  const live = $derived(projects.filter((p) => !p.deleted_at));
+  const theirProjects = $derived(current ? live.filter((p) => p.members.includes(current.user_id) || p.lead_id === current.user_id) : []);
+
+  // ---- the bin: projects deleted by someone on them, yours to restore or delete for good ----
+  const binned = $derived(projects.filter((p) => p.deleted_at));
+  const binnedBy = (p: GroupProject) => members.find((m) => m.user_id === p.deleted_by)?.display_name ?? "someone";
+  async function binAct(run: () => Promise<unknown>) {
+    try {
+      await run();
+      await load();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  const restore = (p: GroupProject) => binAct(() => saveGroupProject(p.id, { deleted_at: null, deleted_by: null }));
+  function deleteForGood(p: GroupProject) {
+    if (!confirm(`Delete “${p.title}” for good? Its milestones go too, private ones included. Actions stay, without a project.`)) return;
+    return binAct(() => deleteGroupProject(p.id));
+  }
   async function loadThread() {
     const c = current;
     if (!c) return;
@@ -181,6 +200,21 @@
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="muted">Loading…</p>{/if}
 
+  {#if binned.length}
+    <div class="bin">
+      <h2>Bin</h2>
+      {#each binned as p (p.id)}
+        <div class="bin-row">
+          <span>{p.title}</span>
+          <span class="muted small">deleted by {binnedBy(p)}, {fmtDay(p.deleted_at!.slice(0, 10))}</span>
+          <span class="spacer"></span>
+          <button class="mini" onclick={() => restore(p)}>Restore</button>
+          <button class="mini danger" onclick={() => deleteForGood(p)}>Delete for good</button>
+        </div>
+      {/each}
+    </div>
+  {/if}
+
   <div class="layout">
     <nav class="people" aria-label="Members">
       {#each people as m (m.user_id)}
@@ -188,7 +222,7 @@
           <span class="name">{m.user_id === me ? `You (${m.display_name})` : m.display_name}</span>
           <span class="meta">
             {#if m.user_id === me}
-              {projects.filter((p) => p.members.includes(me) || p.lead_id === me).length} projects · {weekOf(m.user_id)} comments this week
+              {live.filter((p) => p.members.includes(me) || p.lead_id === me).length} projects · {weekOf(m.user_id)} comments this week
             {:else}
               {m.active ? `${weekOf(m.user_id)} this week` : "not in the group"}
               {#if unanswered(m.user_id)} · <strong>{unanswered(m.user_id)} to read</strong>{/if}
@@ -290,6 +324,10 @@
   .actions { display: flex; gap: 0.5rem; }
   .mini { font-size: 0.75rem; padding: 0.15rem 0.55rem; }
   .small { font-size: 0.8rem; }
+  .danger { color: var(--danger); }
+  .bin { margin-top: 0.6rem; padding: 0.5rem 0.7rem; border: 1px solid var(--rule); border-radius: var(--radius); font-family: var(--font-ui); }
+  .bin h2 { margin: 0 0 0.3rem; font-size: 0.9rem; }
+  .bin-row { display: flex; flex-wrap: wrap; gap: 0.3rem 0.6rem; align-items: baseline; padding: 0.15rem 0; }
   .old { margin: 1rem 0; font-family: var(--font-ui); }
   .old summary { cursor: pointer; font-size: 0.9rem; color: var(--ink-soft); }
   @media (max-width: 44rem) { .layout { grid-template-columns: 1fr; } .people { position: static; } }

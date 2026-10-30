@@ -44,7 +44,9 @@
       const [th, cs, ed] = await Promise.all([
         loadActionComments(acts.map((a) => a.id)), loadComments(es.map((e) => e.id)), revisionCounts(es.map((e) => e.id)),
       ]);
-      [me, members, projects, groupMilestones, actions, thread, entries, comments, edits] = [id, m, p, ms, acts, th, es, cs, ed];
+      // (actions go with their project when it is deleted, and come back with it)
+      const live = acts.filter((a) => !a.group_project_id || p.some((x) => x.id === a.group_project_id));
+      [me, members, projects, groupMilestones, actions, thread, entries, comments, edits] = [id, m, p, ms, live, th, es, cs, ed];
       // previewing: only their projects, as they see them (you see every project)
       if (preview.as) projects = p.filter((x) => x.members.includes(id) || x.lead_id === id);
       // your own Planning projects have actions too (only the planner's owner has any)
