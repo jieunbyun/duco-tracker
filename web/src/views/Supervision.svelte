@@ -11,6 +11,7 @@
   import type { Project } from "../lib/data";
   import { LIVE_STATUSES } from "../lib/plan";
   import { fmtDay } from "../lib/dates";
+  import MemberTime from "../lib/MemberTime.svelte";
   import { quietly } from "../lib/undo.svelte";
   import Logbook from "../lib/Logbook.svelte";
   import ActionLog from "../lib/ActionLog.svelte";
@@ -83,7 +84,7 @@
   const people = $derived(myself ? [myself, ...others] : others);
   const current = $derived(people.find((m) => m.user_id === selected) ?? myself ?? people[0] ?? null);
   const isMe = $derived(!!current && current.user_id === me);
-  let tab = $state<"projects" | "logbook">("projects");
+  let tab = $state<"projects" | "logbook" | "time">("projects");
 
   const live = $derived(projects.filter((p) => !p.deleted_at));
   const theirProjects = $derived(current ? live.filter((p) => p.members.includes(current.user_id) || p.lead_id === current.user_id) : []);
@@ -281,9 +282,12 @@
         <div class="tabs" role="tablist">
           <button role="tab" aria-selected={tab === "projects"} class:on={tab === "projects"} onclick={() => (tab = "projects")}>Projects ({theirProjects.length})</button>
           <button role="tab" aria-selected={tab === "logbook"} class:on={tab === "logbook"} onclick={() => (tab = "logbook")}>Logbook ({theirActions.filter((a) => !a.is_done).length} open)</button>
+          {#if !isMe}<button role="tab" aria-selected={tab === "time"} class:on={tab === "time"} onclick={() => (tab = "time")}>Time</button>{/if}
         </div>
         {#if tab === "projects"}
           <GroupProjects projects={theirProjects} {milestones} {members} {activity} supervisor newFor={current.user_id} onchanged={load} />
+        {:else if tab === "time" && !isMe}
+          <MemberTime userId={current.user_id} {projects} />
         {:else}
           {#if isMe}<p class="muted small">Write in your <a href="#/logbook">Logbook</a> tab; it's shown here too.</p>{/if}
           <ActionLog actions={theirActions} comments={theirThread} projects={isMe ? projects : theirProjects} planning={isMe ? planningRefs : []}

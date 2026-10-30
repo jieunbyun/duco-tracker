@@ -11,6 +11,10 @@
   import { parseLinks, linkName, planningGroups } from "./group";
   import type { GroupProject, GroupMilestone, Member, PlanningRef } from "./group";
   import { fmtDay } from "./dates";
+  import { fmtHours } from "./data";
+  import type { ActionTimes } from "./actionTime";
+  import type { Minimised } from "./minimised.svelte";
+  import ActionTime from "./ActionTime.svelte";
   import Sortable from "./Sortable.svelte";
 
   type Props = {
@@ -24,15 +28,22 @@
     me: string;
     canWrite: boolean; // the actions are yours
     canComment: boolean;
+    times?: ActionTimes | null; // a member's own time, on their actions on shared projects
+    listed?: string[] | null; // these projects ("g:<id>", "p:<id>") in full: every milestone, whether it has actions yet or not
+    folded?: Minimised | null; // the shared projects kept minimised
     onchanged: () => Promise<void>;
   };
-  let { actions, comments, projects, planning = [], groupMilestones = [], filter, members, me, canWrite, canComment, onchanged }: Props = $props();
+  let { actions, comments, projects, planning = [], groupMilestones = [], filter, members, me, canWrite, canComment, times = null, listed = null, folded = null, onchanged }: Props = $props();
 
   let error = $state("");
   const act = async (f: () => Promise<unknown>) => {
     try { error = ""; await f(); await onchanged(); } catch (e) { error = (e as Error).message; }
   };
   const nameOf = (uid: string) => (uid === me ? "you" : members.find((m) => m.user_id === uid)?.display_name ?? "—");
+  const isFolded = (key: string) => key.startsWith("g:") && !!folded?.has(key.slice(2));
+  async function fold(key: string) {
+    try { error = ""; await folded?.toggle(key.slice(2)); } catch (e) { error = (e as Error).message; }
+  }
   /** Yours to tick off, rename, reorder and delete: only the actions you logged. */
   const own = (a: Action) => canWrite && a.user_id === me;
   const keyOf = (a: Action) => (a.project_id ? `p:${a.project_id}` : a.group_project_id ? `g:${a.group_project_id}` : "");
@@ -44,7 +55,7 @@
   // ---- sections: project › milestone ---------------------------------------------------
   type Section = { project: string; ms: string; label: string; open: Action[]; done: Action[] };
   const sections = $derived.by(() => {
-    const keys = filter ? [filter] : [...new Set(actions.map(keyOf).filter(Boolean))].sort((a, b) => projectName(a).localeCompare(projectName(b)));
+    const keys = listed ?? (filter ? [filter] : [...new Set(actions.map(keyOf).filter(Boolean))].sort((a, b) => projectName(a).localeCompare(projectName(b))));
     const out: Section[] = [];
     for (const key of keys) {
       const mine = actions.filter((a) => keyOf(a) === key);
@@ -54,13 +65,28 @@
         : groupMilestones.filter((m) => m.project_id === key.slice(2) && (!m.done || mine.some((a) => msOf(a) === m.id)));
       for (const m of [...ms, { id: "", title: "No milestone" }]) {
         const here = mine.filter((a) => msOf(a) === m.id || (m.id === "" && !ms.some((x) => x.id === msOf(a))));
-        if (!here.length && (!filter || (m.id === "" && ms.length))) continue; // in the overview, only what has actions
+        if (!here.length && ((!filter && !listed) || (m.id === "" && ms.length))) continue; // in the overview, only what has actions
         out.push({ project: key, ms: m.id, label: m.title, open: here.filter((a) => !a.is_done).sort(byOrder), done: here.filter((a) => a.is_done) });
       }
     }
     return out;
   });
   const threadOf = (a: Action) => comments.filter((c) => c.action_id === a.id);
+  // A milestone's hours, yours alone: those you expect to give it (set in Projects),
+  // and what your actions on it add up to so far.
+  function hoursLine(s: Section): string {
+    const t = times;
+    if (!t || !s.project.startsWith("g:")) return "";
+    const all = [...s.open, ...s.done];
+    const projected = all.reduce((n, a) => n + (t.plans.get(a.id) ?? 0), 0);
+    const logged = t.logs.filter((x) => all.some((a) => a.id === x.action_id)).reduce((n, x) => n + x.hours, 0);
+    const expected = groupMilestones.find((m) => m.id === s.ms)?.my_hours ?? null;
+    return [
+      s.ms ? (expected === null ? "no expected hours" : `${fmtHours(expected)} expected`) : "",
+      projected ? `${fmtHours(projected)} projected` : "",
+      logged ? `${fmtHours(logged)} logged` : "",
+    ].filter(Boolean).join(" · ");
+  }
   /** A shared milestone's lead (a label), if it names one. */
   const leadOf = (s: Section) => (s.project.startsWith("g:") ? groupMilestones.find((m) => m.id === s.ms)?.lead_id ?? null : null);
 
@@ -129,7 +155,8 @@
 
 {#if error}<p class="error">{error}</p>{/if}
 
-{#if !filter && canWrite}
+<!-- with the projects listed, each milestone takes its own actions (you, with Planning projects, can still add to any) -->
+{#if !filter && canWrite && (!listed || planning.length)}
   <form class="anywhere" onsubmit={addAnywhere}>
     <input bind:value={newTitle} placeholder="New action…" aria-label="New action" />
     <select bind:value={newProject} aria-label="Project">
@@ -167,6 +194,7 @@
       {#if own(a)}<button class="x" aria-label={`Delete ${a.title}`} title="Delete this action"
                             onclick={() => confirm(`Delete the action “${a.title}” and its comments?`) && act(() => deleteAction(a.id))}>✕</button>{/if}
     </div>
+    {#if times && a.group_project_id && own(a)}<ActionTime action={a} {times} {onchanged} />{/if}
     {#if threadOf(a).length}
       <ul class="thread">
         {#each threadOf(a) as c (c.id)}
@@ -207,9 +235,18 @@
 {/snippet}
 
 {#each sections as s, i (`${s.project}|${s.ms}`)}
-  {#if !filter && (i === 0 || sections[i - 1].project !== s.project)}<h2 class="proj">{projectName(s.project)}</h2>{/if}
+  {@const small = isFolded(s.project)}
+  {#if (listed || !filter) && (i === 0 || sections[i - 1].project !== s.project)}
+    <h2 class="proj">
+      {#if folded && s.project.startsWith("g:")}
+        <button class="fold" aria-expanded={!small} aria-label={`${small ? "Open" : "Minimise"} “${projectName(s.project)}”`}
+                title={small ? "Open" : "Minimise"} onclick={() => fold(s.project)}>{small ? "▸" : "▾"}</button>
+      {/if}{projectName(s.project)}
+    </h2>
+  {/if}
+  {#if !small}
   <section class="ms">
-    <h3>{s.label} <span class="muted">{s.open.length}</span>{#if leadOf(s)}<span class="lead"> · lead: {nameOf(leadOf(s)!)}</span>{/if}</h3>
+    <h3>{s.label} <span class="muted">{s.open.length}</span>{#if leadOf(s)}<span class="lead"> · lead: {nameOf(leadOf(s)!)}</span>{/if}{#if hoursLine(s)}<span class="lead"> · {hoursLine(s)}</span>{/if}</h3>
     <Sortable items={s.open} row={card} onreorder={reorder(s)} disabled={!canWrite} />
     {#each s.done as a (a.id)}{@render card(a)}{/each}
     {#if canWrite}
@@ -218,8 +255,9 @@
       </form>
     {/if}
   </section>
+  {/if}
 {:else}
-  <p class="muted">{filter ? "No actions on this project yet." : canWrite ? "No open actions. Add one above, or pick a project." : "No actions yet."}</p>
+  <p class="muted">{listed ? "Nothing here: choose another list under Show." : filter ? "No actions on this project yet." : canWrite ? "No open actions. Add one above, or pick a project." : "No actions yet."}</p>
 {/each}
 
 <style>
@@ -227,6 +265,7 @@
   .anywhere input { flex: 1 1 14rem; font-size: 0.88rem; }
   .anywhere select { width: auto; font-size: 0.85rem; }
   .proj { font-size: 1.05rem; margin: 1.2rem 0 0.2rem; }
+  .fold { background: none; border: none; padding: 0 0.1rem; color: var(--ink-soft); font-size: 0.85rem; cursor: pointer; }
   .ms { margin: 0 0 0.9rem; font-family: var(--font-ui); }
   .ms h3 { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 0.6rem 0 0.25rem; }
   .ms h3 .muted { font-weight: 400; }

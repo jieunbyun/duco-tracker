@@ -12,6 +12,7 @@ const TABLES = [
   "pw_asset", "asset_contributor", "asset_publication", "asset_link",
   "group_member", "group_project", "group_project_member", "group_milestone",
   "logbook_entry", "logbook_revision", "logbook_comment",
+  "action_plan", "action_time",
 ];
 const PAGE = 1000;
 

@@ -6,16 +6,20 @@
   // readable at the bottom.
   import {
     loadMembers, loadGroupProjects, loadEntries, loadComments, revisionCounts, logbookMarkdown, download, myId, loadMilestones,
-    planningGroups,
+    planningGroups, projectsToShow,
   } from "../lib/group";
   import type { Member, GroupProject, GroupMilestone, Entry, Comment, PlanningRef } from "../lib/group";
   import { loadProjects, loadTaxonomy } from "../lib/data";
   import { LIVE_STATUSES } from "../lib/plan";
   import Logbook from "../lib/Logbook.svelte";
   import ActionLog from "../lib/ActionLog.svelte";
+  import ProjectShow from "../lib/ProjectShow.svelte";
+  import { Minimised } from "../lib/minimised.svelte";
   import ActionHistory from "../lib/ActionHistory.svelte";
   import { loadMyActions, loadSharedActions, loadMemberActions, loadDoneActions, loadActionComments, actionsMarkdown } from "../lib/actions";
   import type { Action, ActionComment } from "../lib/actions";
+  import { loadActionTimes } from "../lib/actionTime";
+  import type { ActionTimes } from "../lib/actionTime";
   import { preview } from "../lib/preview.svelte";
 
   let me = $state("");
@@ -30,7 +34,10 @@
   let edits = $state(new Map<string, number>());
   let loading = $state(true);
   let error = $state("");
-  let filter = $state(""); // "g:<id>" a shared project, "p:<id>" a Planning one, or "" for all
+  let show = $state(""); // what to list (as in Projects), or "p:<id>" a Planning project
+  const folded = new Minimised(() => !preview.as);
+  folded.load();
+  let times = $state<ActionTimes | null>(null);
 
   async function load() {
     try {
@@ -41,9 +48,13 @@
         preview.as ? loadMemberActions(id) : Promise.all([loadMyActions(), loadSharedActions()]).then(([a, b]) => [...a, ...b]),
         loadEntries(id).catch(() => [] as Entry[]),
       ]);
-      const [th, cs, ed] = await Promise.all([
+      // a member's own time on their actions: yours to log, and not for anyone else to read
+      const logsTime = !preview.as && m.find((x) => x.user_id === id)?.role !== "supervisor";
+      const [th, cs, ed, tm] = await Promise.all([
         loadActionComments(acts.map((a) => a.id)), loadComments(es.map((e) => e.id)), revisionCounts(es.map((e) => e.id)),
+        logsTime ? loadActionTimes(acts.map((a) => a.id)) : null,
       ]);
+      times = tm;
       // (actions go with their project when it is deleted, and come back with it)
       const live = acts.filter((a) => !a.group_project_id || p.some((x) => x.id === a.group_project_id));
       [me, members, projects, groupMilestones, actions, thread, entries, comments, edits] = [id, m, p, ms, live, th, es, cs, ed];
@@ -81,6 +92,20 @@
     ...projects.filter((p) => p.lead_id === me || p.members.includes(me)),
     ...projects.filter((p) => !(p.lead_id === me || p.members.includes(me))),
   ]);
+  // one project picked: "g:<id>" a shared one, "p:<id>" a Planning one; otherwise ""
+  const filter = $derived(show.startsWith("p:") ? show : projects.some((p) => p.id === show) ? `g:${show}` : "");
+  // Each project in full, with all its milestones. A member's list is their own; you
+  // see every project, so yours are those you are on or have actions on.
+  const supervising = $derived(!preview.as && members.find((m) => m.user_id === me)?.role === "supervisor");
+  const listed = $derived.by(() => {
+    if (filter) return [filter];
+    const pool = supervising
+      ? ordered.filter((p) => p.members.includes(me) || actions.some((a) => a.group_project_id === p.id))
+      : ordered;
+    const shared = projectsToShow(pool, show).map((p) => `g:${p.id}`);
+    const own = show === "done" ? [] : planning.filter((p) => actions.some((a) => a.project_id === p.id)).map((p) => `p:${p.id}`);
+    return [...shared, ...own];
+  });
   const oldShown = $derived(
     !filter ? entries
       : filter.startsWith("p:") ? entries.filter((e) => e.planning_project_id === filter.slice(2))
@@ -115,18 +140,14 @@
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="muted">Loading…</p>{:else}
     <div class="bar">
-      <label class="small">Project
-        <select bind:value={filter}>
-          <option value="">all</option>
-          {#if ordered.length}<optgroup label="Shared projects">{#each ordered as p (p.id)}<option value={`g:${p.id}`}>{p.title}</option>{/each}</optgroup>{/if}
-          {#each planningGroups(planning) as g (g.label)}<optgroup label={g.label}>{#each g.items as p (p.id)}<option value={`p:${p.id}`}>{p.name}</option>{/each}</optgroup>{/each}
-        </select>
-      </label>
+      <ProjectShow bind:value={show} projects={ordered}>
+        {#each planningGroups(planning) as g (g.label)}<optgroup label={g.label}>{#each g.items as p (p.id)}<option value={`p:${p.id}`}>{p.name}</option>{/each}</optgroup>{/each}
+      </ProjectShow>
       <span class="spacer"></span>
       <button class="mini" onclick={exportMine} disabled={!actions.length && !entries.length} title="As a Markdown file, to keep on OneDrive">Export logbook</button>
     </div>
     <ActionLog {actions} comments={thread} projects={ordered} {planning} {groupMilestones} {filter} {members} {me}
-               canWrite={!preview.as} canComment={!preview.as} onchanged={load} />
+               canWrite={!preview.as} canComment={!preview.as} {times} {listed} {folded} onchanged={load} />
     <ActionHistory load={() => (preview.as ? loadMemberActions(preview.as.user_id) : loadDoneActions())}
                    projects={ordered} {planning} {groupMilestones} {members} {me} {filter} />
     {#if oldShown.length}
@@ -141,10 +162,8 @@
 <style>
   .intro { max-width: 46rem; font-size: 0.9rem; }
   .bar { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.6rem 0; font-family: var(--font-ui); }
-  .bar select { width: auto; }
   .spacer { flex: 1; }
   .mini { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
-  .small { font-size: 0.85rem; }
   .old { margin: 1rem 0; font-family: var(--font-ui); }
   .old summary { cursor: pointer; font-size: 0.9rem; color: var(--ink-soft); }
 </style>

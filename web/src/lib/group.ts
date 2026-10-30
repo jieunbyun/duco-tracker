@@ -133,6 +133,13 @@ export async function saveGroupProject(id: string | null, fields: Partial<Omit<G
   const row = await check<{ id: string }>(supabase.from("group_project").insert(fields).select("id").single());
   return row!.id;
 }
+/** The projects a Show list asks for: "" the current ones, "done", "all", or one project's id. */
+export function projectsToShow(projects: GroupProject[], show: string): GroupProject[] {
+  if (show === "done") return projects.filter((p) => p.status === "done");
+  if (show === "all") return projects;
+  const one = projects.filter((p) => p.id === show);
+  return one.length ? one : projects.filter((p) => p.status !== "done");
+}
 /** The projects you keep minimised on your list — none until 0046 is run. */
 export async function loadMinimised(): Promise<Set<string>> {
   const { data, error } = await supabase.from("project_minimised").select("project_id");

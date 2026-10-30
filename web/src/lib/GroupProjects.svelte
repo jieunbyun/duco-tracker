@@ -1,13 +1,15 @@
 <script lang="ts">
   import {
     saveGroupProject, startGroupProject, deleteGroupProject, binGroupProject, addProjectMember, removeProjectMember,
-    loadMinimised, setMinimised,
+    projectsToShow,
   } from "./group";
   import type { GroupProject, GroupMilestone, Member } from "./group";
   import { fromMonth, fmtMonth } from "./pathways";
   import { today } from "./dates";
   import FolderLink from "./FolderLink.svelte";
   import GroupMilestones from "./GroupMilestones.svelte";
+  import ProjectShow from "./ProjectShow.svelte";
+  import { Minimised } from "./minimised.svelte";
 
   type Props = {
     projects: GroupProject[];
@@ -29,37 +31,16 @@
   const nameOf = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "—";
   const assignable = $derived(members.filter((m) => m.active));
 
-  // ---- what to show: the current projects, the done ones, all, or just one ------------
+  // ---- what to show, and what you keep minimised ---------------------------------------
   let show = $state("");
-  const doneOnes = $derived(projects.filter((p) => p.status === "done"));
-  const shown = $derived(
-    show === "done" ? doneOnes
-      : show === "all" ? projects
-      : projects.some((p) => p.id === show) ? projects.filter((p) => p.id === show)
-      : projects.filter((p) => p.status !== "done"),
-  );
-
-  // ---- minimised projects: each person's own, kept with their account (0046) ----------
-  // (previewing, it only folds them here: what a member keeps minimised is theirs)
-  let minimised = $state(new Set<string>());
-  $effect(() => {
-    if (!readonly) loadMinimised().then((s) => (minimised = s));
-  });
+  const shown = $derived(projectsToShow(projects, show));
+  const folded = new Minimised(() => !readonly);
+  folded.load();
   async function toggle(p: GroupProject) {
-    const on = !minimised.has(p.id);
-    const set = (v: boolean) => {
-      const s = new Set(minimised);
-      if (v) s.add(p.id);
-      else s.delete(p.id);
-      minimised = s;
-    };
-    set(on);
-    if (readonly) return;
     try {
       error = "";
-      await setMinimised(p.id, on);
+      await folded.toggle(p.id);
     } catch (e) {
-      set(!on);
       error = (e as Error).message;
     }
   }
@@ -101,16 +82,7 @@
 {#if error}<p class="error">{error}</p>{/if}
 <div class="bar">
   {#if !readonly && !draft}<button onclick={() => edit(null)}>+ Project</button>{/if}
-  {#if projects.length > 1 || doneOnes.length}
-    <label class="small">Show
-      <select bind:value={show}>
-        <option value="">current projects</option>
-        <option value="done">done ({doneOnes.length})</option>
-        <option value="all">all</option>
-        <optgroup label="Per project">{#each projects as p (p.id)}<option value={p.id}>{p.title}</option>{/each}</optgroup>
-      </select>
-    </label>
-  {/if}
+  {#if projects.length > 1 || projects.some((p) => p.status === "done")}<ProjectShow bind:value={show} {projects} />{/if}
 </div>
 
 {#snippet editor()}
@@ -135,7 +107,7 @@
 
 {#each shown as p (p.id)}
   {@const ms = milestones.filter((m) => m.project_id === p.id)}
-  {@const small = minimised.has(p.id)}
+  {@const small = folded.has(p.id)}
   <section class="gp" class:quiet={p.status !== "active"}>
     {#if draft?.id === p.id}
       {@render editor()}
@@ -193,7 +165,6 @@
 
 <style>
   .bar { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.7rem; font-family: var(--font-ui); }
-  .bar select { width: auto; }
   .fold { background: none; border: none; padding: 0 0.1rem; color: var(--ink-soft); font-size: 0.85rem; cursor: pointer; }
   .gp { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem 0.9rem; margin-bottom: 0.8rem; font-family: var(--font-ui); }
   .gp.quiet { opacity: 0.7; }
