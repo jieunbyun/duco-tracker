@@ -793,6 +793,17 @@
     return out;
   }
 
+  // clicking an idea's text, or a note's, edits it; a link in it still opens, and
+  // text being selected to copy stays selected
+  function clickEdit(ev: MouseEvent, edit: () => void) {
+    if ((ev.target as HTMLElement).closest("a") || getSelection()?.toString()) return;
+    edit();
+  }
+  /** An editor opens ready to type, the cursor after what is there. */
+  function ready(el: HTMLInputElement | HTMLTextAreaElement) {
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }
   function editIdea(t: Todo) {
     ideaEditing = t.id;
     ideaError = "";
@@ -1391,10 +1402,15 @@
 
   <!-- ================= to think about ================= -->
   {#snippet linked(text: string)}{#each linkParts(text) as part, i (i)}{#if part.url}<a class="ulink" href={part.url} target="_blank" rel="noopener" title={part.url}>link</a>{:else}{part.text}{/if}{/each}{/snippet}
+  {#snippet editable(cls: string, text: string, edit: () => void)}
+    <span class="editable {cls}" role="button" tabindex="0" title="Click to edit"
+          onclick={(ev) => clickEdit(ev, edit)}
+          onkeydown={(ev) => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); edit(); } }}>{@render linked(text)}</span>
+  {/snippet}
   {#snippet noteBox(t: Todo)}
     <div class="note-box">
       <textarea rows="3" bind:value={noteText} placeholder="Develop it — notes, options, who to ask…" aria-label="Note"
-                onkeydown={(ev) => noteKeys(ev, t)}></textarea>
+                use:ready onkeydown={(ev) => noteKeys(ev, t)}></textarea>
       {#if noteError}<p class="error">Not saved: {noteError}</p>{/if}
       <div class="t-acts">
         <button class="mini primary" onclick={() => saveNote(t)} disabled={!noteText.trim()}>Save</button>
@@ -1414,7 +1430,7 @@
         <li class="idea" class:dragging={dragId === t.id} data-id={t.id}>
           {#if ideaEditing === t.id}
             <div class="idea-edit">
-              <input bind:value={ideaDraft.title} aria-label="Idea"
+              <input bind:value={ideaDraft.title} aria-label="Idea" use:ready
                      onkeydown={(ev) => { if (ev.key === "Enter") saveIdea(t); else ideaKeys(ev, t); }} />
               {#if t.note}
                 <textarea rows="3" bind:value={ideaDraft.note} aria-label="Note" onkeydown={(ev) => ideaKeys(ev, t)}></textarea>
@@ -1430,8 +1446,8 @@
                     onpointerdown={(ev) => startDrag(ev, t)}
                     onkeydown={(ev) => keyMove(ev, t)}>⠿</button>
             <div class="t-main">
-              <span class="idea-title">{@render linked(t.title)}</span>
-              {#if t.note}<span class="idea-note">{@render linked(t.note)}</span>{/if}
+              {@render editable("idea-title", t.title, () => editIdea(t))}
+              {#if t.note}{@render editable("idea-note", t.note, () => editIdea(t))}{/if}
               <span class="t-meta muted">jotted {fmtDay(t.due_on)}</span>
               {#if notesOf(t).length}
                 <ul class="inotes">
@@ -1440,10 +1456,9 @@
                       {#if noteEditing === n.id}
                         {@render noteBox(t)}
                       {:else}
-                        <span class="idea-note">{@render linked(n.body)}</span>
+                        {@render editable("idea-note", n.body, () => startNote(t, n))}
                         <span class="t-meta muted">{fmtDay(n.created_at.slice(0, 10))}</span>
-                        <button class="link" onclick={() => startNote(t, n)}>edit</button>
-                        <button class="link danger" aria-label="Delete note" title="Delete note" onclick={() => deleteNote(t, n)}>✕</button>
+                        <button class="link" aria-label="Delete note" title="Delete note" onclick={() => deleteNote(t, n)}>✕</button>
                       {/if}
                     </li>
                   {/each}
@@ -1453,7 +1468,6 @@
             </div>
             <div class="t-acts">
               <button class="mini" title="Add a note to develop it" onclick={() => startNote(t)}>+ Note</button>
-              <button class="mini" title="Edit the idea" onclick={() => editIdea(t)}>Edit</button>
               <button class="mini" title="Make it a to-do for this week" onclick={() => ideaToTodo(t)}>→ To-do</button>
               <button class="mini" title="Thought through — take it off the list" onclick={() => ideaDone(t)}>Done</button>
               <button class="mini danger" aria-label="Delete" title="Delete" onclick={() => deleteIdea(t)}>✕</button>
@@ -1962,10 +1976,10 @@
   .idea-note { font-size: 0.82rem; white-space: pre-line; color: var(--ink); }
   .inotes { list-style: none; margin: 0.15rem 0 0; padding: 0 0 0 0.6rem; border-left: 2px solid var(--rule); display: grid; gap: 0.2rem; }
   .inotes li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.2rem 0.45rem; }
-  .inotes .link { background: none; border: none; padding: 0; font-size: 0.75rem; color: var(--ink-soft); text-decoration: underline; cursor: pointer; }
-  .inotes .link.danger { color: var(--danger); text-decoration: none; }
+  .inotes .link { background: none; border: none; padding: 0; font-size: 0.75rem; color: var(--danger); cursor: pointer; }
   .note-box { display: grid; gap: 0.3rem; width: 100%; max-width: 46rem; margin-top: 0.2rem; }
   .idea-title { font-size: 0.92rem; overflow-wrap: anywhere; }
+  .editable { justify-self: start; cursor: text; }
   .ulink { text-decoration: underline; color: var(--accent); }
   .idea-edit { grid-column: 1 / -1; display: grid; gap: 0.4rem; max-width: 46rem; }
   .mini.danger { color: var(--danger); }
