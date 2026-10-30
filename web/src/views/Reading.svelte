@@ -9,7 +9,6 @@
   import { fmtDay, today } from "../lib/dates";
   import ReadingForm from "../lib/ReadingForm.svelte";
 
-  const FREE_STORAGE = 1024 * 1024 * 1024; // Supabase's free plan: 1 GB of files
 
   let items = $state<Reading[]>([]);
   let projects = $state<Project[]>([]);
@@ -19,6 +18,7 @@
   let open = $state<string | null>(null); // the item shown in full
   let editing = $state(false);
   let filter = $state("all");
+  let category = $state(""); // a category, "-" for readings with none, or "" for all
   let search = $state("");
   let view = $state<"items" | "quotes">("items"); // the reading list, or every quote across it
 
@@ -39,12 +39,16 @@
     const q = search.trim().toLowerCase();
     return items.filter((r) =>
       (filter === "all" || r.status === filter) &&
-      (!q || [r.title, r.authors, r.venue, r.doi].some((v) => v?.toLowerCase().includes(q))));
+      (!category || (r.category ?? "-") === category) &&
+      (!q || [r.title, r.authors, r.venue, r.doi, r.category].some((v) => v?.toLowerCase().includes(q))));
   });
+  const categories = $derived(
+    [...new Set(items.map((r) => r.category).filter((c): c is string => !!c))].sort((a, b) => a.localeCompare(b)),
+  );
   const groups = $derived(
     STATUSES.map((s) => ({ ...s, rows: shown.filter((r) => r.status === s.key) })).filter((g) => g.rows.length),
   );
-  const storageUsed = $derived(items.reduce((s, r) => s + (r.pdf_size ?? 0), 0));
+  const storedCopies = $derived(items.filter((r) => r.pdf_path).length);
   /** "Project › Milestone", or just the project. */
   function linkOf(r: Reading): string {
     const p = r.project_id ? projects.find((x) => x.id === r.project_id) : null;
@@ -168,18 +172,19 @@
     view = "items";
     filter = "all";
     search = "";
+    category = "";
     const r = items.find((x) => x.id === readingId);
     if (r && open !== r.id) toggle(r);
   }
 
-  // ---- PDF ---------------------------------------------------------------------------
-  // PDFs live on OneDrive: a reading keeps the link. (Copies stored here before
+  // ---- its link ------------------------------------------------------------------------
+  // A reading keeps a link, to OneDrive or a web page. (Copies stored here before
   // still open, and can be removed once moved.)
   let pdfBusy = $state(false);
   let pdfDraft = $state<Record<string, string>>({});
   async function savePdfUrl(r: Reading, url: string | null) {
     const clean = url?.trim() || null;
-    if (clean && !/^https?:\/\//i.test(clean)) return void (error = "Paste the PDF's link from OneDrive (it starts with https://).");
+    if (clean && !/^https?:\/\//i.test(clean)) return void (error = "Paste a link to OneDrive or a web page (it starts with https://).");
     pdfBusy = true;
     try {
       await setPdfUrl(r, clean);
@@ -204,7 +209,7 @@
     }
   }
   async function dropPdf(r: Reading) {
-    if (!confirm(`Remove the PDF of “${r.title}”?`)) return;
+    if (!confirm(`Remove the copy stored for “${r.title}”? Open it and save it to OneDrive first if you want to keep it.`)) return;
     pdfBusy = true;
     try {
       await removePdf(r);
@@ -245,18 +250,25 @@
           <button class:on={filter === s.key} aria-pressed={filter === s.key} onclick={() => (filter = s.key)}>{s.label}</button>
         {/each}
       </div>
+      {#if categories.length}
+        <select class="category" bind:value={category} aria-label="Category">
+          <option value="">All categories</option>
+          {#each categories as c (c)}<option value={c}>{c}</option>{/each}
+          <option value="-">No category</option>
+        </select>
+      {/if}
     {/if}
     <input class="search" type="search" bind:value={search} aria-label="Search"
-           placeholder={view === "quotes" ? "Search quotes, notes, titles, authors" : "Search title, authors, journal, DOI"} />
+           placeholder={view === "quotes" ? "Search quotes, notes, titles, authors" : "Search title, authors, journal, DOI, category"} />
   </div>
-  {#if storageUsed}
-    <p class="muted small">PDFs: {fmtSize(storageUsed)} of 1 GB free storage ({Math.round((100 * storageUsed) / FREE_STORAGE)}%)</p>
+  {#if storedCopies}
+    <p class="muted small">{storedCopies} old {storedCopies === 1 ? "copy is" : "copies are"} still stored here: open {storedCopies === 1 ? "that reading" : "those readings"} to remove {storedCopies === 1 ? "it" : "them"}.</p>
   {/if}
 
   {#if error}<p class="error">{error}</p>{/if}
 
   {#if adding}
-    <div class="card"><ReadingForm reading={null} {projects} onsaved={saved} oncancel={() => (adding = false)} /></div>
+    <div class="card"><ReadingForm reading={null} {projects} {categories} onsaved={saved} oncancel={() => (adding = false)} /></div>
   {/if}
 
   {#if view === "quotes"}
@@ -305,9 +317,9 @@
               <span class="by muted">{byline(r)}</span>
             </span>
             <span class="meta muted">
-              {kindLabel(r.kind)}{period(r) ? ` · ${period(r)}` : ""}
+              {kindLabel(r.kind)}{r.category ? ` · ${r.category}` : ""}{period(r) ? ` · ${period(r)}` : ""}
               {#if noteCount(r)} · {noteCount(r)} {noteCount(r) === 1 ? "note" : "notes"}{/if}
-              {#if r.pdf_url || r.pdf_path} · PDF{/if}
+              {#if r.pdf_url} · link{/if}
               {#if linkOf(r)} · {linkOf(r)}{/if}
             </span>
           </button>
@@ -315,7 +327,7 @@
           {#if open === r.id}
             <div class="body">
               {#if editing}
-                <ReadingForm reading={r} {projects} onsaved={saved} ondeleted={async () => { open = null; await load(); }}
+                <ReadingForm reading={r} {projects} {categories} onsaved={saved} ondeleted={async () => { open = null; await load(); }}
                              oncancel={() => (editing = false)} />
               {:else}
                 <div class="links">
@@ -334,24 +346,23 @@
                 </div>
 
                 <div class="pdf">
-                  <h3>PDF</h3>
+                  <h3>Link</h3>
                   {#if r.pdf_url}
-                    <a class="mini open" href={r.pdf_url} target="_blank" rel="noopener noreferrer">Open PDF ↗</a>
+                    <a class="mini open" href={r.pdf_url} target="_blank" rel="noopener noreferrer">Open ↗</a>
                     <button class="mini" onclick={() => (pdfDraft[r.id] = r.pdf_url ?? "")}>Change link</button>
                     <button class="mini danger" onclick={() => savePdfUrl(r, null)} disabled={pdfBusy}>Remove link</button>
                   {/if}
                   {#if !r.pdf_url || pdfDraft[r.id]}
                     <form class="pdf-link" onsubmit={(ev) => { ev.preventDefault(); savePdfUrl(r, pdfDraft[r.id] ?? ""); }}>
-                      <input type="url" bind:value={pdfDraft[r.id]} placeholder="Paste the PDF's link from OneDrive" aria-label="PDF link" />
+                      <input type="url" bind:value={pdfDraft[r.id]} placeholder="Paste a link to OneDrive or a web page" aria-label="Link" />
                       <button class="mini" type="submit" disabled={pdfBusy || !(pdfDraft[r.id] ?? "").trim()}>Save link</button>
                     </form>
                   {/if}
                   {#if r.pdf_path}
                     <span class="stored muted small">
-                      A copy is stored here ({fmtSize(r.pdf_size)}):
+                      An old copy is stored here ({fmtSize(r.pdf_size)}):
                       <button class="mini" onclick={() => openPdf(r)}>Open it</button>
-                      {#if r.pdf_url}<button class="mini danger" onclick={() => dropPdf(r)}>Remove the stored copy</button>
-                      {:else}— to move it, open it, save it to OneDrive, and paste its link above.{/if}
+                      <button class="mini danger" onclick={() => dropPdf(r)}>Remove it</button>
                     </span>
                   {/if}
                 </div>
@@ -405,6 +416,7 @@
   .filters button { font-size: 0.82rem; padding: 0.3rem 0.65rem; }
   .filters button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
   .search { width: auto; flex: 1; min-width: 12rem; max-width: 24rem; }
+  .category { width: auto; font-size: 0.85rem; }
   .small { font-size: 0.8rem; font-family: var(--font-ui); }
   .card { background: var(--panel); border-radius: var(--radius); padding: 1rem; margin-bottom: 1rem; }
   .reading h2 { margin-top: 1.6rem; font-size: 1.1rem; }

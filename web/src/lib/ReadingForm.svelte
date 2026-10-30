@@ -9,11 +9,12 @@
   type Props = {
     reading: Reading | null; // null = new
     projects: Project[];
+    categories?: string[]; // those in use, to pick from
     onsaved: (id: string) => void;
     ondeleted?: () => void;
     oncancel: () => void;
   };
-  let { reading, projects, onsaved, ondeleted, oncancel }: Props = $props();
+  let { reading, projects, categories = [], onsaved, ondeleted, oncancel }: Props = $props();
 
   const r0 = untrack(() => reading);
   let f = $state({
@@ -29,6 +30,7 @@
     doi: r0?.doi ?? "",
     url: r0?.url ?? "",
     citation: r0?.citation ?? "",
+    category: r0?.category ?? "",
     status: r0?.status ?? "reading",
     started_on: r0?.started_on ?? (r0 ? "" : today()),
     finished_on: r0?.finished_on ?? "",
@@ -86,6 +88,8 @@
   }
 
   const blank = (v: string) => v.trim() || null;
+  /** A category as already written, however this one was typed: "bayesian" joins "Bayesian". */
+  const sameCategory = (v: string) => categories.find((c) => c.toLowerCase() === v.toLowerCase()) ?? v;
 
   async function save(event: SubmitEvent) {
     event.preventDefault();
@@ -101,6 +105,8 @@
         pages: blank(f.pages), doi: blank(f.doi), url: blank(f.url), citation: blank(f.citation),
         status: f.status, started_on: f.started_on || null, finished_on: f.finished_on || null,
         project_id: f.project_id || null,
+        // only sent when there is one to set or clear, so saving works before 0050 is run
+        ...(f.category.trim() || r0?.category ? { category: blank(sameCategory(f.category.trim())) } : {}),
         // only sent when there is one to set or clear, so saving works before 0036 is run
         ...(f.milestone_id || r0?.milestone_id ? { milestone_id: (f.project_id && f.milestone_id) || null } : {}),
       };
@@ -113,7 +119,7 @@
   }
 
   async function remove() {
-    if (!r0 || !confirm(`Delete “${r0.title}”, its notes${r0.pdf_path ? " and its PDF" : ""}?`)) return;
+    if (!r0 || !confirm(`Delete “${r0.title}” and its notes?`)) return;
     busy = true;
     try {
       await deleteReading(r0);
@@ -145,7 +151,11 @@
     <label>Issue <input bind:value={f.issue} /></label>
   {/if}
   <label>Pages <input bind:value={f.pages} placeholder="e.g. 436-444" /></label>
-  <label class="span2">Link <input type="url" bind:value={f.url} placeholder="https://…" /></label>
+  <label class="span2">Web address (shown in the citation) <input type="url" bind:value={f.url} placeholder="https://…" /></label>
+  <label>Category
+    <input bind:value={f.category} list="reading-categories" placeholder="Your own, or pick one" />
+    <datalist id="reading-categories">{#each categories as c (c)}<option value={c}></option>{/each}</datalist>
+  </label>
 
   <label>Status
     <select bind:value={f.status} onchange={onStatus}>{#each STATUSES as s (s.key)}<option value={s.key}>{s.label}</option>{/each}</select>

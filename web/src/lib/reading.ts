@@ -1,5 +1,6 @@
-// Reading: items (articles, books, …), dated notes, citations, and PDFs kept
-// in the private "reading-pdfs" storage bucket (each user's own folder).
+// Reading: items (articles, books, …), dated notes, citations, and a link to each
+// on OneDrive or a web page. Nothing is uploaded: copies stored here in the past,
+// in the private "reading-pdfs" bucket, can only be opened and removed.
 import { supabase } from "./supabase";
 import { check } from "./data";
 
@@ -31,6 +32,7 @@ export type Reading = {
   doi: string | null;
   url: string | null;
   citation: string | null;
+  category?: string | null; // your own classification (0050)
   status: string;
   started_on: string | null;
   finished_on: string | null;
@@ -38,7 +40,7 @@ export type Reading = {
   milestone_id?: string | null; // one of that project's milestones (0036)
   pdf_path: string | null; // a copy stored here (before PDFs moved to OneDrive)
   pdf_size: number | null;
-  pdf_url?: string | null; // the PDF on OneDrive
+  pdf_url?: string | null; // its link: OneDrive or a web page (not in citations, as url is)
   created_at: string;
   reading_note?: { count: number }[];
 };
@@ -100,8 +102,8 @@ export function quoteText(n: Note, r: Pick<Reading, "title" | "authors" | "year"
   return `“${n.quote!.trim()}” (${shortCite(r, n.page)})` + (n.body?.trim() ? `\n— ${n.body.trim()}` : "");
 }
 
-// ---- PDFs ----------------------------------------------------------------------
-/** The PDF lives on OneDrive; the reading keeps its link. */
+// ---- links, and copies stored here in the past ---------------------------------
+/** The reading's link, to OneDrive or a web page. */
 export async function setPdfUrl(r: Reading, url: string | null): Promise<void> {
   await saveReading(r.id, { pdf_url: url });
 }
