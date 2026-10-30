@@ -38,7 +38,7 @@
       idea or its notes shows as a short underlined “link”. Ideas are listed oldest first; drag the ⠿ handle (or
       press ↑ ↓ on it) to rearrange them. Develop one with <em>+ Note</em> — as many notes as you like, each dated,
       listed under it. Click an idea or a note to edit it. Turn an idea into a to-do, mark it done once thought
-      through, or delete it.
+      through, cancel it (it stays on the list, struck through, until you restore or delete it), or delete it.
       <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
       more days; mark them must-do or flexible. Once a to-do is on a day it shows on the calendar only, and the list

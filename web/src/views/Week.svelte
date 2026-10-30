@@ -687,8 +687,9 @@
 
   // ---- "To think about": ideas jotted down as they come ------------------------------------
   // Not tied to a week and never counted as planned; listed until done, deleted,
-  // or turned into a to-do for the week.
+  // or turned into a to-do for the week. A cancelled one stays, struck through.
   let ideas = $state<Todo[]>([]);
+  const openIdeas = $derived(ideas.filter((t) => !t.is_cancelled).length);
   let ideaText = $state("");
   let ideaEditing = $state<string | null>(null);
   let ideaDraft = $state({ title: "", note: "" }); // note: an idea's one note from before 0044
@@ -1420,14 +1421,14 @@
     </div>
   {/snippet}
   <div class="group ideas">
-    <h3>To think about {#if ideas.length}<span class="muted small">{ideas.length}</span>{/if}</h3>
+    <h3>To think about {#if openIdeas}<span class="muted small">{openIdeas}</span>{/if}</h3>
     <form class="idea-add" onsubmit={addIdea}>
       <input bind:value={ideaText} placeholder="Jot down a thought — paste a web address and it shows as a short “link”" aria-label="New idea" />
       <button type="submit" disabled={!ideaText.trim()}>Add</button>
     </form>
     <ul class="todos">
       {#each shownIdeas as t (t.id)}
-        <li class="idea" class:dragging={dragId === t.id} data-id={t.id}>
+        <li class="idea" class:dragging={dragId === t.id} class:cancelled={t.is_cancelled} data-id={t.id}>
           {#if ideaEditing === t.id}
             <div class="idea-edit">
               <input bind:value={ideaDraft.title} aria-label="Idea" use:ready
@@ -1467,10 +1468,17 @@
               {#if noteFor === t.id}{@render noteBox(t)}{/if}
             </div>
             <div class="t-acts">
-              <button class="mini" title="Add a note to develop it" onclick={() => startNote(t)}>+ Note</button>
-              <button class="mini" title="Make it a to-do for this week" onclick={() => ideaToTodo(t)}>→ To-do</button>
-              <button class="mini" title="Thought through — take it off the list" onclick={() => ideaDone(t)}>Done</button>
-              <button class="mini danger" aria-label="Delete" title="Delete" onclick={() => deleteIdea(t)}>✕</button>
+              {#if t.is_cancelled}
+                <span class="muted small">cancelled</span>
+                <button class="mini" onclick={() => restore(t)}>Restore</button>
+                <button class="mini danger" title="Delete for good" onclick={() => deleteIdea(t)}>Delete</button>
+              {:else}
+                <button class="mini" title="Add a note to develop it" onclick={() => startNote(t)}>+ Note</button>
+                <button class="mini" title="Make it a to-do for this week" onclick={() => ideaToTodo(t)}>→ To-do</button>
+                <button class="mini" title="Thought through — take it off the list" onclick={() => ideaDone(t)}>Done</button>
+                <button class="mini" title="Cancel — stays here, struck through" onclick={() => cancelTodo(t)}>Cancel</button>
+                <button class="mini danger" aria-label="Delete" title="Delete" onclick={() => deleteIdea(t)}>✕</button>
+              {/if}
             </div>
           {/if}
         </li>
@@ -1980,6 +1988,7 @@
   .note-box { display: grid; gap: 0.3rem; width: 100%; max-width: 46rem; margin-top: 0.2rem; }
   .idea-title { font-size: 0.92rem; overflow-wrap: anywhere; }
   .editable { justify-self: start; cursor: text; }
+  .idea.cancelled .idea-title { text-decoration: line-through; color: var(--ink-soft); }
   .ulink { text-decoration: underline; color: var(--accent); }
   .idea-edit { grid-column: 1 / -1; display: grid; gap: 0.4rem; max-width: 46rem; }
   .mini.danger { color: var(--danger); }
