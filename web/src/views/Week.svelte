@@ -22,7 +22,7 @@
   import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
 
   const SHOW_LOGGED = "week.showLogged";
-  const MS_PICKS = "week.msPicks"; // + From milestones as you left it for Planning (this browser tab)
+  const MS_PICKS = "week.msPicks"; // + From milestones as you last left it (this browser)
   const LAST_CATEGORY = "log.category";
 
   // ---- week ------------------------------------------------------------------
@@ -112,7 +112,7 @@
       error = "";
       if (reopenMs) {
         reopenMs = false;
-        openMilestones(true);
+        openMilestones();
       }
     } catch (e) {
       if (id === request) error = (e as Error).message;
@@ -877,15 +877,27 @@
   // then only by you — ticking a box must not fold its section
   let msOpen = $state<Record<string, boolean>>({});
 
-  /** `kept`: back from Planning, with the ticks, hours and musts you left (hours you hadn't changed are worked out again). */
-  async function openMilestones(kept = false) {
+  // What you tick, type and choose is kept (in this browser) until you add them, so the
+  // window opens again as you left it for the same week — after closing it, a reload, or a
+  // trip to Planning. Hours you hadn't changed are worked out again.
+  type MsKept = { week: string; rows: { id: string; pick: boolean; must: boolean; hours?: number | null }[] };
+  let msWeek = "";
+  $effect(() => {
+    if (msLoading || !msRows.length) return;
+    const kept: MsKept = { week: msWeek, rows: msRows.map((r) => ({
+      id: r.m.id, pick: r.pick, must: r.must, hours: r.hours === r.info.suggested ? undefined : r.hours,
+    })) };
+    try { localStorage.setItem(MS_PICKS, JSON.stringify(kept)); } catch {}
+  });
+  async function openMilestones() {
     panel = { kind: "milestones" };
     msLoading = true;
     msRows = [];
-    let left: { id: string; pick: boolean; must: boolean; hours?: number | null }[] = [];
+    msWeek = start;
+    let left: MsKept["rows"] = [];
     try {
-      if (kept) left = JSON.parse(sessionStorage.getItem(MS_PICKS) ?? "[]");
-      sessionStorage.removeItem(MS_PICKS);
+      const kept = JSON.parse(localStorage.getItem(MS_PICKS) ?? "null") as MsKept | null;
+      if (kept?.week === start) left = kept.rows;
     } catch {}
     try {
       const logged = new Map<string, number>();
@@ -950,15 +962,10 @@
     for (const r of rows) r.pick = on && !r.done;
   }
   // going to a milestone in Planning: its link there, or the browser's Back, comes back
-  // to this week with the window open again, as you left it (a Ctrl+click opens a new tab and leaves this one be)
+  // to this week with the window open again (a Ctrl+click opens a new tab and leaves this one be)
   function leaveForPlanning(ev: MouseEvent) {
     if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button !== 0) return;
     history.replaceState(null, "", `#/week?w=${start}&ms=1`);
-    try {
-      sessionStorage.setItem(MS_PICKS, JSON.stringify(msRows.map((r) => ({
-        id: r.m.id, pick: r.pick, must: r.must, hours: r.hours === r.info.suggested ? undefined : r.hours,
-      }))));
-    } catch {}
   }
   async function msDone(r: MsRow, done: boolean) {
     if (await change(done ? `Marked ${q(r.m)} done` : `Reopened ${q(r.m)}`, () => setMilestoneStatus(r.m.id, done ? "done" : "active"))) {
@@ -969,7 +976,8 @@
 
   async function addFromMilestones() {
     const picked = msRows.filter((r) => r.pick);
-    if (picked.length) await change(`Added ${picked.length} to-${picked.length === 1 ? "do" : "dos"} from milestones`, async () => {
+    if (!picked.length) return;
+    if (await change(`Added ${picked.length} to-${picked.length === 1 ? "do" : "dos"} from milestones`, async () => {
       for (const r of picked) {
         await saveTodo(null, {
           kind: "task", title: r.m.title, due_on: isCurrent ? today() : start,
@@ -977,7 +985,11 @@
           est_hours: r.hours, must_this_week: r.must,
         });
       }
-    });
+    })) {
+      // added: the next time starts afresh
+      msRows = [];
+      try { localStorage.removeItem(MS_PICKS); } catch {}
+    }
     panel = null;
   }
 

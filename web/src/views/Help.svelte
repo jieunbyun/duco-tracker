@@ -35,7 +35,9 @@
       unless the milestone already has an open to-do this week (named in the list; you can still add another).
       <em>Done</em> on a milestone there marks it done at once, as in Planning (<em>Reopen</em> takes it back);
       click a milestone's name to go to it in Planning, and <em>← Back to + From milestones</em> there (or the
-      browser's Back) brings the window back as you left it, with any changes made in Planning.
+      browser's Back) brings the window back, with any changes made in Planning. What you tick, type and choose
+      there is remembered in this browser until you add them: closed by accident or after a reload, the window opens
+      again for that week as you left it.
       <em>To think about</em>, at the end of the to-do list, holds ideas jotted down as they come — a conference
       title, an angle to explore: not tied to a week and never counted as planned time. A web address pasted into an
       idea or its notes shows as a short underlined “link”. Ideas are listed oldest first; drag the ⠿ handle (or
