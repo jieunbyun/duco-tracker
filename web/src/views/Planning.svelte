@@ -47,10 +47,14 @@
   // #/planning?m=<milestone id> (a milestone's name in Week's + From milestones):
   // open its project and bring the milestone into view, lit up for a moment
   let target = $state<string | null>(null);
+  let backToWeek = $state<string | null>(null); // that week, with + From milestones open again
   async function goToMilestone() {
-    const id = new URLSearchParams(location.hash.split("?")[1] ?? "").get("m");
+    const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+    const id = params.get("m");
     if (!id) return;
     history.replaceState(null, "", "#/planning");
+    const w = params.get("w");
+    if (w) backToWeek = `#/week?w=${w}&ms=1`;
     const p = projects.find((x) => x.milestone.some((m) => m.id === id));
     if (!p) return;
     if (["done", "dropped"].includes(p.status)) showFinished = true;
@@ -462,6 +466,10 @@
   <ExportData />
 </section>
 
+{#if backToWeek}
+  <a class="back-week" href={backToWeek}>← Back to + From milestones</a>
+{/if}
+
 {#if flash}
   <div class="flash" role="status">
     <span>{flash.text}</span>
@@ -552,6 +560,13 @@
   .horizon-pick { display: flex; gap: 0.25rem; font-family: var(--font-ui); }
   .horizon-pick button { font-size: 0.8rem; padding: 0.2rem 0.55rem; }
   .horizon-pick button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  .back-week {
+    position: fixed; left: 1rem; bottom: 1.2rem; z-index: 59;
+    padding: 0.45rem 0.9rem; background: var(--paper); color: var(--ink); border: 1px solid var(--rule);
+    border-radius: var(--radius); box-shadow: 0 4px 14px rgb(0 0 0 / 0.15);
+    font-family: var(--font-ui); font-size: 0.85rem; text-decoration: none;
+  }
+  .back-week:hover { border-color: var(--ink-soft); }
   .flash {
     position: fixed; left: 50%; bottom: 1.2rem; transform: translateX(-50%); z-index: 60;
     display: flex; align-items: center; gap: 0.8rem; max-width: calc(100vw - 32px);

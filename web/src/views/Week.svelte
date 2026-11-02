@@ -8,7 +8,7 @@
   import { milestoneWeek } from "../lib/plan";
   import { shareRemaining } from "../lib/share";
   import type { MilestoneWeek } from "../lib/plan";
-  import { addDays, today, weekStart, parse, fmtDay } from "../lib/dates";
+  import { addDays, today, weekStart, parse, fmtDay, daysIn } from "../lib/dates";
   import { meetingsInRange } from "../lib/ics";
   import type { Meeting } from "../lib/ics";
   import EntryForm from "../lib/EntryForm.svelte";
@@ -22,6 +22,7 @@
   import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
 
   const SHOW_LOGGED = "week.showLogged";
+  const MS_PICKS = "week.msPicks"; // + From milestones as you left it for Planning (this browser tab)
   const LAST_CATEGORY = "log.category";
 
   // ---- week ------------------------------------------------------------------
@@ -30,6 +31,14 @@
   const end = $derived(addDays(start, 6));
   const days = $derived(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
   const isCurrent = $derived(offset === 0);
+  // back from Planning (#/week?w=<week>&ms=1): that week, with + From milestones open again
+  const arrivedWith = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  let reopenMs = !!arrivedWith.get("ms");
+  if (reopenMs) {
+    history.replaceState(null, "", "#/week");
+    const w = arrivedWith.get("w");
+    if (w) offset = Math.round((daysIn({ from: weekStart(today()), to: weekStart(w) }) - 1) / 7);
+  }
 
   // ---- data --------------------------------------------------------------------
   let tax = $state<Taxonomy | null>(null);
@@ -101,6 +110,10 @@
       slots = plan.slots;
       entries = logged;
       error = "";
+      if (reopenMs) {
+        reopenMs = false;
+        openMilestones(true);
+      }
     } catch (e) {
       if (id === request) error = (e as Error).message;
     } finally {
@@ -864,10 +877,16 @@
   // then only by you — ticking a box must not fold its section
   let msOpen = $state<Record<string, boolean>>({});
 
-  async function openMilestones() {
+  /** `kept`: back from Planning, with the ticks, hours and musts you left (hours you hadn't changed are worked out again). */
+  async function openMilestones(kept = false) {
     panel = { kind: "milestones" };
     msLoading = true;
     msRows = [];
+    let left: { id: string; pick: boolean; must: boolean; hours?: number | null }[] = [];
+    try {
+      if (kept) left = JSON.parse(sessionStorage.getItem(MS_PICKS) ?? "[]");
+      sessionStorage.removeItem(MS_PICKS);
+    } catch {}
     try {
       const logged = new Map<string, number>();
       for (const h of await loadAllHours()) {
@@ -883,6 +902,13 @@
           const urgent = info.overdue || info.dueThisWeek;
           rows.push({ p, m, info, existing, pick: !existing && urgent, hours: info.suggested, must: m.hard_deadline || urgent, done: false });
         }
+      }
+      for (const k of left) {
+        const r = rows.find((x) => x.m.id === k.id);
+        if (!r) continue;
+        r.pick = k.pick;
+        r.must = k.must;
+        if (k.hours !== undefined) r.hours = k.hours;
       }
       // overdue first, then by due date; undated last
       msRows = rows.sort((a, b) =>
@@ -922,6 +948,17 @@
   const pickedIn = (rows: MsRow[]) => rows.filter((r) => r.pick).length;
   function pickAll(rows: MsRow[], on: boolean) {
     for (const r of rows) r.pick = on && !r.done;
+  }
+  // going to a milestone in Planning: its link there, or the browser's Back, comes back
+  // to this week with the window open again, as you left it (a Ctrl+click opens a new tab and leaves this one be)
+  function leaveForPlanning(ev: MouseEvent) {
+    if (ev.ctrlKey || ev.metaKey || ev.shiftKey || ev.button !== 0) return;
+    history.replaceState(null, "", `#/week?w=${start}&ms=1`);
+    try {
+      sessionStorage.setItem(MS_PICKS, JSON.stringify(msRows.map((r) => ({
+        id: r.m.id, pick: r.pick, must: r.must, hours: r.hours === r.info.suggested ? undefined : r.hours,
+      }))));
+    } catch {}
   }
   async function msDone(r: MsRow, done: boolean) {
     if (await change(done ? `Marked ${q(r.m)} done` : `Reopened ${q(r.m)}`, () => setMilestoneStatus(r.m.id, done ? "done" : "active"))) {
@@ -1238,7 +1275,7 @@
   <div class="toolbar">
     <button class="primary" onclick={() => openEntry(null, isCurrent ? today() : start)}>+ Log</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "task" })}>+ To-do</button>
-    <button onclick={openMilestones} title="To-dos from milestones that fall in this week">+ From milestones</button>
+    <button onclick={() => openMilestones()} title="To-dos from milestones that fall in this week">+ From milestones</button>
     <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: isCurrent ? today() : start })}>+ Meeting</button>
     <label class="toggle"><input type="checkbox" bind:checked={showLogged} /> Show logged time</label>
   </div>
@@ -1606,7 +1643,7 @@
                         <li class:off={!!r.existing && !r.pick} class:done={r.done}>
                           <input type="checkbox" bind:checked={r.pick} disabled={r.done} aria-label={`Add ${r.m.title}`} />
                           <div class="ms-what">
-                            <a class="ms-goto" href={`#/planning?m=${r.m.id}`} title="Show it in Planning"><strong>{r.m.title}</strong></a>
+                            <a class="ms-goto" href={`#/planning?m=${r.m.id}&w=${start}`} title="Show it in Planning" onclick={leaveForPlanning}><strong>{r.m.title}</strong></a>
                             {#if r.done}<span class="ms-done">✓ done</span>{/if}
                             <span class="ms-when" class:late={r.info.overdue}>
                               {#if r.info.overdue}overdue since {fmtDay(r.info.due!)}
