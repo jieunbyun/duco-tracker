@@ -2,6 +2,7 @@
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadUnfinishedBefore, loadEntriesBetween, loggedHoursOf, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
     saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas, openSlotOn, loadIdeaNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote,
+    setMilestoneStatus,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields, IdeaNote } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
@@ -854,8 +855,9 @@
   // with this week's share of its remaining hours; ticked ones become to-dos
   // linked to the milestone, its project and category.
   // `existing`: an open to-do this week already linked to the milestone — noted, and
-  // the row starts unticked, but it can still be added (e.g. a different task on it)
-  type MsRow = { p: Project; m: Milestone; info: MilestoneWeek; existing: Todo | null; pick: boolean; hours: number | null; must: boolean };
+  // the row starts unticked, but it can still be added (e.g. a different task on it).
+  // `done`: marked done here (saved at once, as in Planning) — it stays listed, struck through
+  type MsRow = { p: Project; m: Milestone; info: MilestoneWeek; existing: Todo | null; pick: boolean; hours: number | null; must: boolean; done: boolean };
   let msRows = $state<MsRow[]>([]);
   let msLoading = $state(false);
   // which sections are open: set once when the window opens (urgent ones),
@@ -879,7 +881,7 @@
           if (!info) continue;
           const existing = todos.find((t) => t.milestone_id === m.id && t.kind === "task" && !t.is_cancelled && !t.is_done) ?? null;
           const urgent = info.overdue || info.dueThisWeek;
-          rows.push({ p, m, info, existing, pick: !existing && urgent, hours: info.suggested, must: m.hard_deadline || urgent });
+          rows.push({ p, m, info, existing, pick: !existing && urgent, hours: info.suggested, must: m.hard_deadline || urgent, done: false });
         }
       }
       // overdue first, then by due date; undated last
@@ -919,7 +921,13 @@
   });
   const pickedIn = (rows: MsRow[]) => rows.filter((r) => r.pick).length;
   function pickAll(rows: MsRow[], on: boolean) {
-    for (const r of rows) r.pick = on;
+    for (const r of rows) r.pick = on && !r.done;
+  }
+  async function msDone(r: MsRow, done: boolean) {
+    if (await change(done ? `Marked ${q(r.m)} done` : `Reopened ${q(r.m)}`, () => setMilestoneStatus(r.m.id, done ? "done" : "active"))) {
+      r.done = done;
+      if (done) r.pick = false;
+    }
   }
 
   async function addFromMilestones() {
@@ -1595,10 +1603,11 @@
                     </div>
                     <ul class="ms-pick">
                       {#each gp.rows as r (r.m.id)}
-                        <li class:off={!!r.existing && !r.pick}>
-                          <input type="checkbox" bind:checked={r.pick} aria-label={`Add ${r.m.title}`} />
+                        <li class:off={!!r.existing && !r.pick} class:done={r.done}>
+                          <input type="checkbox" bind:checked={r.pick} disabled={r.done} aria-label={`Add ${r.m.title}`} />
                           <div class="ms-what">
                             <strong>{r.m.title}</strong>
+                            {#if r.done}<span class="ms-done">✓ done</span>{/if}
                             <span class="ms-when" class:late={r.info.overdue}>
                               {#if r.info.overdue}overdue since {fmtDay(r.info.due!)}
                               {:else if r.info.due}due {fmtDay(r.info.due)}{r.m.due_on ? "" : " (project end)"}
@@ -1612,6 +1621,11 @@
                           </div>
                           <label class="ms-h">h <input type="number" min="0" step="0.5" bind:value={r.hours} aria-label="Hours this week" /></label>
                           <label class="ms-must"><input type="checkbox" bind:checked={r.must} /> must</label>
+                          {#if r.done}
+                            <button class="mini" title="Not done after all" onclick={() => msDone(r, false)}>Reopen</button>
+                          {:else}
+                            <button class="mini" title="Mark the milestone done — saved at once" onclick={() => msDone(r, true)}>Done</button>
+                          {/if}
                         </li>
                       {/each}
                     </ul>
@@ -1839,8 +1853,10 @@
   .ms-project { margin: 0.3rem 0 0.5rem 0.4rem; }
   .ms-project-head { display: flex; align-items: center; gap: 0.4rem; font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); }
   .ms-pick { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; }
-  .ms-pick li { display: grid; grid-template-columns: auto 1fr auto auto; gap: 0.6rem; align-items: center; padding: 0.4rem 0.3rem; border-bottom: 1px solid var(--rule); }
+  .ms-pick li { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 0.6rem; align-items: center; padding: 0.4rem 0.3rem; border-bottom: 1px solid var(--rule); }
   .ms-pick li.off { opacity: 0.55; }
+  .ms-pick li.done strong { text-decoration: line-through; color: var(--ink-soft); }
+  .ms-done { font-size: 0.78rem; color: var(--accent); }
   .ms-pick input[type="checkbox"] { width: auto; }
   .ms-what { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; align-items: baseline; font-size: 0.88rem; }
   .ms-when { width: 100%; font-size: 0.78rem; color: var(--ink-soft); }

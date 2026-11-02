@@ -33,6 +33,7 @@
       week's share of its remaining hours — spread evenly to its due date, as in Planning — and turns the ones you tick
       into to-dos linked to the milestone, its project and category; overdue and due-this-week ones are pre-ticked,
       unless the milestone already has an open to-do this week (named in the list; you can still add another).
+      <em>Done</em> on a milestone there marks it done at once, as in Planning (<em>Reopen</em> takes it back).
       <em>To think about</em>, at the end of the to-do list, holds ideas jotted down as they come — a conference
       title, an angle to explore: not tied to a week and never counted as planned time. A web address pasted into an
       idea or its notes shows as a short underlined “link”. Ideas are listed oldest first; drag the ⠿ handle (or
