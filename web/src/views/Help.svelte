@@ -61,6 +61,8 @@
       <em>Move to a date…</em> takes it to any day, in this week or another — a to-do with no other day planned goes
       along to that week.
       Moving a card onto a day that already has the same to-do merges them into one card with the hours added.
+      To put a day's duties in your own order, drag a card's ⠿ handle up or down (or press ↑ ↓ on it); meetings
+      keep to their times, and a duty newly planned or moved onto the day goes at the end.
       <em>Plan across days…</em> (on a duty's menu, or in the to-do list) lets you tick several days and give the
       total hours, which are split evenly over them; each card then shows its share.
       A logged day keeps what was logged; the days still to do share what is left of the to-do's total. So they

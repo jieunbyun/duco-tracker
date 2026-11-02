@@ -181,11 +181,76 @@
   const weekSlots = $derived(
     slots.filter((s) => s.planned_on >= start && s.planned_on <= end && !todoById.get(s.todo_id)?.is_cancelled),
   );
+  // meetings by their time; to-dos in the order you have dragged them into (one
+  // not yet placed in it, say just planned there, goes at the end)
   function slotsOn(day: string, kind: "task" | "meeting"): Slot[] {
+    const placed = (s: Slot) => (kind === "task" ? s.sort_order ?? Infinity : 0);
     return weekSlots
       .filter((s) => s.planned_on === day && todoById.get(s.todo_id)?.kind === kind)
-      .sort((a, b) =>
+      .sort((a, b) => placed(a) - placed(b) ||
         (a.start_time ?? "").localeCompare(b.start_time ?? "") || (a.sort_order ?? 0) - (b.sort_order ?? 0) || a.id.localeCompare(b.id));
+  }
+
+  // ---- rearranging a day's to-dos: drag a card's ⠿ handle (mouse or touch), or arrow keys on it ----
+  let dayDrag = $state<{ day: string; id: string; from: string[]; order: string[] } | null>(null);
+  function dutiesOn(day: string): Slot[] {
+    const list = slotsOn(day, "task");
+    if (dayDrag?.day !== day) return list;
+    return dayDrag.order.map((id) => list.find((s) => s.id === id)).filter((s): s is Slot => !!s);
+  }
+  // as with ideas, the window follows the pointer for the whole drag
+  function startCardDrag(ev: PointerEvent, s: Slot) {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const order = slotsOn(s.planned_on, "task").map((x) => x.id);
+    dayDrag = { day: s.planned_on, id: s.id, from: order, order };
+    window.addEventListener("pointermove", cardDragMove);
+    window.addEventListener("pointerup", endCardDrag);
+    window.addEventListener("pointercancel", endCardDrag);
+  }
+  function cardDragMove(ev: PointerEvent) {
+    if (!dayDrag) return;
+    const over = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>(".card.duty");
+    const overId = over?.dataset.id;
+    if (!overId || overId === dayDrag.id || over!.dataset.day !== dayDrag.day) return;
+    const order = dayDrag.order.filter((id) => id !== dayDrag!.id);
+    const r = over!.getBoundingClientRect();
+    order.splice(order.indexOf(overId) + (ev.clientY > r.top + r.height / 2 ? 1 : 0), 0, dayDrag.id);
+    if (order.join() !== dayDrag.order.join()) dayDrag.order = order;
+  }
+  async function endCardDrag() {
+    window.removeEventListener("pointermove", cardDragMove);
+    window.removeEventListener("pointerup", endCardDrag);
+    window.removeEventListener("pointercancel", endCardDrag);
+    if (!dayDrag) return;
+    const { day, from, order } = dayDrag;
+    dayDrag = null;
+    if (order.join() !== from.join()) await saveDayOrder(day, order);
+  }
+  function cardKeyMove(ev: KeyboardEvent, s: Slot) {
+    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+    ev.preventDefault();
+    const order = slotsOn(s.planned_on, "task").map((x) => x.id);
+    const i = order.indexOf(s.id);
+    const j = i + (ev.key === "ArrowUp" ? -1 : 1);
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    saveDayOrder(s.planned_on, order).then(() => {
+      // keep the focus on the moved card's handle
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`.card.duty[data-id="${s.id}"] .grip`)?.focus());
+    });
+  }
+  /** Store a day's order as sort_order 10, 20, 30…, changing only what moved. */
+  async function saveDayOrder(day: string, order: string[]) {
+    const changes = order
+      .map((id, i) => ({ id, sort_order: (i + 1) * 10 }))
+      .filter((c) => slots.find((s) => s.id === c.id)?.sort_order !== c.sort_order);
+    if (!changes.length) return;
+    // show the new order at once; the reload confirms it
+    const at = new Map(changes.map((c) => [c.id, c.sort_order]));
+    slots = slots.map((s) => (at.has(s.id) ? { ...s, sort_order: at.get(s.id)! } : s));
+    await change(`Reordered the to-dos on ${dayName(day)} ${dayNum(day)}`,
+      async () => { for (const c of changes) await saveSlot(c.id, { sort_order: c.sort_order }); });
   }
   function entriesOn(day: string): TimeEntry[] {
     return entries.filter((e) => e.started_at.slice(0, 10) === day);
@@ -330,7 +395,7 @@
           await saveSlot(there.id, { planned_hours: merged });
           await deleteSlot(s.id);
         } else {
-          await saveSlot(s.id, { planned_on: to });
+          await saveSlot(s.id, { planned_on: to, sort_order: null });
         }
         if (refile) await saveTodo(t.id, { due_on: week });
       });
@@ -1312,7 +1377,7 @@
   <div class="days">
     {#each days as d (d)}
       {@const meetings = slotsOn(d, "meeting")}
-      {@const duties = slotsOn(d, "task")}
+      {@const duties = dutiesOn(d)}
       {@const plan = plannedOn(d)}
       <div class="day" class:today={d === today()} class:past={d < today()}>
         <div class="day-head">
@@ -1345,7 +1410,14 @@
           <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done}
                class:cancelled={s.is_cancelled} class:review={pending(t)} class:tentative={tentative(t)}
                class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}
+               class:sortable={duties.length > 1} class:dragging={dayDrag?.id === s.id}
+               data-id={s.id} data-day={d}
                role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
+            {#if duties.length > 1}
+              <button class="grip" title="Drag to reorder (or use ↑ ↓)" aria-label={`Move “${t.title}”: drag, or press up or down`}
+                      onpointerdown={(ev) => startCardDrag(ev, s)}
+                      onkeydown={(ev) => cardKeyMove(ev, s)}>⠿</button>
+            {/if}
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
@@ -1970,6 +2042,10 @@
   .menu button.danger { color: var(--danger); }
   .card { background: var(--paper); border-radius: 4px; padding: 0.35rem 0.45rem; font-size: 0.78rem; display: grid; gap: 0.1rem; border-left: 3px solid var(--accent); }
   .card.duty { border-left-color: var(--ink-soft); }
+  .card.sortable { grid-template-columns: auto 1fr; column-gap: 0.2rem; align-items: start; }
+  .card .grip { font-size: 0.8rem; padding: 0; line-height: 1.4; opacity: 0.45; }
+  .card .grip:hover, .card .grip:focus-visible { opacity: 1; }
+  .card.dragging { box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
   .card.logged { opacity: 0.7; }
   .card.done .title { text-decoration: line-through; color: var(--ink-soft); }
   .card.stale { border-left-color: var(--danger); }
