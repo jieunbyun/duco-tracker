@@ -1606,7 +1606,7 @@
                         <li class:off={!!r.existing && !r.pick} class:done={r.done}>
                           <input type="checkbox" bind:checked={r.pick} disabled={r.done} aria-label={`Add ${r.m.title}`} />
                           <div class="ms-what">
-                            <strong>{r.m.title}</strong>
+                            <a class="ms-goto" href={`#/planning?m=${r.m.id}`} title="Show it in Planning"><strong>{r.m.title}</strong></a>
                             {#if r.done}<span class="ms-done">✓ done</span>{/if}
                             <span class="ms-when" class:late={r.info.overdue}>
                               {#if r.info.overdue}overdue since {fmtDay(r.info.due!)}
@@ -1856,6 +1856,8 @@
   .ms-pick li { display: grid; grid-template-columns: auto 1fr auto auto auto; gap: 0.6rem; align-items: center; padding: 0.4rem 0.3rem; border-bottom: 1px solid var(--rule); }
   .ms-pick li.off { opacity: 0.55; }
   .ms-pick li.done strong { text-decoration: line-through; color: var(--ink-soft); }
+  .ms-goto { color: inherit; text-decoration: none; }
+  .ms-goto:hover { text-decoration: underline; }
   .ms-done { font-size: 0.78rem; color: var(--accent); }
   .ms-pick input[type="checkbox"] { width: auto; }
   .ms-what { display: flex; flex-wrap: wrap; gap: 0.15rem 0.5rem; align-items: baseline; font-size: 0.88rem; }

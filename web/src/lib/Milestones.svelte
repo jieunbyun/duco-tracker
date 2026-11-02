@@ -10,8 +10,9 @@
   type Props = {
     project: Project; actualByMilestone: Map<string, number>; onchange: () => void;
     privateShared?: Map<string, boolean>; // shared milestone id → whether it is private (only you)
+    target?: string | null; // a milestone just gone to from Week, lit up for a moment
   };
-  let { project, actualByMilestone, onchange, privateShared = new Map() }: Props = $props();
+  let { project, actualByMilestone, onchange, privateShared = new Map(), target = null }: Props = $props();
 
   // Which row is open for editing: a milestone id, "new", or nothing.
   let editing = $state<string | null>(null);
@@ -191,7 +192,7 @@
           {:else}
             {@const actual = actualByMilestone.get(m.id) ?? 0}
             {@const d = milestoneDates(project, m)}
-            <div class="ms-line" class:complete={m.status === "done"}>
+            <div class="ms-line" id={`ms-${m.id}`} class:complete={m.status === "done"} class:target={m.id === target}>
             <button class="ms-row" onclick={() => open(m)}>
               <span class="title">
                 {#if linked}<span class="shared" title={isPrivate(m) ? "On the shared project, private: only you see it" : "A public milestone of the shared project"}>{isPrivate(m) ? "🔒" : "⇄"}</span>{/if}
@@ -248,7 +249,9 @@
     font-size: 0.88rem;
   }
   .ms-row:hover { background: var(--paper); }
-  .ms-line { display: flex; align-items: center; gap: 0.5rem; }
+  .ms-line { display: flex; align-items: center; gap: 0.5rem; border-radius: var(--radius); }
+  .ms-line.target { animation: lit 3s ease-out; }
+  @keyframes lit { from, 40% { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
   .ms-line .ms-row { flex: 1; min-width: 0; }
   .done-tick { width: auto; flex: none; margin-right: 0.4rem; }
   .ms-line.complete .title { text-decoration: line-through; color: var(--ink-soft); }

@@ -48,8 +48,8 @@
 
   // Hash routing (#/week): no server rewrites needed, and the browser's
   // back button moves between views. Anything else (including the old #/log)
-  // opens the first tab.
-  const fromHash = () => location.hash.replace(/^#\/?/, "");
+  // opens the first tab. A "?…" after the tab says where to go in it (#/planning?m=<milestone>).
+  const fromHash = () => location.hash.replace(/^#\/?/, "").split("?")[0];
   let hash = $state(fromHash());
   // Help is not a tab; it opens from the ? in the header
   const route = $derived<Route>(

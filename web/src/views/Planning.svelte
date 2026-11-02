@@ -1,6 +1,7 @@
 <script lang="ts">
   import FolderLink from "../lib/FolderLink.svelte";
   import ExportData from "../lib/ExportData.svelte";
+  import { tick } from "svelte";
   import { undoable, undoLast } from "../lib/undo.svelte";
   import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus } from "../lib/data";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
@@ -41,7 +42,26 @@
       loading = false;
     }
   }
-  load();
+  load().then(goToMilestone);
+
+  // #/planning?m=<milestone id> (a milestone's name in Week's + From milestones):
+  // open its project and bring the milestone into view, lit up for a moment
+  let target = $state<string | null>(null);
+  async function goToMilestone() {
+    const id = new URLSearchParams(location.hash.split("?")[1] ?? "").get("m");
+    if (!id) return;
+    history.replaceState(null, "", "#/planning");
+    const p = projects.find((x) => x.milestone.some((m) => m.id === id));
+    if (!p) return;
+    if (["done", "dropped"].includes(p.status)) showFinished = true;
+    expanded = p.id;
+    target = id;
+    await tick();
+    const el = document.getElementById(`ms-${id}`);
+    const folded = el?.closest("details");
+    if (folded) folded.open = true;
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 
   // ---- derived figures ----------------------------------------------------
   // The viewing period: a button choice remembered in this browser, else the
@@ -356,7 +376,7 @@
                 <div class="p-body">
                   <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id} shared={sharedChoices}
                                  onsaved={changed} oncancel={() => (expanded = null)} />
-                  <Milestones project={p} {actualByMilestone} {privateShared} onchange={load} />
+                  <Milestones project={p} {actualByMilestone} {privateShared} {target} onchange={load} />
                 </div>
               {/if}
             </div>
