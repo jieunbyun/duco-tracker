@@ -272,11 +272,17 @@
     const planned = calendar + must.hours;
     unknown += must.unknown;
     const logged = entries.reduce((sum, e) => sum + e.minutes / 60, 0);
+    // how far through the plan: a to-do marked done drops out of "planned", so the
+    // time logged on it this week counts back in as what had been planned for it
+    const doneEntries = new Set(weekSlots
+      .filter((s) => s.entry_id && todoById.get(s.todo_id)?.kind === "task" && todoById.get(s.todo_id)?.is_done)
+      .map((s) => s.entry_id!));
+    const plan = planned + entries.filter((e) => doneEntries.has(e.id)).reduce((sum, e) => sum + e.minutes / 60, 0);
     const target = (tax?.areas ?? []).reduce((sum, a) => {
       const t = targetOn(tax!.targets, a.id, start);
       return sum + (t ? t.weekly_hours + t.email_weekly_hours : 0);
     }, 0);
-    return { planned, calendar, must, flex, unknown, logged, target };
+    return { planned, calendar, must, flex, unknown, logged, plan, target };
   });
 
   /** Hours still to do on the to-dos in a list (estimate less what is logged), and how many have no estimate. */
@@ -1328,7 +1334,11 @@
     <div class="wt">
       <span class="wt-label">Logged</span>
       <span class="wt-value">{fmtHours(weekTotals.logged)}</span>
-      {#if weekTotals.target}<span class="wt-sub">{Math.round((100 * weekTotals.logged) / weekTotals.target)}% of target</span>{/if}
+      {#if weekTotals.plan || weekTotals.target}
+        <span class="wt-sub">
+          {#if weekTotals.plan}<span title="Logged, against what is still planned plus what was logged on to-dos already done">{Math.round((100 * weekTotals.logged) / weekTotals.plan)}% of planned</span>{/if}{weekTotals.plan && weekTotals.target ? " · " : ""}{#if weekTotals.target}{Math.round((100 * weekTotals.logged) / weekTotals.target)}% of target{/if}
+        </span>
+      {/if}
     </div>
     {#if weekTotals.target}
       <div class="wt">
