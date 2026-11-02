@@ -174,6 +174,8 @@
       thread of comments and links. Tick off what is done, add what comes up under a milestone, drag the ⠿ handle to
       put them in order, click an action to rename it, and use <em>comment / link</em> to add to its thread. Your
       Logbook covers the shared projects you are on and your Planning projects; a member's covers their shared projects.
+      The same open actions show in Week's log window once a project is chosen: tick them off, add new ones, or click
+      one's text to reword it (Enter saves, Escape leaves it as it was).
       On a public milestone of a shared project, everyone on the project sees every action and its thread, and can
       comment on any of them, but ticks off, renames, reorders and deletes only the actions they logged themselves.
       Actions on a private milestone, or on no milestone, stay their author's (and, for a member's, yours). Under

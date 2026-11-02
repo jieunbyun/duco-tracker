@@ -1,9 +1,10 @@
 <script lang="ts">
   // A project's actions inside Week's time log: tick off what the block
-  // finished, add what came up, comment or link on any action, and drag them
-  // into order. Each change is saved at once and noted for the block.
+  // finished, add what came up, click one's text to reword it, comment or link
+  // on any action, and drag them into order. Each change is saved at once and
+  // noted for the block.
   import {
-    loadMyActions, loadActionComments, addAction, setActionDone, addActionComment, noteStep, deleteAction, saveActionOrder, byOrder,
+    loadMyActions, loadActionComments, addAction, saveAction, setActionDone, addActionComment, noteStep, deleteAction, saveActionOrder, byOrder,
   } from "./actions";
   import type { Action, ActionComment, ActionStep } from "./actions";
   import { parseLinks, linkName } from "./group";
@@ -83,6 +84,37 @@
     catch (e) { error = (e as Error).message; }
   }
 
+  // rewording an action: Enter (or clicking away) saves, Escape leaves it as it was
+  let editing = $state<string | null>(null);
+  let draft = $state("");
+  function startEdit(a: Action) {
+    editing = a.id;
+    draft = a.title;
+  }
+  async function rename(a: Action) {
+    if (editing !== a.id) return;
+    editing = null;
+    const t = draft.trim();
+    if (!t || t === a.title) return;
+    try {
+      error = "";
+      await saveAction(a.id, { title: t });
+      onlog(log.map((s) => (s.id === a.id ? { ...s, title: t } : s))); // the block's note names it as it is now
+      await refresh();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  function renameKeys(ev: KeyboardEvent, a: Action) {
+    if (ev.key === "Enter") { ev.preventDefault(); rename(a); }
+    if (ev.key === "Escape") { ev.preventDefault(); editing = null; } // the window stays open
+  }
+  /** The box opens ready to type, the cursor after the text. */
+  function ready(el: HTMLInputElement) {
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }
+
   let open = $state<string | null>(null); // the action being commented on
   let comment = $state("");
   let links = $state("");
@@ -97,10 +129,16 @@
 {#snippet row(a: Action)}
   {@const last = lastComment(a)}
   <div class="item">
-    <label class="row">
+    <span class="row">
       <input type="checkbox" onchange={() => step(() => setActionDone(a.id, true), a, "done")} aria-label={`Done: ${a.title}`} />
-      <span>{a.title}</span>
-    </label>
+      {#if editing === a.id}
+        <input class="rename" bind:value={draft} use:ready aria-label="Action"
+               onkeydown={(ev) => renameKeys(ev, a)} onblur={() => rename(a)} />
+      {:else}
+        <span class="title" role="button" tabindex="0" title="Click to edit" onclick={() => startEdit(a)}
+              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); startEdit(a); } }}>{a.title}</span>
+      {/if}
+    </span>
     <button type="button" class="link" onclick={() => { open = open === a.id ? null : a.id; comment = links = ""; }}>comment / link</button>
     <button type="button" class="x" title="Delete this action" aria-label={`Delete ${a.title}`} onclick={() => remove(a)}>✕</button>
     {#if last}<p class="note">{last.created_at.slice(0, 10)}: {last.body ?? ""}{#each last.links as l (l)} <a href={l} target="_blank" rel="noopener noreferrer">↗ {linkName(l)}</a>{/each}</p>{/if}
@@ -137,6 +175,8 @@
   .item { padding: 0.1rem 0; }
   .row { display: inline-flex; gap: 0.4rem; align-items: baseline; cursor: pointer; }
   .row input { width: auto; }
+  .row .title { cursor: text; }
+  .row input.rename { flex: 1; min-width: 14rem; font-size: 0.85rem; padding: 0.15rem 0.4rem; }
   .row.done span { text-decoration: line-through; color: var(--ink-soft); }
   .note { margin: 0.1rem 0 0 1.5rem; font-size: 0.78rem; color: var(--ink-soft); }
   .cmt { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.2rem 0 0 1.5rem; }
