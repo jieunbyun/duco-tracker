@@ -4,6 +4,7 @@
   import { dismissOutlook } from "./outlook";
   import { parse } from "./dates";
   import { LIVE_STATUSES } from "./plan";
+  import Linked from "./Linked.svelte";
 
   type Props = {
     todos: Todo[];
@@ -104,7 +105,7 @@
           {#if t.source_tentative}<span class="tag">tentative in Outlook</span>{/if}
           {#if t.source_all_day}<span class="tag">all day</span>{/if}
           {#if repeats(t)}<span class="tag">repeats</span>{/if}
-          {#if t.note}<span class="muted where">{t.note}</span>{/if}
+          {#if t.note}<span class="muted where"><Linked text={t.note} /></span>{/if}
         </div>
         <div class="how">
           <select bind:value={d.category_id} aria-label="Category" onchange={() => (d.project_id = "")}>

@@ -41,7 +41,8 @@
       through, cancel it (it stays on the list, struck through, until you restore or delete it), or delete it.
       <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
-      more days; mark them must-do or flexible. Once a to-do is on a day it shows on the calendar only, and the list
+      more days; mark them must-do or flexible. A web address in a to-do's note shows as a short
+      “link”; click the note to edit it. Once a to-do is on a day it shows on the calendar only, and the list
       below keeps the ones not yet placed. <em>✓ Log</em> on a card opens the log form already filled in and
       ties the logged time back to the plan. Unfinished to-dos do not move to the next week by themselves:
       <em>↪ Carry forward unfinished to-dos…</em> (under the calendar) lists the open ones filed before the week they

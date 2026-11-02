@@ -4,6 +4,7 @@
   import type { Taxonomy, Project, Todo, Slot, TodoFields } from "./data";
   import { addDays } from "./dates";
   import { LIVE_STATUSES } from "./horizon";
+  import Linked from "./Linked.svelte";
 
   type Props = {
     todo: Todo | null; // null = new
@@ -33,6 +34,19 @@
   let must = $state(t0?.must_this_week ?? false);
   let core = $state(t0?.is_core ?? false);
   let note = $state(t0?.note ?? "");
+  // a note shows as text, its web addresses as a short "link"; click it to edit
+  let noteEditing = $state(!t0?.note);
+  let noteClicked = false;
+  function editNote(ev: Event) {
+    if ((ev.target as HTMLElement).closest("a") || getSelection()?.toString()) return;
+    noteClicked = noteEditing = true;
+  }
+  /** Opened by a click, the box is ready to type, the cursor after what is there. */
+  function ready(el: HTMLTextAreaElement) {
+    if (!noteClicked) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }
   let due_on = $state(t0?.due_on ?? init.day ?? init.weekStart);
   let date = $state(meetingSlot?.planned_on ?? t0?.due_on ?? init.day ?? init.weekStart);
   let start = $state(meetingSlot?.start_time?.slice(0, 5) ?? "10:00");
@@ -198,7 +212,17 @@
     {/if}
   {/if}
   <label class="check"><input type="checkbox" bind:checked={core} /> 🎯 Core</label>
-  <label class="wide">Note <input bind:value={note} placeholder="optional" /></label>
+  {#if noteEditing}
+    <label class="wide">Note
+      <textarea rows="2" bind:value={note} use:ready placeholder="optional — paste a web address and it shows as a short “link”"></textarea>
+    </label>
+  {:else}
+    <div class="wide note">
+      Note
+      <span class="note-text" role="button" tabindex="0" title="Click to edit" onclick={editNote}
+            onkeydown={(ev) => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); editNote(ev); } }}><Linked text={note} /></span>
+    </div>
+  {/if}
 
   {#if error}<p class="error wide">{error}</p>{/if}
   <div class="actions wide">
@@ -220,6 +244,8 @@
   }
   label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .wide { grid-column: 1 / -1; }
+  .note { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
+  .note-text { justify-self: start; cursor: text; font-size: 0.92rem; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
   .hint { grid-column: 1 / -1; margin: -0.35rem 0 0; font-size: 0.8rem; color: var(--ink-soft); white-space: pre-line; }
 
   .kind { display: flex; }

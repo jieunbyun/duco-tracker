@@ -12,6 +12,7 @@
   import type { Meeting } from "../lib/ics";
   import EntryForm from "../lib/EntryForm.svelte";
   import TodoForm from "../lib/TodoForm.svelte";
+  import Linked from "../lib/Linked.svelte";
   import CvForm from "../lib/CvForm.svelte";
   import OutlookInbox from "../lib/OutlookInbox.svelte";
   import OutlookSettings from "../lib/OutlookSettings.svelte";
@@ -775,24 +776,6 @@
     await change("Reordered your ideas",
       async () => { for (const c of changes) await saveTodo(c.id, { sort_order: c.sort_order }); });
   }
-  /** Text split around web addresses, so each address can show as a short "link". */
-  function linkParts(text: string): { text?: string; url?: string }[] {
-    const out: { text?: string; url?: string }[] = [];
-    const re = /https?:\/\/[^\s<>"']+[^\s<>"'.,;:!?)\]]/g;
-    let last = 0;
-    for (const m of text.matchAll(re)) {
-      let url = m[0];
-      // keep a closing bracket the address itself opened, e.g. …/Thing_(topic)
-      const opens = (url.match(/\(/g) ?? []).length;
-      const closes = (url.match(/\)/g) ?? []).length;
-      if (opens > closes && text[m.index! + url.length] === ")") url += ")";
-      if (m.index! > last) out.push({ text: text.slice(last, m.index) });
-      out.push({ url });
-      last = m.index! + url.length;
-    }
-    if (last < text.length) out.push({ text: text.slice(last) });
-    return out;
-  }
 
   // clicking an idea's text, or a note's, edits it; a link in it still opens, and
   // text being selected to copy stays selected
@@ -1402,7 +1385,7 @@
   {/each}
 
   <!-- ================= to think about ================= -->
-  {#snippet linked(text: string)}{#each linkParts(text) as part, i (i)}{#if part.url}<a class="ulink" href={part.url} target="_blank" rel="noopener" title={part.url}>link</a>{:else}{part.text}{/if}{/each}{/snippet}
+  {#snippet linked(text: string)}<Linked {text} />{/snippet}
   {#snippet editable(cls: string, text: string, edit: () => void)}
     <span class="editable {cls}" role="button" tabindex="0" title="Click to edit"
           onclick={(ev) => clickEdit(ev, edit)}
@@ -1989,7 +1972,6 @@
   .idea-title { font-size: 0.92rem; overflow-wrap: anywhere; }
   .editable { justify-self: start; cursor: text; }
   .idea.cancelled .idea-title { text-decoration: line-through; color: var(--ink-soft); }
-  .ulink { text-decoration: underline; color: var(--accent); }
   .idea-edit { grid-column: 1 / -1; display: grid; gap: 0.4rem; max-width: 46rem; }
   .mini.danger { color: var(--danger); }
 
