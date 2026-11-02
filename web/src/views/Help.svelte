@@ -61,7 +61,8 @@
       (it stays on its day, struck through and restorable, as a record of what was planned), edit it, or take it off
       the calendar (for a meeting, delete it). For a duty, the menu also marks the to-do done or reopens it, and
       <em>Move to a date…</em> takes it to any day, in this week or another — a to-do with no other day planned goes
-      along to that week.
+      along to that week. <em>Open in Logbook ›</em>, on a card with a project, shows that project's actions in the
+      Logbook at its milestone; <em>← Back to Week</em> there (or the browser's Back) returns to the same week.
       Moving a card onto a day that already has the same to-do merges them into one card with the hours added.
       To put a day's duties in your own order, drag a card's ⠿ handle up or down (or press ↑ ↓ on it); meetings
       keep to their times, and a duty newly planned or moved onto the day goes at the end.

@@ -31,13 +31,13 @@
   const end = $derived(addDays(start, 6));
   const days = $derived(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
   const isCurrent = $derived(offset === 0);
-  // back from Planning (#/week?w=<week>&ms=1): that week, with + From milestones open again
+  // back from Planning (#/week?w=<week>&ms=1): that week, with + From milestones open again;
+  // back from the Logbook (#/week?w=<week>): that week
   const arrivedWith = new URLSearchParams(location.hash.split("?")[1] ?? "");
   let reopenMs = !!arrivedWith.get("ms");
-  if (reopenMs) {
+  if (arrivedWith.get("w")) {
     history.replaceState(null, "", "#/week");
-    const w = arrivedWith.get("w");
-    if (w) offset = Math.round((daysIn({ from: weekStart(today()), to: weekStart(w) }) - 1) / 7);
+    offset = Math.round((daysIn({ from: weekStart(today()), to: weekStart(arrivedWith.get("w")!) }) - 1) / 7);
   }
 
   // ---- data --------------------------------------------------------------------
@@ -520,6 +520,19 @@
   }
   const closeMenu = () => (menu = null);
 
+  // a card's project (its logged entry's, once logged) in the Logbook, at its milestone;
+  // the browser's Back, or the Logbook's link, comes back to this week
+  function logbookItem(s: Slot, t: Todo): Item[] {
+    const e = s.entry_id ? entryById.get(s.entry_id) : undefined;
+    const p = e?.project_id ?? t.project_id;
+    if (!p) return [];
+    const m = (e?.project_id ? e.milestone_id : t.milestone_id) ?? "";
+    return [{ label: "Open in Logbook ›", run: () => {
+      history.replaceState(null, "", `#/week?w=${start}`);
+      location.hash = `#/logbook?p=${p}${m ? `&m=${m}` : ""}&w=${start}`;
+    } }];
+  }
+
   function menuItems(m: Menu): Item[] {
     const s = m.slot;
     const t = todoById.get(s.todo_id);
@@ -562,7 +575,8 @@
         ? [{ label: `Move the remaining ${fmtHours(rest)} to the day after ›`, run: () => moveRest(s, 1) }]
         : [];
       const another: Item[] = meeting ? [] : [{ label: "+ Another session on this day", run: () => addSession(t, m.day) }];
-      return [...done, ...another, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []), edit, remove];
+      return [...done, ...another, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []),
+              ...logbookItem(s, t), edit, remove];
     }
     const moves: Item[] = meeting
       ? []
@@ -581,6 +595,7 @@
       ...moves,
       { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
       ...(meeting ? [] : [{ label: "Cancel the whole to-do (keep, struck through)", run: () => cancelTodo(t) }]),
+      ...logbookItem(s, t),
       edit,
       remove,
       ...(meeting ? [] : [{ label: "Delete the to-do", run: () => deleteWhole(t), danger: true }]),

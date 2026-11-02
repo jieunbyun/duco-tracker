@@ -31,9 +31,10 @@
     times?: ActionTimes | null; // a member's own time, on their actions on shared projects
     listed?: string[] | null; // these projects ("g:<id>", "p:<id>") in full: every milestone, whether it has actions yet or not
     folded?: Minimised | null; // the shared projects kept minimised
+    target?: string | null; // a milestone just gone to from Week, lit up for a moment
     onchanged: () => Promise<void>;
   };
-  let { actions, comments, projects, planning = [], groupMilestones = [], filter, members, me, canWrite, canComment, times = null, listed = null, folded = null, onchanged }: Props = $props();
+  let { actions, comments, projects, planning = [], groupMilestones = [], filter, members, me, canWrite, canComment, times = null, listed = null, folded = null, target = null, onchanged }: Props = $props();
 
   let error = $state("");
   const act = async (f: () => Promise<unknown>) => {
@@ -245,7 +246,7 @@
     </h2>
   {/if}
   {#if !small}
-  <section class="ms">
+  <section class="ms" id={s.ms ? `al-${s.ms}` : undefined} class:target={!!s.ms && s.ms === target}>
     <h3>{s.label} <span class="muted">{s.open.length}</span>{#if leadOf(s)}<span class="lead"> · lead: {nameOf(leadOf(s)!)}</span>{/if}{#if hoursLine(s)}<span class="lead"> · {hoursLine(s)}</span>{/if}</h3>
     <Sortable items={s.open} row={card} onreorder={reorder(s)} disabled={!canWrite} />
     {#each s.done as a (a.id)}{@render card(a)}{/each}
@@ -266,7 +267,9 @@
   .anywhere select { width: auto; font-size: 0.85rem; }
   .proj { font-size: 1.05rem; margin: 1.2rem 0 0.2rem; }
   .fold { background: none; border: none; padding: 0 0.1rem; color: var(--ink-soft); font-size: 0.85rem; cursor: pointer; }
-  .ms { margin: 0 0 0.9rem; font-family: var(--font-ui); }
+  .ms { margin: 0 0 0.9rem; font-family: var(--font-ui); border-radius: var(--radius); scroll-margin-top: 1rem; }
+  .ms.target { animation: lit 3s ease-out; }
+  @keyframes lit { from, 40% { background: color-mix(in srgb, var(--accent) 16%, transparent); } to { background: transparent; } }
   .ms h3 { font-size: 0.76rem; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ink-soft); margin: 0.6rem 0 0.25rem; }
   .ms h3 .muted { font-weight: 400; }
   .ms h3 .lead { font-weight: 400; text-transform: none; letter-spacing: 0; }

@@ -21,6 +21,7 @@
   import { loadActionTimes } from "../lib/actionTime";
   import type { ActionTimes } from "../lib/actionTime";
   import { preview } from "../lib/preview.svelte";
+  import { tick } from "svelte";
 
   let me = $state("");
   let members = $state<Member[]>([]);
@@ -84,7 +85,27 @@
       loading = false;
     }
   }
-  load();
+  load().then(arrive);
+
+  // #/logbook?p=<Planning project>&m=<milestone>&w=<week> (Open in Logbook, on a Week card):
+  // that project, its milestone brought into view and lit up for a moment
+  let target = $state<string | null>(null);
+  let backToWeek = $state<string | null>(null);
+  async function arrive() {
+    const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
+    const p = params.get("p");
+    if (!p) return;
+    history.replaceState(null, "", "#/logbook");
+    const w = params.get("w");
+    if (w) backToWeek = `#/week?w=${w}`;
+    if (preview.as) return;
+    show = `p:${p}`;
+    const m = params.get("m");
+    if (!m) return;
+    target = m;
+    await tick();
+    document.getElementById(`al-${m}`)?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
 
   const myName = $derived(members.find((m) => m.user_id === me)?.display_name ?? "me");
   // yours first: the projects you lead or are on
@@ -147,7 +168,7 @@
       <button class="mini" onclick={exportMine} disabled={!actions.length && !entries.length} title="As a Markdown file, to keep on OneDrive">Export logbook</button>
     </div>
     <ActionLog {actions} comments={thread} projects={ordered} {planning} {groupMilestones} {filter} {members} {me}
-               canWrite={!preview.as} canComment={!preview.as} {times} {listed} {folded} onchanged={load} />
+               canWrite={!preview.as} canComment={!preview.as} {times} {listed} {folded} {target} onchanged={load} />
     <ActionHistory load={() => (preview.as ? loadMemberActions(preview.as.user_id) : loadDoneActions())}
                    projects={ordered} {planning} {groupMilestones} {members} {me} {filter} />
     {#if oldShown.length}
@@ -159,6 +180,10 @@
   {/if}
 </section>
 
+{#if backToWeek}
+  <a class="back-week" href={backToWeek}>← Back to Week</a>
+{/if}
+
 <style>
   .intro { max-width: 46rem; font-size: 0.9rem; }
   .bar { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin: 0.6rem 0; font-family: var(--font-ui); }
@@ -166,4 +191,11 @@
   .mini { font-size: 0.8rem; padding: 0.25rem 0.7rem; }
   .old { margin: 1rem 0; font-family: var(--font-ui); }
   .old summary { cursor: pointer; font-size: 0.9rem; color: var(--ink-soft); }
+  .back-week {
+    position: fixed; left: 1rem; bottom: 1.2rem; z-index: 59;
+    padding: 0.45rem 0.9rem; background: var(--paper); color: var(--ink); border: 1px solid var(--rule);
+    border-radius: var(--radius); box-shadow: 0 4px 14px rgb(0 0 0 / 0.15);
+    font-family: var(--font-ui); font-size: 0.85rem; text-decoration: none;
+  }
+  .back-week:hover { border-color: var(--ink-soft); }
 </style>
