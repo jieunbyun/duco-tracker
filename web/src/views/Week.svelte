@@ -615,13 +615,13 @@
     return [
       ...(t.is_tentative ? [tentativeItem] : []),
       { label: "✓ Log time", run: () => openLog(t, s, m.day) },
-      ...(meeting ? [] : [{ label: "+ Another session on this day", run: () => addSession(t, m.day) }]),
-      ...(meeting ? [] : [{ label: "Plan across days…", run: () => openSpread(t) }]),
-      ...done,
-      ...(meeting ? [] : [{ label: "Move… ›", go: "move" as const }]),
-      { label: "Cancel / change status… ›", go: "status" },
       ...logbookItem(s, t),
       edit,
+      ...done,
+      ...(meeting ? [] : [{ label: "+ Another session on this day", run: () => addSession(t, m.day) }]),
+      ...(meeting ? [] : [{ label: "Move… ›", go: "move" as const }]),
+      { label: "Cancel / change status… ›", go: "status" },
+      ...(meeting ? [] : [{ label: "Plan across days…", run: () => openSpread(t) }]),
       ...fromOutlook,
     ];
   }
