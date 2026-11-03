@@ -70,6 +70,9 @@
       total hours, which are split evenly over them; each card then shows its share.
       A logged day keeps what was logged; the days still to do share what is left of the to-do's total. So they
       follow the total when you change it, grow when a day comes in under its plan, and shrink when one runs over.
+      A card also says how much of the whole to-do is left (its total, or its days' hours without one, less all
+      that is logged) — <em>4 h left</em>, or <em>0.5 h over</em> — unless that is just the card's own hours; in the
+      to-do list it follows what is logged.
       A day that passes without being logged hands its hours on to the days still to come (its card says so); only
       when none is left does it keep them. If no day is left to take the rest, a partly logged day offers to move it to the next day.
       <em>✉ Create email checks</em>, under the calendar, adds one “Email check” to-do for the week — 1.5 hours on

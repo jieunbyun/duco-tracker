@@ -333,6 +333,18 @@
   function loggedFor(t: Todo): number {
     return slotsOf(t).reduce((s, x) => s + ((x.entry_id && entryById.get(x.entry_id)?.minutes) || 0) / 60, 0);
   }
+  /** A to-do's hours still to go: its estimate (without one, its days' planned hours) less
+   *  all that is logged on it; below zero when it has run over. Null with no figure to go by. */
+  function leftFor(t: Todo): number | null {
+    let plan = t.est_hours;
+    if (plan === null) {
+      const hs = slotsOf(t).filter((x) => !x.is_cancelled).map((x) => x.planned_hours);
+      if (!hs.length || hs.some((h) => h === null)) return null;
+      plan = hs.reduce((a: number, b) => a + b!, 0);
+    }
+    return plan - loggedFor(t);
+  }
+  const leftText = (h: number) => (h < 0 ? `${fmtHours(-h)} over` : `${fmtHours(h)} left`);
 
   // ---- summary ----------------------------------------------------------------------
   const summary = $derived.by(() => {
@@ -1432,6 +1444,8 @@
           {@const t = todoById.get(s.todo_id)!}
           {@const e = s.entry_id ? entryById.get(s.entry_id) : null}
           {@const h = cardHours(s, t)}
+          {@const left = t.is_done || s.is_cancelled || pending(t) ? null : leftFor(t)}
+          {@const leftShown = left !== null && fmtHours(left) !== fmtHours(h ?? 0) ? leftText(left) : ""}
           <div class="card duty" class:logged={!!s.entry_id} class:done={t.is_done}
                class:cancelled={s.is_cancelled} class:review={pending(t)} class:tentative={tentative(t)}
                class:stale={!s.entry_id && !s.is_cancelled && !t.is_done && d < today()}
@@ -1446,7 +1460,7 @@
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="title">{t.must_this_week ? "● " : ""}{t.is_core ? "🎯 " : ""}{t.title}</span>
-              {#if label(t) || h}<span class="sub">{label(t)}{label(t) && h ? " · " : ""}{h ? fmtHours(h) : ""}</span>{/if}
+              {#if label(t) || h || leftShown}<span class="sub">{[label(t), h ? fmtHours(h) : "", leftShown].filter(Boolean).join(" · ")}</span>{/if}
               {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ {e ? fmtHours(e.minutes / 60) : "logged"}</span>{:else if pending(t)}<span class="off">from Outlook — to review</span>{:else if tentative(t)}<span class="off">tentative</span>{:else if t.is_done}<span class="ok">done</span>{:else if d < today() && h === 0 && t.est_hours !== null}<span class="off">not logged — hours moved on</span>{/if}
             </button>
           </div>
@@ -1502,7 +1516,7 @@
                 </button>
                 <span class="t-meta muted">
                   {label(t)}{label(t) && (t.est_hours || lh) ? " · " : ""}
-                  {#if lh}{fmtHours(lh)}{t.est_hours ? ` of ${fmtHours(t.est_hours)}` : ""} logged{:else if t.est_hours}est. {fmtHours(t.est_hours)}{/if}
+                  {#if lh}{fmtHours(lh)}{t.est_hours ? ` of ${fmtHours(t.est_hours)}` : ""} logged{#if !t.is_done && !t.is_cancelled && leftFor(t) !== null} · {leftText(leftFor(t)!)}{/if}{:else if t.est_hours}est. {fmtHours(t.est_hours)}{/if}
                 </span>
                 {#if ts.length}
                   <span class="t-days">
