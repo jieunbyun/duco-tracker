@@ -551,6 +551,7 @@ export function targetOn(targets: Target[], areaId: string, day: string): Target
     .sort((p, q) => q.effective_from.localeCompare(p.effective_from))[0];
 }
 
+/** Hours to two decimals at most (1.25 h, 1.5 h, 2 h), large totals included. */
 export function fmtHours(h: number): string {
-  return h >= 100 ? `${Math.round(h)} h` : `${Math.round(h * 10) / 10} h`;
+  return `${Math.round(h * 100) / 100} h`;
 }
