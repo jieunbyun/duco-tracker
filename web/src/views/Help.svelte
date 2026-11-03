@@ -57,11 +57,12 @@
       filed there; a day planned for one before that week and never logged is cancelled, struck through, so its hours
       move with it. Cancel keeps a to-do in the list, struck
       through and restorable; Delete removes it. A red edge marks a planned day that has passed without being logged.
-      Click or right-click a meeting or duty on the calendar for its actions: log time, move it a day, cancel it
-      (it stays on its day, struck through and restorable, as a record of what was planned), edit it, or take it off
-      the calendar (for a meeting, delete it). For a duty, the menu also marks the to-do done or reopens it, and
-      <em>Move to a date…</em> takes it to any day, in this week or another — a to-do with no other day planned goes
-      along to that week. <em>Open in Logbook ›</em>, on a card with a project, shows that project's actions in the
+      Click or right-click a meeting or duty on the calendar for its actions: log time, mark the to-do done (or
+      reopen it), or edit it. <em>Move… ›</em> opens the moves: a day before, a day after, or <em>Move to a date…</em>,
+      which takes it to any day, in this week or another — a to-do with no other day planned goes along to that week.
+      <em>Cancel / change status… ›</em> opens the rest: cancel the day (it stays on its day, struck through and
+      restorable, as a record of what was planned) or the whole to-do, take it off the calendar (for a meeting, delete
+      it), delete the to-do, or mark it tentative; <em>‹ Back</em> returns to the whole menu. <em>Open in Logbook ›</em>, on a card with a project, shows that project's actions in the
       Logbook at its milestone; <em>← Back to Week</em> there (or the browser's Back) returns to the same week.
       Moving a card onto a day that already has the same to-do merges them into one card with the hours added.
       To put a day's duties in your own order, drag a card's ⠿ handle up or down (or press ↑ ↓ on it); meetings

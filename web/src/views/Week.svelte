@@ -504,8 +504,11 @@
 
   // ---- card menu: click or right-click a card ------------------------------------------
   // The cards stay quiet (title, tick, status); their actions live in one menu.
-  type Menu = { slot: Slot; day: string; x: number; y: number };
-  type Item = { label: string; run: () => unknown; danger?: boolean };
+  // `sub`: one of its groups (Move…, Cancel / change status…) shown in its place
+  type Sub = "move" | "status";
+  type Menu = { slot: Slot; day: string; x: number; y: number; sub?: Sub };
+  // `go`: opens a group (or, "main", goes back to the whole menu) instead of running
+  type Item = { label: string; run?: () => unknown; danger?: boolean; go?: Sub | "main" };
   let menu = $state<Menu | null>(null);
   const MENU_W = 220;
   const MENU_H = 290;
@@ -590,27 +593,35 @@
       return [...done, ...another, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []),
               ...logbookItem(s, t), edit, remove];
     }
-    const moves: Item[] = meeting
-      ? []
-      : [
-          { label: "‹ Move to the day before", run: () => move(s, -1) },
-          { label: "Move to the day after ›", run: () => move(s, 1) },
-          { label: "Move to a date…", run: () => openMoveTo(t, s) },
-        ];
+    const back: Item = { label: "‹ Back", go: "main" };
+    if (m.sub === "move") {
+      return [
+        back,
+        { label: "‹ Move to the day before", run: () => move(s, -1) },
+        { label: "Move to the day after ›", run: () => move(s, 1) },
+        { label: "Move to a date…", run: () => openMoveTo(t, s) },
+      ];
+    }
+    if (m.sub === "status") {
+      return [
+        back,
+        { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
+        ...(meeting ? [] : [{ label: "Cancel the whole to-do (keep, struck through)", run: () => cancelTodo(t) }]),
+        remove,
+        ...(meeting ? [] : [{ label: "Delete the to-do", run: () => deleteWhole(t), danger: true }]),
+        ...(t.is_tentative ? [] : [tentativeItem]),
+      ];
+    }
     return [
       ...(t.is_tentative ? [tentativeItem] : []),
       { label: "✓ Log time", run: () => openLog(t, s, m.day) },
-      ...(t.is_tentative ? [] : [tentativeItem]),
       ...(meeting ? [] : [{ label: "+ Another session on this day", run: () => addSession(t, m.day) }]),
       ...(meeting ? [] : [{ label: "Plan across days…", run: () => openSpread(t) }]),
       ...done,
-      ...moves,
-      { label: meeting ? "Cancel meeting (keep, struck through)" : "Cancel this day (keep, struck through)", run: () => setCancelled(s, true) },
-      ...(meeting ? [] : [{ label: "Cancel the whole to-do (keep, struck through)", run: () => cancelTodo(t) }]),
+      ...(meeting ? [] : [{ label: "Move… ›", go: "move" as const }]),
+      { label: "Cancel / change status… ›", go: "status" },
       ...logbookItem(s, t),
       edit,
-      remove,
-      ...(meeting ? [] : [{ label: "Delete the to-do", run: () => deleteWhole(t), danger: true }]),
       ...fromOutlook,
     ];
   }
@@ -1694,11 +1705,18 @@
   {@const m = menu}
   <div class="menu-backdrop" role="presentation" onclick={closeMenu}
        oncontextmenu={(ev) => { ev.preventDefault(); closeMenu(); }}></div>
-  <div class="menu" role="menu" style:left={`${m.x}px`} style:top={`${m.y}px`} use:focusFirst>
-    {#each menuItems(m) as item (item.label)}
-      <button role="menuitem" class:danger={item.danger} onclick={() => { closeMenu(); item.run(); }}>{item.label}</button>
-    {/each}
-  </div>
+  {#key m.sub}
+    <div class="menu" role="menu" style:left={`${m.x}px`} style:top={`${m.y}px`} use:focusFirst>
+      {#each menuItems(m) as item (item.label)}
+        <button role="menuitem" class:danger={item.danger} class:back={item.go === "main"}
+                aria-haspopup={item.go && item.go !== "main" ? "menu" : undefined}
+                onclick={() => {
+                  if (item.go) menu = { ...m, sub: item.go === "main" ? undefined : item.go };
+                  else { closeMenu(); item.run?.(); }
+                }}>{item.label}</button>
+      {/each}
+    </div>
+  {/key}
 {/if}
 
 <dialog bind:this={dialog} onclose={() => (panel = null)}>
@@ -2079,6 +2097,7 @@
   .menu button { text-align: left; background: none; border: none; border-radius: 4px; padding: 0.45rem 0.6rem; font-size: 0.85rem; }
   .menu button:hover, .menu button:focus-visible { background: var(--panel); outline: none; }
   .menu button.danger { color: var(--danger); }
+  .menu button.back { color: var(--ink-soft); border-bottom: 1px solid var(--rule); border-radius: 4px 4px 0 0; }
   .card { background: var(--paper); border-radius: 4px; padding: 0.35rem 0.45rem; font-size: 0.78rem; display: grid; gap: 0.1rem; border-left: 3px solid var(--accent); }
   .card.duty { border-left-color: var(--ink-soft); }
   .card.sortable { grid-template-columns: auto 1fr; column-gap: 0.2rem; align-items: start; }
