@@ -29,8 +29,9 @@
       against a category, and optionally a project and milestone — new ones can be created on the spot — by start
       and end times (an end of 00:00 means midnight) or by minutes. It starts where that day's last entry ended.
       Click a logged entry on a day to edit, delete, copy it to another date, or turn it into a CV achievement.
-      At the top, <em>Logged</em> shows the week's hours so far as a share of the plan (what is still planned,
-      plus what was logged on to-dos already marked done) and of your weekly target.
+      At the top, <em>Logged</em> shows the week's hours so far as a share of the plan — logged plus what is still to
+      do: the cards not yet logged (a to-do's card holding what is left of it) and the must-dos' hours left — and of
+      your weekly target.
       <em>+ From milestones</em> lists the milestones whose dates fall in the week (and any overdue), each with this
       week's share of its remaining hours — spread evenly to its due date, as in Planning — and turns the ones you tick
       into to-dos linked to the milestone, its project and category; overdue and due-this-week ones are pre-ticked,

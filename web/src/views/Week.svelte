@@ -272,12 +272,17 @@
     const planned = calendar + must.hours;
     unknown += must.unknown;
     const logged = entries.reduce((sum, e) => sum + e.minutes / 60, 0);
-    // how far through the plan: a to-do marked done drops out of "planned", so the
-    // time logged on it this week counts back in as what had been planned for it
-    const doneEntries = new Set(weekSlots
-      .filter((s) => s.entry_id && todoById.get(s.todo_id)?.kind === "task" && todoById.get(s.todo_id)?.is_done)
-      .map((s) => s.entry_id!));
-    const plan = planned + entries.filter((e) => doneEntries.has(e.id)).reduce((sum, e) => sum + e.minutes / 60, 0);
+    // how far through the week's work: what is logged, against that plus what is still
+    // to do — the cards not yet logged (a to-do's card holds what is left of it) and the
+    // must-dos' hours left. Logged cards count once, by what was logged, not as planned.
+    let toDo = must.hours;
+    for (const s of weekSlots) {
+      if (s.entry_id || s.is_cancelled) continue;
+      const t = todoById.get(s.todo_id);
+      if (!t || uncounted(t) || t.is_done) continue;
+      toDo += (t.kind === "meeting" ? s.planned_hours : cardHours(s, t)) ?? 0;
+    }
+    const plan = logged + toDo;
     const target = (tax?.areas ?? []).reduce((sum, a) => {
       const t = targetOn(tax!.targets, a.id, start);
       return sum + (t ? t.weekly_hours + t.email_weekly_hours : 0);
@@ -1375,7 +1380,7 @@
       <span class="wt-value">{fmtHours(weekTotals.logged)}</span>
       {#if weekTotals.plan || weekTotals.target}
         <span class="wt-sub">
-          {#if weekTotals.plan}<span title="Logged, against what is still planned plus what was logged on to-dos already done">{Math.round((100 * weekTotals.logged) / weekTotals.plan)}% of planned</span>{/if}{weekTotals.plan && weekTotals.target ? " · " : ""}{#if weekTotals.target}{Math.round((100 * weekTotals.logged) / weekTotals.target)}% of target{/if}
+          {#if weekTotals.plan}<span title="Logged, against logged plus what is still to do (cards not yet logged, and must-dos' hours left)">{Math.round((100 * weekTotals.logged) / weekTotals.plan)}% of planned</span>{/if}{weekTotals.plan && weekTotals.target ? " · " : ""}{#if weekTotals.target}{Math.round((100 * weekTotals.logged) / weekTotals.target)}% of target{/if}
         </span>
       {/if}
     </div>
