@@ -283,8 +283,10 @@
   .spacer { flex: 1; }
   .chip { font-size: 0.75rem; padding: 0 0.45rem; border: 1px solid var(--rule); border-radius: 999px; text-decoration: none; }
   .thread { list-style: none; margin: 0.2rem 0 0 1.5rem; padding: 0; font-size: 0.84rem; }
-  .thread li { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: baseline; padding: 0.08rem 0; }
-  .when { color: var(--ink-soft); font-size: 0.76rem; min-width: 4.8rem; }
+  /* one running line: a long comment starts right after the date and name, and wraps under them */
+  .thread li { padding: 0.08rem 0; }
+  .thread li > :not(form) { margin-right: 0.3rem; }
+  .when { display: inline-block; color: var(--ink-soft); font-size: 0.76rem; min-width: 4.8rem; }
   .who { font-weight: 600; font-size: 0.8rem; }
   .text { white-space: pre-wrap; }
   .cmt { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.25rem 0 0 1.5rem; }
@@ -295,6 +297,6 @@
   .x { background: none; border: none; color: var(--ink-soft); font-size: 0.72rem; padding: 0 0.25rem; }
   .x:hover { color: var(--danger); }
   .x.edit-btn:hover { color: var(--accent); }
-  .cmt.edit { flex: 1 1 20rem; margin: 0; }
+  .cmt.edit { margin: 0.15rem 0 0; }
   .link { background: none; border: none; color: var(--accent); text-decoration: underline; padding: 0 0.2rem; font-size: 0.75rem; }
 </style>
