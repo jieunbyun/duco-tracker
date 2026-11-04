@@ -124,6 +124,11 @@
     open = null;
     await step(() => addActionComment(a.id, c, l), a, "updated");
   }
+  // these boxes sit inside the log window's form: Enter adds the comment, rather than
+  // logging the entry and leaving the comment behind
+  function commentKeys(ev: KeyboardEvent, a: Action) {
+    if (ev.key === "Enter") { ev.preventDefault(); saveComment(a); }
+  }
 </script>
 
 {#snippet row(a: Action)}
@@ -141,11 +146,11 @@
     </span>
     <button type="button" class="link" onclick={() => { open = open === a.id ? null : a.id; comment = links = ""; }}>comment / link</button>
     <button type="button" class="x" title="Delete this action" aria-label={`Delete ${a.title}`} onclick={() => remove(a)}>✕</button>
-    {#if last}<p class="note">{last.created_at.slice(0, 10)}: {last.body ?? ""}{#each last.links as l (l)} <a href={l} target="_blank" rel="noopener noreferrer">↗ {linkName(l)}</a>{/each}</p>{/if}
+    {#if last}<p class="note">{last.created_at.slice(2, 10)}: {last.body ?? ""}{#each last.links as l (l)} <a href={l} target="_blank" rel="noopener noreferrer">↗ {linkName(l)}</a>{/each}</p>{/if}
     {#if open === a.id}
       <div class="cmt">
-        <input bind:value={comment} placeholder="Comment" aria-label="Comment" />
-        <input bind:value={links} placeholder="Link(s)" aria-label="Links" />
+        <input bind:value={comment} placeholder="Comment" aria-label="Comment" onkeydown={(ev) => commentKeys(ev, a)} />
+        <input bind:value={links} placeholder="Link(s)" aria-label="Links" onkeydown={(ev) => commentKeys(ev, a)} />
         <button type="button" class="mini" onclick={() => saveComment(a)}>Add</button>
       </div>
     {/if}

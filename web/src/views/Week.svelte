@@ -542,10 +542,11 @@
     const p = e?.project_id ?? t.project_id;
     if (!p) return [];
     const m = (e?.project_id ? e.milestone_id : t.milestone_id) ?? "";
-    return [{ label: "Open in Logbook ›", run: () => {
-      history.replaceState(null, "", `#/week?w=${start}`);
-      location.hash = `#/logbook?p=${p}${m ? `&m=${m}` : ""}&w=${start}`;
-    } }];
+    return [{ label: "Open in Logbook ›", run: () => toLogbook(p, m) }];
+  }
+  function toLogbook(project: string, milestone: string | null) {
+    history.replaceState(null, "", `#/week?w=${start}`);
+    location.hash = `#/logbook?p=${project}${milestone ? `&m=${milestone}` : ""}&w=${start}`;
   }
 
   function menuItems(m: Menu): Item[] {
@@ -1959,7 +1960,13 @@
                     onsaved={() => (panel = null)} oncancel={() => (cvOpen = false)} />
           </div>
         {:else}
-          <button class="cv-btn" onclick={() => (cvOpen = true)}>Add as CV achievement…</button>
+          <div class="entry-more">
+            <button class="cv-btn" onclick={() => (cvOpen = true)}>Add as CV achievement…</button>
+            {#if e.project_id}
+              <button class="cv-btn" title="Its project's actions in the Logbook (changes not saved here are left behind)"
+                      onclick={() => toLogbook(e.project_id!, e.milestone_id)}>To Logbook ›</button>
+            {/if}
+          </div>
         {/if}
       {/if}
     {:else}
@@ -2128,6 +2135,7 @@
   }
   .entry:hover { background: var(--paper); color: var(--ink); }
   .cv-btn { margin-top: 0.9rem; font-size: 0.82rem; }
+  .entry-more { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .cv-add { margin-top: 1rem; border-top: 1px solid var(--rule); padding-top: 0.8rem; }
   .cv-add h3 { font-size: 0.92rem; font-family: var(--font-ui); }
   .add-day { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.25rem; }

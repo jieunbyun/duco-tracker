@@ -71,7 +71,7 @@
               <span class="name">{a.title}</span>
               {#if !filter}<span class="muted small">{where(a)}</span>{/if}
               {#each thread.filter((c) => c.action_id === a.id) as c (c.id)}
-                <span class="cmt">{c.created_at.slice(0, 10)}{c.author_id !== me ? ` · ${nameOf(c.author_id)}` : ""}: {c.body ?? ""}
+                <span class="cmt">{c.created_at.slice(2, 10)}{c.author_id !== me ? ` · ${nameOf(c.author_id)}` : ""}: {c.body ?? ""}
                   {#each c.links as l (l)}<a href={l} target="_blank" rel="noopener noreferrer" title={l}> ↗ {linkName(l)}</a>{/each}</span>
               {/each}
             </span>
