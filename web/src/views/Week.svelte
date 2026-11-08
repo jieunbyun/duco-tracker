@@ -17,6 +17,7 @@
   import CvForm from "../lib/CvForm.svelte";
   import OutlookInbox from "../lib/OutlookInbox.svelte";
   import OutlookSettings from "../lib/OutlookSettings.svelte";
+  import Sortable from "../lib/Sortable.svelte";
   import { loadFeed, syncOutlook, isStale, loadUnreviewed, dismissOutlook } from "../lib/outlook";
   import type { Feed } from "../lib/outlook";
   import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
@@ -331,6 +332,24 @@
     { key: "flex", title: "Flexible", rows: unplaced.filter((t) => (!t.is_done || t.is_cancelled) && !t.must_this_week) },
     { key: "done", title: "Done", rows: unplaced.filter((t) => t.is_done && !t.is_cancelled) },
   ].map((g) => ({ ...g, rows: [...g.rows].sort((a, b) => a.sort_order - b.sort_order || a.title.localeCompare(b.title)) })));
+
+  let todoOrderSaving = $state(false);
+  async function saveTodoOrder(title: string, order: string[]) {
+    if (todoOrderSaving) return;
+    const changes = order
+      .map((id, i) => ({ id, sort_order: (i + 1) * 10 }))
+      .filter((c) => todoById.get(c.id)?.sort_order !== c.sort_order);
+    if (!changes.length) return;
+    todoOrderSaving = true;
+    const at = new Map(changes.map((c) => [c.id, c.sort_order]));
+    todos = todos.map((t) => (at.has(t.id) ? { ...t, sort_order: at.get(t.id)! } : t));
+    try {
+      await change(`Reordered the ${title.toLowerCase()} to-dos`,
+        async () => { for (const c of changes) await saveTodo(c.id, { sort_order: c.sort_order }); });
+    } finally {
+      todoOrderSaving = false;
+    }
+  }
 
   function slotsOf(t: Todo): Slot[] {
     return slots.filter((s) => s.todo_id === t.id).sort((a, b) => a.planned_on.localeCompare(b.planned_on));
@@ -1535,11 +1554,12 @@
       {@const gh = g.key === "done" ? null : listHours(g.key as "must" | "flex")}
       <div class="group" class:muted-group={g.key === "done"}>
         <h3>{g.title} <span class="muted small">{g.rows.length}{gh && gh.hours ? ` · ${fmtHours(gh.hours)}` : ""}</span></h3>
-        <ul class="todos">
-          {#each g.rows as t (t.id)}
+        <div class="todo-list">
+          <Sortable items={g.rows} onreorder={(order) => saveTodoOrder(g.title, order)} disabled={todoOrderSaving}>
+          {#snippet row(t)}
             {@const ts = slotsOf(t)}
             {@const lh = loggedFor(t)}
-            <li class="todo" class:cancelled={t.is_cancelled}>
+            <div class="todo" class:cancelled={t.is_cancelled}>
               {#if t.is_cancelled}
                 <span class="x-mark" aria-hidden="true">⊘</span>
               {:else}
@@ -1580,9 +1600,10 @@
                   <button class="mini danger" title="Delete for good" aria-label="Delete" onclick={() => deleteWhole(t)}>✕</button>
                 {/if}
               </div>
-            </li>
-          {/each}
-        </ul>
+            </div>
+          {/snippet}
+          </Sortable>
+        </div>
       </div>
     {/if}
   {/each}
@@ -2174,6 +2195,7 @@
   .group h3 { font-size: 0.9rem; margin-bottom: 0.3rem; }
   .muted-group { opacity: 0.75; }
   .todos { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+  .todo-list :global(.grip) { margin-top: 0.55rem; }
   .todo { display: grid; grid-template-columns: auto 1fr auto; gap: 0.7rem; align-items: start; padding: 0.45rem 0.3rem; border-radius: var(--radius); }
   .todo:hover { background: var(--panel); }
   .todo > input { width: auto; margin-top: 0.25rem; }
