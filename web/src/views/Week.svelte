@@ -1118,6 +1118,8 @@
   let fwdRows = $state<FwdRow[]>([]);
   let fwdSlots = $state<Slot[]>([]);
   let fwdLoading = $state(false);
+  let fwdSaving = $state<string | null>(null);
+  let fwdError = $state("");
   let fwdTo = $state(""); // the week they go into: the one on screen, or the next
   const fwdWeeks = $derived([...new Set(fwdRows.map((r) => r.week))]);
 
@@ -1125,6 +1127,7 @@
     panel = { kind: "forward" };
     fwdTo = to;
     fwdLoading = true;
+    fwdError = "";
     fwdRows = [];
     try {
       const plan = await loadUnfinishedBefore(to);
@@ -1140,7 +1143,22 @@
       fwdLoading = false;
     }
   }
+  async function finishForward(t: Todo) {
+    if (fwdSaving) return;
+    fwdSaving = t.id;
+    fwdError = "";
+    try {
+      if (await setDone(t, true)) {
+        fwdRows = fwdRows.filter((r) => r.t.id !== t.id);
+      } else {
+        fwdError = error;
+      }
+    } finally {
+      fwdSaving = null;
+    }
+  }
   async function forwardPicked() {
+    if (fwdSaving) return;
     const picked = fwdRows.filter((r) => r.pick).map((r) => r.t);
     if (!picked.length) return;
     panel = null;
@@ -1851,7 +1869,7 @@
       <h2>Carry forward unfinished to-dos</h2>
       <div class="pick">
         <label class="pick-hours">Into the week of
-          <select value={fwdTo} onchange={(ev) => openForward((ev.target as HTMLSelectElement).value)}>
+          <select value={fwdTo} disabled={!!fwdSaving} onchange={(ev) => openForward((ev.target as HTMLSelectElement).value)}>
             <option value={start}>{fmtDay(start)} (on screen)</option>
             <option value={addDays(start, 7)}>{fmtDay(addDays(start, 7))} (the week after)</option>
           </select>
@@ -1860,8 +1878,9 @@
           To-dos filed under any week before that one, neither done nor cancelled — choose the week after to send on
           the week on screen's leftovers. Tick the ones to bring; the rest stay where they are. A day planned for one
           before that week and never logged is cancelled (it stays on its day, struck through), so its hours move with
-          the to-do.
+          the to-do. You can also mark a to-do done to remove it from this list.
         </p>
+        {#if fwdError}<p class="error">Could not mark done: {fwdError}</p>{/if}
         {#if fwdLoading}
           <p class="muted">Loading…</p>
         {:else if !fwdRows.length}
@@ -1882,6 +1901,8 @@
                       <span>{r.t.must_this_week ? "● " : ""}{r.t.is_core ? "🎯 " : ""}{r.t.title}</span>
                       <span class="muted small">{fwdInfo(r)}</span>
                     </label>
+                    <button class="mini" disabled={!!fwdSaving} aria-label={`Mark “${r.t.title}” done`}
+                            onclick={() => finishForward(r.t)}>{fwdSaving === r.t.id ? "Saving…" : "Mark done"}</button>
                   </li>
                 {/each}
               </ul>
@@ -1890,7 +1911,7 @@
         {/if}
         <div class="pick-actions">
           {#if fwdRows.some((r) => r.pick)}
-            <button class="primary" onclick={forwardPicked}>Carry {fwdRows.filter((r) => r.pick).length} forward</button>
+            <button class="primary" disabled={!!fwdSaving} onclick={forwardPicked}>Carry {fwdRows.filter((r) => r.pick).length} forward</button>
           {:else}
             <button class="primary" disabled>Nothing ticked</button>
           {/if}
@@ -2034,7 +2055,9 @@
   .join button { font-size: 0.82rem; }
   .fwd-week h3 { margin: 0.2rem 0 0.3rem; font-size: 0.82rem; color: var(--ink-soft); font-weight: 600; }
   .fwd { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
-  .fwd label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; font-size: 0.88rem; cursor: pointer; }
+  .fwd li { display: flex; align-items: center; gap: 0.6rem; }
+  .fwd button { flex-shrink: 0; }
+  .fwd label { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; font-size: 0.88rem; cursor: pointer; }
   .fwd input { width: auto; }
   .ms-groups { display: grid; gap: 0.4rem; max-height: 58vh; overflow-y: auto; padding-right: 0.2rem; }
   .ms-group { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.3rem 0.6rem; }
