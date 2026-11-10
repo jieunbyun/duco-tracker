@@ -5,7 +5,7 @@
   // milestone of a shared project everyone there sees them all, and comments.
   import {
     addAction, saveAction, setActionDone, deleteAction, saveActionOrder, addActionComment, editActionComment, deleteActionComment,
-    commentDeletable, byOrder,
+    commentDeletable, byOrder, byDoneDesc,
   } from "./actions";
   import type { Action, ActionComment } from "./actions";
   import { parseLinks, linkName, planningGroups } from "./group";
@@ -67,12 +67,13 @@
       for (const m of [...ms, { id: "", title: "No milestone" }]) {
         const here = mine.filter((a) => msOf(a) === m.id || (m.id === "" && !ms.some((x) => x.id === msOf(a))));
         if (!here.length && ((!filter && !listed) || (m.id === "" && ms.length))) continue; // in the overview, only what has actions
-        out.push({ project: key, ms: m.id, label: m.title, open: here.filter((a) => !a.is_done).sort(byOrder), done: here.filter((a) => a.is_done) });
+        out.push({ project: key, ms: m.id, label: m.title, open: here.filter((a) => !a.is_done).sort(byOrder), done: here.filter((a) => a.is_done).sort(byDoneDesc) });
       }
     }
     return out;
   });
-  const threadOf = (a: Action) => comments.filter((c) => c.action_id === a.id);
+  // newest first: the most recent log at the top of each thread
+  const threadOf = (a: Action) => comments.filter((c) => c.action_id === a.id).sort((x, y) => y.created_at.localeCompare(x.created_at));
   // A milestone's hours, yours alone: those you expect to give it (set in Projects),
   // and what your actions on it add up to so far.
   function hoursLine(s: Section): string {

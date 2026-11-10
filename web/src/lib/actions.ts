@@ -28,6 +28,8 @@ const RECENT_DAYS = 14;
 const asAction = (a: Action) => ({ ...a, links: a.links ?? [], sort_order: a.sort_order ?? 100 });
 /** Your order first (dragging sets it), then oldest first. */
 export const byOrder = (a: Action, b: Action) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at);
+/** Done actions: the most recently ticked off first. */
+export const byDoneDesc = (a: Action, b: Action) => (b.done_at ?? "").localeCompare(a.done_at ?? "");
 
 // Others' actions on public milestones of your shared projects can be read too
 // (0042), so "yours" is asked for by name.
@@ -102,12 +104,13 @@ export async function saveActionOrder(ids: string[], before: Map<string, number>
 }
 
 // ---- the threads -------------------------------------------------------------------
+/** The threads on these actions, newest first (the most recent log at the top). */
 export async function loadActionComments(actionIds: string[]): Promise<ActionComment[]> {
   if (!actionIds.length) return [];
   const out: ActionComment[] = [];
   for (let i = 0; i < actionIds.length; i += 200) {
     const { data, error } = await supabase.from("action_comment").select("*")
-      .in("action_id", actionIds.slice(i, i + 200)).order("created_at");
+      .in("action_id", actionIds.slice(i, i + 200)).order("created_at", { ascending: false });
     if (error) return [];
     out.push(...((data ?? []) as ActionComment[]).map((c) => ({ ...c, links: c.links ?? [] })));
   }

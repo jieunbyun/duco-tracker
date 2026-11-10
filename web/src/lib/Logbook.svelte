@@ -227,7 +227,7 @@
 
 {#each entries as e (e.id)}
   {@const f = FIELDS[e.kind]}
-  {@const cs = comments.filter((c) => c.entry_id === e.id)}
+  {@const cs = comments.filter((c) => c.entry_id === e.id).sort((x, y) => y.created_at.localeCompare(x.created_at))}
   <article class="entry" class:weekly={e.kind === "weekly"}>
     {#if editing === e.id}
       {@render form(true)}

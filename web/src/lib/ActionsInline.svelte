@@ -4,7 +4,7 @@
   // on any action, and drag them into order. Each change is saved at once and
   // noted for the block.
   import {
-    loadMyActions, loadActionComments, addAction, saveAction, setActionDone, addActionComment, noteStep, deleteAction, saveActionOrder, byOrder,
+    loadMyActions, loadActionComments, addAction, saveAction, setActionDone, addActionComment, noteStep, deleteAction, saveActionOrder, byOrder, byDoneDesc,
   } from "./actions";
   import type { Action, ActionComment, ActionStep } from "./actions";
   import { parseLinks, linkName } from "./group";
@@ -35,8 +35,8 @@
     const open = all.filter((a) => !a.is_done && inProject(a)).sort(byOrder);
     return milestoneId ? [...open.filter((a) => a.milestone_id === milestoneId), ...open.filter((a) => a.milestone_id !== milestoneId)] : open;
   });
-  const doneHere = $derived(all.filter((a) => a.is_done && log.some((s) => s.id === a.id && s.what.includes("done"))));
-  const lastComment = (a: Action) => thread.filter((c) => c.action_id === a.id).at(-1);
+  const doneHere = $derived(all.filter((a) => a.is_done && log.some((s) => s.id === a.id && s.what.includes("done"))).sort(byDoneDesc));
+  const lastComment = (a: Action) => thread.filter((c) => c.action_id === a.id)[0]; // the thread comes newest first
 
   async function step(f: () => Promise<unknown>, a: { id: string; title: string }, what: ActionStep["what"][number]) {
     try {
