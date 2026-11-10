@@ -1,5 +1,7 @@
 /* Ink on paper with one blueprint-slate accent — carried over from the
-   Streamlit theme. Colours are tokens so dark mode only redefines them. */
+   Streamlit theme. Colours are tokens so dark mode only redefines them.
+   The theme is set on <html data-theme> (lib/theme.svelte.ts): the system's
+   until you switch it in the header. */
 :root {
   --paper: #fbfaf7;
   --panel: #f0eee8;
@@ -22,8 +24,9 @@
   color-scheme: light;
 }
 
+/* before the script has run, the system's setting */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     --paper: #15191e;
     --panel: #1e242b;
     --rule: #323a44;
@@ -39,6 +42,23 @@
     --track: #262d35;
     color-scheme: dark;
   }
+}
+
+:root[data-theme="dark"] {
+  --paper: #15191e;
+  --panel: #1e242b;
+  --rule: #323a44;
+  --ink: #e6e2d9;
+  --ink-soft: #9aa3ad;
+  --accent: #8fb0cf;
+  --accent-ink: #10151a;
+  --danger: #e08a7c;
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --track: #262d35;
+  color-scheme: dark;
 }
 
 * { box-sizing: border-box; }

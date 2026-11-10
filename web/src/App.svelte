@@ -9,6 +9,7 @@
   import SetPassword from "./lib/SetPassword.svelte";
   import { undo, undoLast } from "./lib/undo.svelte";
   import { preview } from "./lib/preview.svelte";
+  import { theme, toggleTheme } from "./lib/theme.svelte";
 
   // Each tab's code is fetched when the tab is first opened, so the app starts
   // with only what the opening tab needs.
@@ -145,6 +146,8 @@
     {#if !member && !preview.as}<a class="help" href="#/help" class:active={route === "help"} title="How the tracker works">?</a>{/if}
     <button class="undo" onclick={undoLast} disabled={!lastAction}
             title={lastAction ? `Undo: ${lastAction.label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
+    <button class="theme" onclick={toggleTheme} aria-label={theme.value === "dark" ? "Switch to light" : "Switch to dark"}
+            title={theme.value === "dark" ? "Switch to light" : "Switch to dark"}>{theme.value === "dark" ? "☀" : "☾"}</button>
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
   </header>
   <main>
@@ -209,6 +212,7 @@
     font-weight: 600;
   }
   .undo { white-space: nowrap; }
+  .theme { padding-inline: 0.6rem; line-height: 1; }
   .help {
     display: grid; place-items: center; width: 2rem; height: 2rem; border-radius: 50%; border: 1px solid var(--rule);
     color: var(--ink-soft); text-decoration: none; font-family: var(--font-ui); font-weight: 600;

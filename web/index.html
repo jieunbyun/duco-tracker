@@ -4,6 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Duco Tracker</title>
+    <script>
+      // light or dark before the page draws: your choice in this browser, else the system's
+      try {
+        var t = localStorage.getItem("theme");
+        document.documentElement.dataset.theme = t === "light" || t === "dark" ? t
+          : matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

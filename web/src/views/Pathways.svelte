@@ -728,8 +728,9 @@
     --lk: var(--ink-soft);
   }
   @media (prefers-color-scheme: dark) {
-    .pathways { --lane-publications: #9085e9; --lane-awards: #e06aae; }
+    :global(:root:not([data-theme="light"])) .pathways { --lane-publications: #9085e9; --lane-awards: #e06aae; }
   }
+  :global(:root[data-theme="dark"]) .pathways { --lane-publications: #9085e9; --lane-awards: #e06aae; }
 
   .views { display: flex; gap: 0.25rem; margin-top: 0.6rem; font-family: var(--font-ui); }
   .views button { font-size: 0.88rem; padding: 0.35rem 0.85rem; }
