@@ -32,6 +32,27 @@
   const end = $derived(addDays(start, 6));
   const days = $derived(Array.from({ length: 7 }, (_, i) => addDays(start, i)));
   const isCurrent = $derived(offset === 0);
+
+  // ---- on a phone: the calendar or the to-dos, and the calendar one day at a time ----
+  const MOBILE_VIEW = "week.mobileView"; // which of the two you last looked at (this browser)
+  const phoneQuery = window.matchMedia("(max-width: 48rem)");
+  let phone = $state(phoneQuery.matches);
+  $effect(() => {
+    const on = () => (phone = phoneQuery.matches);
+    phoneQuery.addEventListener("change", on);
+    return () => phoneQuery.removeEventListener("change", on);
+  });
+  let mobileView = $state<"calendar" | "todos">((() => {
+    try { return localStorage.getItem(MOBILE_VIEW) === "todos" ? "todos" : "calendar"; } catch { return "calendar"; }
+  })());
+  function showView(v: "calendar" | "todos") {
+    mobileView = v;
+    try { localStorage.setItem(MOBILE_VIEW, v); } catch {}
+  }
+  let pickedDay = $state<string | null>(null);
+  // the day picked in this week; else today, if it is in this week; else its first day
+  const phoneDay = $derived(pickedDay && days.includes(pickedDay) ? pickedDay : days.includes(today()) ? today() : start);
+  const shownDays = $derived(phone ? [phoneDay] : days);
   // back from Planning (#/week?w=<week>&ms=1): that week, with + From milestones open again;
   // back from the Logbook (#/week?w=<week>): that week
   const arrivedWith = new URLSearchParams(location.hash.split("?")[1] ?? "");
@@ -1395,6 +1416,15 @@
     {#if loading}<span class="muted small">loading…</span>{/if}
   </div>
 
+  {#if phone}
+    <div class="m-switch" role="tablist" aria-label="Show">
+      <button role="tab" aria-selected={mobileView === "calendar"} class:on={mobileView === "calendar"}
+              onclick={() => showView("calendar")}>Calendar</button>
+      <button role="tab" aria-selected={mobileView === "todos"} class:on={mobileView === "todos"}
+              onclick={() => showView("todos")}>To-dos{#if groups[0].rows.length + groups[1].rows.length}<span class="m-count">{groups[0].rows.length + groups[1].rows.length}</span>{/if}</button>
+    </div>
+  {/if}
+
   {#if error}<p class="error">{error}</p>{/if}
 
   <div class="week-totals" aria-label="Week totals">
@@ -1465,8 +1495,22 @@
   {/if}
 
   <!-- ================= days ================= -->
+  {#if !phone || mobileView === "calendar"}
+  {#if phone}
+    <div class="m-days" role="tablist" aria-label="Day">
+      {#each days as d (d)}
+        {@const plan = plannedOn(d)}
+        <button role="tab" aria-selected={d === phoneDay} class:on={d === phoneDay} class:today={d === today()}
+                onclick={() => (pickedDay = d)}>
+          <span class="m-dname">{dayName(d)}</span>
+          <strong>{dayNum(d)}</strong>
+          <span class="m-dh">{plan.hours ? fmtHours(plan.hours) : "·"}</span>
+        </button>
+      {/each}
+    </div>
+  {/if}
   <div class="days">
-    {#each days as d (d)}
+    {#each shownDays as d (d)}
       {@const meetings = slotsOn(d, "meeting")}
       {@const duties = dutiesOn(d)}
       {@const plan = plannedOn(d)}
@@ -1541,8 +1585,10 @@
     <button onclick={openEmail}>✉ Create email checks (Mon–Fri)</button>
     <button onclick={() => openForward()}>↪ Carry forward unfinished to-dos…</button>
   </div>
+  {/if}
 
   <!-- ================= to-do list ================= -->
+  {#if !phone || mobileView === "todos"}
   <h2>To-dos not yet on a day</h2>
   {#if !tasks.length}
     <p class="muted">No to-dos for this week yet.</p>
@@ -1692,6 +1738,8 @@
       {/each}
     </ul>
   </div>
+
+  {/if}
 
   <!-- ================= invites ================= -->
   <details class="import">
@@ -2258,6 +2306,21 @@
   dialog h2 { margin: 0 0 0.8rem; font-size: 1.1rem; }
   .mark-done { display: flex; align-items: center; gap: 0.45rem; margin-top: 0.8rem; font-family: var(--font-ui); font-size: 0.9rem; }
   .mark-done input { width: auto; }
+
+  /* on a phone: Calendar | To-dos, and a strip of the week's days to pick one */
+  .m-switch { display: grid; grid-template-columns: 1fr 1fr; gap: 0.25rem; padding: 0.2rem; margin: 0 0 0.8rem;
+              background: var(--panel); border-radius: var(--radius); font-family: var(--font-ui); }
+  .m-switch button { border: none; background: none; padding: 0.5rem; font-size: 0.95rem; color: var(--ink-soft); border-radius: var(--radius); }
+  .m-switch button.on { background: var(--paper); color: var(--ink); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+  .m-count { margin-left: 0.35rem; font-size: 0.75rem; font-weight: 400; color: var(--ink-soft); }
+  .m-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.2rem; margin: 0 0 0.5rem; font-family: var(--font-ui); }
+  .m-days button { display: grid; justify-items: center; gap: 0.05rem; padding: 0.35rem 0; border: 1px solid var(--rule);
+                   background: none; border-radius: var(--radius); color: var(--ink); }
+  .m-days button.today { border-color: var(--accent); }
+  .m-days button.on { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .m-dname { font-size: 0.7rem; }
+  .m-days strong { font-size: 1rem; line-height: 1.1; }
+  .m-dh { font-size: 0.65rem; opacity: 0.8; }
 
   @media (max-width: 60rem) {
     .days { grid-template-columns: 1fr; }
