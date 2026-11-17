@@ -29,6 +29,7 @@
   let title = $state(t0?.title ?? "");
   let category_id = $state(t0?.category_id ?? "");
   let project_id = $state(t0?.project_id ?? "");
+  let projectSearch = $state("");
   let milestone_id = $state(t0?.milestone_id ?? "");
   let est = $state<number | null>(t0?.est_hours ?? null);
   let must = $state(t0?.must_this_week ?? false);
@@ -59,10 +60,19 @@
     area: a,
     cats: tax.allCategories.filter((c) => c.area_id === a.id && (c.is_active || c.id === t0?.category_id)),
   })));
-  const projectOptions = $derived(
-    projects
-      .filter((p) => (!category_id || p.category_id === category_id) && (LIVE_STATUSES.has(p.status) || p.id === t0?.project_id))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+  const projectOptions = $derived.by(() => {
+    const query = projectSearch.trim().toLocaleLowerCase();
+    return projects
+      .filter((p) =>
+        (query
+          ? p.name.toLocaleLowerCase().includes(query) || p.id === project_id
+          : !category_id || p.category_id === category_id) &&
+        (LIVE_STATUSES.has(p.status) || p.id === t0?.project_id),
+      )
+      .sort((a, b) => a.name.localeCompare(b.name));
+  });
+  const projectMatches = $derived(
+    projectOptions.filter((p) => p.name.toLocaleLowerCase().includes(projectSearch.trim().toLocaleLowerCase())),
   );
   const project = $derived(projects.find((p) => p.id === project_id) ?? null);
   const categoryNote = $derived(tax.categories.find((c) => c.id === category_id)?.description ?? "");
@@ -71,6 +81,7 @@
   );
 
   function onCategory() {
+    projectSearch = "";
     if (project_id && !projectOptions.some((p) => p.id === project_id)) project_id = "";
     milestone_id = "";
   }
@@ -179,12 +190,16 @@
       {/each}
     </select>
   </label>
+  <label class="wide">Search all Planning projects
+    <input type="search" bind:value={projectSearch} placeholder="Find a project by name" autocomplete="off" />
+  </label>
   <label>
     Project
     <select bind:value={project_id} onchange={onProject}>
       <option value="">— none —</option>
       {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
     </select>
+    {#if projectSearch.trim() && !projectMatches.length}<span class="project-empty">No matching projects</span>{/if}
   </label>
   {#if categoryNote}<p class="hint">{categoryNote}</p>{/if}
   {#if project_id}
@@ -247,6 +262,7 @@
   .note { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .note-text { justify-self: start; cursor: text; font-size: 0.92rem; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
   .hint { grid-column: 1 / -1; margin: -0.35rem 0 0; font-size: 0.8rem; color: var(--ink-soft); white-space: pre-line; }
+  .project-empty { font-size: 0.8rem; color: var(--ink-soft); }
 
   .kind { display: flex; }
   .kind button { font-size: 0.85rem; border-radius: 0; }
