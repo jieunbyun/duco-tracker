@@ -233,6 +233,17 @@
       Achievement records by CV section, with a tailored form for supervision, and a LaTeX export
       (<code>jobshort</code>/<code>joblong</code>) for your CV source.
     </dd>
+
+    <dt>Tips</dt>
+    <dd>
+      Checklists you keep by topic — submitting a paper, examining a thesis, setting up a lab computer — each with
+      a category of your own and notes. Tick items as you go through them, and <em>Untick all</em> to use the list
+      again; drag ⠿ to reorder, or paste a list to add every line at once. Search as you type, like
+      <em>Everything</em>: every word must appear somewhere in the topic (title, category, item or note), in any order;
+      <code>"exact phrase"</code>, <code>a|b</code> for either, <code>!word</code> to leave out. ↑ ↓ move through the
+      results, Enter opens one (or creates it, if nothing matches), and <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd>
+      goes back to the search box. Private to you.
+    </dd>
   </dl>
 
   <h2>Categories</h2>
