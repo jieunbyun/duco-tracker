@@ -474,6 +474,15 @@ export async function saveCv(id: string | null, fields: Partial<CvFields>): Prom
   const row = await check<{ id: string }>(supabase.from("cv_entry").insert(withYear).select("id").single());
   return row!.id;
 }
+/** CV records on a project, or on one of its milestones; newest first. */
+export async function loadCvFor(projectId: string, milestoneId: string | null): Promise<CvEntry[]> {
+  const rows = await check<CvEntry[]>(
+    supabase.from("cv_entry").select("*")
+      .or(milestoneId ? `project_id.eq.${projectId},milestone_id.eq.${milestoneId}` : `project_id.eq.${projectId}`)
+      .order("entry_date", { ascending: false }),
+  );
+  return rows ?? [];
+}
 export async function deleteCv(id: string): Promise<void> {
   await check(supabase.from("cv_entry").delete().eq("id", id));
 }

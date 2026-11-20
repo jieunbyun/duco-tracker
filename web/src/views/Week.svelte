@@ -15,6 +15,7 @@
   import TodoForm from "../lib/TodoForm.svelte";
   import Linked from "../lib/Linked.svelte";
   import CvForm from "../lib/CvForm.svelte";
+  import CvRelated from "../lib/CvRelated.svelte";
   import OutlookInbox from "../lib/OutlookInbox.svelte";
   import OutlookSettings from "../lib/OutlookSettings.svelte";
   import Sortable from "../lib/Sortable.svelte";
@@ -2048,6 +2049,9 @@
         {#if cvOpen}
           <div class="cv-add">
             <h3>CV achievement from this session</h3>
+            {#if e.project_id}
+              <CvRelated project={projById.get(e.project_id)} projectId={e.project_id} milestoneId={e.milestone_id} entryId={e.id} />
+            {/if}
             <CvForm entry={null}
                     preset={{ source_type: "entry", entry_id: e.id, project_id: e.project_id, milestone_id: e.milestone_id,
                               entry_date: e.started_at.slice(0, 10),
