@@ -16,8 +16,9 @@
   type Props = {
     project: GroupProject; milestones: GroupMilestone[]; members?: Member[]; readonly?: boolean;
     act: (f: () => Promise<unknown>) => Promise<boolean>;
+    onediting?: (open: boolean) => void; // a milestone's form is open (so the project's Delete can step aside)
   };
-  let { project, milestones, members = [], readonly = false, act }: Props = $props();
+  let { project, milestones, members = [], readonly = false, act, onediting }: Props = $props();
   // a public milestone's lead: one of the people on the project (a label only)
   const nameOf = (id: string) => members.find((x) => x.user_id === id)?.display_name ?? "—";
   const people = $derived(members.filter((x) => project.members.includes(x.user_id) || x.role === "supervisor"));
@@ -26,6 +27,11 @@
   let editing = $state<string | null>(null);
   let draft = $state(blank());
   let error = $state("");
+  $effect(() => {
+    if (editing === null) return;
+    onediting?.(true);
+    return () => onediting?.(false);
+  });
 
   function blank() {
     return { title: "", start_on: "", due_on: "", hard_deadline: false, notes: "", after: [] as string[], is_private: false,

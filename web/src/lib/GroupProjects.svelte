@@ -30,6 +30,9 @@
   };
   const nameOf = (id: string) => members.find((m) => m.user_id === id)?.display_name ?? "—";
   const assignable = $derived(members.filter((m) => m.active));
+  // projects with a milestone open for editing: their own Delete is hidden meanwhile, so
+  // the milestone's Delete is the only one in sight (a project was deleted by mistake)
+  let msOpen = $state<Record<string, boolean>>({});
 
   // ---- what to show, and what you keep minimised ---------------------------------------
   let show = $state("");
@@ -125,7 +128,9 @@
           <button class="mini" onclick={() => edit(p)}>Edit</button>
           <button class="mini" onclick={() => act(() => saveGroupProject(p.id, { status: p.status === "done" ? "active" : "done" }))}>{p.status === "done" ? "Reopen" : "Done"}</button>
         {/if}
-        {#if supervisor}
+        {#if msOpen[p.id]}
+          <!-- a milestone is open: its own Delete is the one to use -->
+        {:else if supervisor}
           <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”?`) && act(() => deleteGroupProject(p.id))}>Delete</button>
         {:else if !readonly}
           <button class="mini danger" onclick={() => confirm(`Delete the project “${p.title}”?`) && act(() => binGroupProject(p.id))}>Delete</button>
@@ -152,7 +157,7 @@
       {/if}
     </div>
 
-    <GroupMilestones project={p} milestones={ms} {members} {readonly} {act} />
+    <GroupMilestones project={p} milestones={ms} {members} {readonly} {act} onediting={(on) => (msOpen[p.id] = on)} />
     {/if}
   </section>
 {:else}
