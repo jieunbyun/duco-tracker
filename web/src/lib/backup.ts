@@ -6,7 +6,7 @@ import { supabase } from "./supabase";
 const TABLES = [
   "area", "category", "area_target", "user_setting",
   "project", "milestone", "time_entry", "todo", "todo_slot",
-  "calendar_feed", "calendar_ignore", "cv_entry", "tip", "failure_theme", "failure",
+  "calendar_feed", "calendar_ignore", "cv_entry", "tip", "failure_theme", "failure", "failure_note",
   "reading", "reading_note", "idea_note",
   "pw_node", "pw_link", "pw_revision", "pw_contributor",
   "pw_asset", "asset_contributor", "asset_publication", "asset_link",

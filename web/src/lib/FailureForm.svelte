@@ -35,6 +35,8 @@
   let lesson = $state(f0?.lesson ?? "");
   let created_on = $state(f0?.created_on ?? today());
   let due_on = $state(f0?.due_on ?? "");
+  let done = $state(!!f0?.done_on);
+  let done_on = $state(f0?.done_on ?? today());
   let theme = $state(f0?.theme_id ?? untrack(() => themeId ?? (themes.length ? "" : NEW)));
   let themeName = $state("");
   let project = $state(project0);
@@ -83,6 +85,8 @@
     if (!hypothesis.trim()) return (error = "Write the hypothesis.");
     if (!theme || (theme === NEW && !themeName.trim())) return (error = "Give it a theme.");
     if (due_on && due_on < created_on) return (error = "The deadline is before the creation date.");
+    if (done && done_on < created_on) return (error = "It was completed before it was created.");
+    const completed = done ? done_on || today() : null;
     busy = true;
     error = "";
     try {
@@ -91,6 +95,7 @@
         return saveFailure(f0?.id ?? null, {
           theme_id, hypothesis: hypothesis.trim(), test: test.trim() || null, lesson: lesson.trim() || null,
           created_on, due_on: due_on || null, ...attachment(),
+          ...(completed !== (f0?.done_on ?? null) ? { done_on: completed } : {}),
         });
       });
       onsaved(id);
@@ -121,6 +126,10 @@
   </label>
   <label>Created <input name="created_on" type="date" bind:value={created_on} required /></label>
   <label>Deadline <input name="due_on" type="date" bind:value={due_on} min={created_on || undefined} /></label>
+  <label class="check">
+    <input type="checkbox" name="done" bind:checked={done} /> Completed
+    {#if done}<input type="date" name="done_on" bind:value={done_on} min={created_on || undefined} aria-label="Completed on" />{/if}
+  </label>
   {#if theme === NEW}
     <label class="wide">New theme
       <input name="theme_name" bind:value={themeName} required placeholder="A general theme, e.g. Surrogate modelling" />
@@ -159,6 +168,9 @@
   }
   label { display: grid; gap: 0.2rem; align-content: start; font-size: 0.8rem; color: var(--ink-soft); min-width: 0; }
   .wide { grid-column: 1 / -1; }
+  .check { display: flex; align-items: center; gap: 0.45rem; grid-column: 1 / -1; color: var(--ink); }
+  .check input[type="checkbox"] { width: auto; }
+  .check input[type="date"] { width: auto; padding: 0.2rem 0.4rem; }
   .span2 { grid-column: span 2; }
   .actions { display: flex; flex-wrap: wrap; gap: 0.5rem; }
   .danger { margin-left: auto; color: var(--danger); }

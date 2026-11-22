@@ -15,9 +15,13 @@ export type Attachment = {
 export type Failure = Attachment & {
   id: string; theme_id: string; hypothesis: string; test: string | null; lesson: string | null;
   created_on: string; due_on: string | null; created_at: string;
+  done_on?: string | null; // completed on (0054); null while ongoing
 };
 export type FailureFields = Omit<Failure, "id" | "created_at">;
-export type Board = { themes: Theme[]; items: Failure[]; error?: string };
+/** An observation or calibration on a hypothesis (0054): dated, added as the work goes on. */
+export type NoteKind = "observation" | "calibration";
+export type Note = { id: string; failure_id: string; kind: NoteKind; noted_on: string; body: string; created_at: string };
+export type Board = { themes: Theme[]; items: Failure[]; notes: Note[]; error?: string };
 
 export const NOWHERE: Attachment = { project_id: null, milestone_id: null, group_project_id: null, group_milestone_id: null };
 const PAGE = 1000; // PostgREST's default row cap per request
@@ -36,12 +40,34 @@ export async function loadBoard(): Promise<Board | null> {
       .range(from, from + PAGE - 1);
     if (f.error) throw new Error(f.error.message);
     items.push(...(f.data as Failure[]));
-    if (f.data.length < PAGE) return { themes: t.data as Theme[], items };
+    if (f.data.length < PAGE) break;
   }
+  return { themes: t.data as Theme[], items, notes: await loadNotes() };
+}
+/** Every note, newest first; none until 0054 is run. */
+async function loadNotes(): Promise<Note[]> {
+  const notes: Note[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const n = await supabase.from("failure_note").select("id,failure_id,kind,noted_on,body,created_at")
+      .order("noted_on", { ascending: false }).order("created_at", { ascending: false }).order("id")
+      .range(from, from + PAGE - 1);
+    if (n.error) {
+      if (n.error.code === "PGRST205" || n.error.code === "42P01") return [];
+      throw new Error(n.error.message);
+    }
+    notes.push(...(n.data as Note[]));
+    if (n.data.length < PAGE) return notes;
+  }
+}
+export async function saveNote(id: string | null, fields: Partial<Pick<Note, "failure_id" | "kind" | "noted_on" | "body">>): Promise<void> {
+  await check(id ? supabase.from("failure_note").update(fields).eq("id", id) : supabase.from("failure_note").insert(fields));
+}
+export async function deleteNote(id: string): Promise<void> {
+  await check(supabase.from("failure_note").delete().eq("id", id));
 }
 /** The same for Planning and Members, which must still open if it cannot be read. */
 export function loadBoardBeside(): Promise<Board | null> {
-  return loadBoard().catch((e) => ({ themes: [], items: [], error: (e as Error).message }));
+  return loadBoard().catch((e) => ({ themes: [], items: [], notes: [], error: (e as Error).message }));
 }
 export async function saveTheme(id: string | null, name: string): Promise<string> {
   if (id) {
@@ -54,7 +80,7 @@ export async function saveTheme(id: string | null, name: string): Promise<string
 export async function deleteTheme(id: string): Promise<void> {
   await check(supabase.from("failure_theme").delete().eq("id", id));
 }
-export async function saveFailure(id: string | null, fields: FailureFields): Promise<string> {
+export async function saveFailure(id: string | null, fields: Partial<FailureFields>): Promise<string> {
   if (id) {
     await check(supabase.from("failure").update(fields).eq("id", id));
     return id;
@@ -65,6 +91,16 @@ export async function saveFailure(id: string | null, fields: FailureFields): Pro
 export async function deleteFailure(id: string): Promise<void> {
   await check(supabase.from("failure").delete().eq("id", id));
 }
+
+/** Past its deadline and not completed. */
+export const isLate = (f: Failure, day: string) => !f.done_on && !!f.due_on && f.due_on < day;
+
+/**
+ * Under way at some time in a date range ("" for no bound): created by its end, and
+ * not completed before its start. An ongoing one runs on to today and beyond.
+ */
+export const inRange = (f: Failure, from: string, to: string) =>
+  (!to || f.created_on <= to) && (!from || !f.done_on || f.done_on >= from);
 
 // ---- what is on what -----------------------------------------------------------------
 

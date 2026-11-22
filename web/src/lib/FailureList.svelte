@@ -1,7 +1,7 @@
 <script lang="ts">
   // The hypotheses from Failures on a project or milestone, with the way there and back.
   import { onMount } from "svelte";
-  import { toFailures } from "./failures";
+  import { toFailures, isLate } from "./failures";
   import type { Board, Failure, Attachment } from "./failures";
   import { fmtDay, today } from "./dates";
 
@@ -48,10 +48,11 @@
         {@const ms = milestoneOf?.(f)}
         <li>
           <div class="what">
-            <p class="hypothesis">{f.hypothesis}</p>
+            <p class="hypothesis" class:done={!!f.done_on}>{f.hypothesis}</p>
             <p class="meta">
               {themeOf(f)}{ms ? ` · ${ms}` : ""} · created {fmtDay(f.created_on)}
-              {#if f.due_on}· <span class:overdue={!f.lesson && f.due_on < today()}>deadline {fmtDay(f.due_on)}</span>{/if}
+              {#if f.done_on}· completed {fmtDay(f.done_on)}
+              {:else if f.due_on}· <span class:overdue={isLate(f, today())}>deadline {fmtDay(f.due_on)}{isLate(f, today()) ? " ⚠ overdue" : ""}</span>{/if}
             </p>
             {#if f.lesson}<p class="lesson"><strong>Lesson:</strong> {f.lesson}</p>{/if}
           </div>
@@ -73,6 +74,7 @@
   .what { flex: 1 1 14rem; min-width: 0; }
   p { margin: 0; overflow-wrap: anywhere; }
   .hypothesis { font-size: 0.85rem; color: var(--ink); white-space: pre-wrap; }
+  .hypothesis.done { text-decoration: line-through; color: var(--ink-soft); }
   .meta { font-size: 0.74rem; color: var(--ink-soft); }
   .lesson {
     font-size: 0.78rem; color: var(--ink-soft);
