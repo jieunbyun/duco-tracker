@@ -179,6 +179,9 @@
     await load();
   }
   let expanded = $state<string | null>(null);
+  // a project with a milestone open: its own Delete is hidden meanwhile, so the milestone's
+  // Delete is the only one in sight (as in Projects and Members)
+  let msOpen = $state<Record<string, boolean>>({});
   let addingTo = $state<string | null>(null); // category id
 
   const visible = $derived(projects.filter((p) => showFinished || !["done", "dropped"].includes(p.status)));
@@ -391,8 +394,9 @@
               {#if expanded === p.id}
                 <div class="p-body" data-unsaved-scope>
                   <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id} shared={sharedChoices}
-                                 onsaved={changed} oncancel={() => (expanded = null)} />
-                  <Milestones project={p} {actualByMilestone} {privateShared} {target} {board} onchange={load} />
+                                 onsaved={changed} oncancel={() => (expanded = null)} hideDelete={!!msOpen[p.id]} />
+                  <Milestones project={p} {actualByMilestone} {privateShared} {target} {board} onchange={load}
+                              onediting={(on) => (msOpen[p.id] = on)} />
                   {#if board}
                     <FailureList {board} items={board.items.filter((f) => onProject(f, p, p.group_project_id))}
                                  here={planningHash(p.id)} attach={{ ...NOWHERE, project_id: p.id }}

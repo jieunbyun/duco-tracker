@@ -12,8 +12,9 @@
     shared?: { id: string; title: string; taken: boolean }[]; // shared projects it can stand for (taken: by another of yours)
     onsaved: () => void;
     oncancel: () => void;
+    hideDelete?: boolean; // one of its milestones is open, with its own Delete: only that one in sight
   };
-  let { project, categories, categoryId, shared = [], onsaved, oncancel }: Props = $props();
+  let { project, categories, categoryId, shared = [], onsaved, oncancel, hideDelete = false }: Props = $props();
 
   // A local draft, copied once when the editor opens: nothing reaches the
   // database until Save, and a reload behind it does not overwrite typing.
@@ -120,7 +121,7 @@
   <div class="actions wide">
     <button class="primary" type="submit" disabled={busy || !name.trim()}>{project ? "Save" : "Add project"}</button>
     <button type="button" onclick={oncancel} disabled={busy}>Cancel</button>
-    {#if project}<button type="button" class="danger" onclick={remove} disabled={busy}>Delete</button>{/if}
+    {#if project && !hideDelete}<button type="button" class="danger" onclick={remove} disabled={busy}>Delete</button>{/if}
   </div>
 </form>
 

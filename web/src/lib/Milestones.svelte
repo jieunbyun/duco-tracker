@@ -15,14 +15,20 @@
     privateShared?: Map<string, boolean>; // shared milestone id → whether it is private (only you)
     target?: string | null; // a milestone just gone to from Week or Failures, lit up for a moment
     board?: Board | null; // Failures, to show on the milestones they are on
+    onediting?: (open: boolean) => void; // a milestone's form is open (so the project's Delete can step aside)
   };
-  let { project, actualByMilestone, onchange, privateShared = new Map(), target = null, board = null }: Props = $props();
+  let { project, actualByMilestone, onchange, privateShared = new Map(), target = null, board = null, onediting }: Props = $props();
   const failuresOn = (m: Milestone) => board?.items.filter((f) => onMilestone(f, m, m.group_milestone_id)) ?? [];
 
   // Which row is open for editing: a milestone id, "new", or nothing.
   let editing = $state<string | null>(null);
   let draft = $state(blank());
   let busy = $state(false);
+  $effect(() => {
+    if (editing === null) return;
+    onediting?.(true);
+    return () => onediting?.(false);
+  });
   let error = $state("");
 
   function blank() {
