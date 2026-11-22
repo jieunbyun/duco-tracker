@@ -29,6 +29,7 @@
   let loading = $state(true);
   let error = $state("");
   let target = $state<string | null>(null); // lit up for a moment
+  let expanded = $state<Record<string, boolean>>({}); // hypotheses opened to show their test and lessons
 
   // one form at a time, so there is only ever one Delete in sight
   type Editing =
@@ -67,6 +68,7 @@
     const f = arrived.get("f");
     if (f && board.items.some((x) => x.id === f)) {
       target = f;
+      expanded[f] = true; // the one you came for, in full
       await reveal(`[id="fail-${f}"]`, "center");
     } else if (arrived.get("new")) {
       await openNew(null, {
@@ -193,25 +195,25 @@
             {@const at = placeOf(f, world)}
             {@const where = whereOf(at)}
             {@const member = at.group && !at.group.deleted_at ? memberFor(at.group, me, members) : null}
+            {@const late = !!f.due_on && !f.lesson && f.due_on < today()}
+            <!-- two lines each, so many fit in view; click the hypothesis for its test and lessons -->
             <article class="card" id={`fail-${f.id}`} class:target={target === f.id}>
-              <div class="top">
-                <h3><Linked text={f.hypothesis} /></h3>
+              <div class="line1">
+                <button class="hypothesis" aria-expanded={!!expanded[f.id]} title={f.hypothesis}
+                        onclick={() => (expanded[f.id] = !expanded[f.id])}>
+                  <span class="caret" aria-hidden="true">{expanded[f.id] ? "▾" : "▸"}</span>
+                  <span class="text">{f.hypothesis}</span>
+                </button>
+                <span class="date">Created {fmtDay(f.created_on)}</span>
+                <span class="date" class:overdue={late}>
+                  {#if f.due_on}Deadline {fmtDay(f.due_on)}{late ? " · overdue" : ""}{:else}No deadline{/if}
+                </span>
                 <button class="mini" onclick={() => (editing = { kind: "failure", id: f.id })} disabled={!!editing}>Edit</button>
               </div>
-              <dl>
-                <dt>Test</dt>
-                <dd class:blank={!f.test}>{#if f.test}<Linked text={f.test} />{:else}Not written yet{/if}</dd>
-                <dt>Lessons from failure</dt>
-                <dd class:blank={!f.lesson}>{#if f.lesson}<Linked text={f.lesson} />{:else}Not written yet{/if}</dd>
-              </dl>
-              <footer>
-                <span>Created {fmtDay(f.created_on)}</span>
-                {#if f.due_on}
-                  {@const late = !f.lesson && f.due_on < today()}
-                  <span class:overdue={late}>Deadline {fmtDay(f.due_on)}{late ? " · overdue" : ""}</span>
-                {/if}
-                {#if where}<span class="where">{where}</span>{:else if isLinked(f)}<span>Its project was deleted</span>{/if}
-                <span class="spacer"></span>
+              <div class="line2">
+                {#if where}<span class="where">{where}</span>
+                {:else if isLinked(f)}<span class="where none">Its project was deleted</span>
+                {:else}<span class="where none">No project</span>{/if}
                 {#if at.project}
                   <button class="mini" onclick={() => go(f, planningHash(at.project!.id, at.milestone?.id, f.id))}
                           disabled={!!editing}>Open in Planning ›</button>
@@ -220,7 +222,17 @@
                   <button class="mini" onclick={() => go(f, membersHash(member, at.group!.id, at.groupMilestone?.id, f.id))}
                           disabled={!!editing}>Open in Members ›</button>
                 {/if}
-              </footer>
+              </div>
+              {#if expanded[f.id]}
+                <dl>
+                  <dt>Hypothesis</dt>
+                  <dd><Linked text={f.hypothesis} /></dd>
+                  <dt>Test</dt>
+                  <dd class:blank={!f.test}>{#if f.test}<Linked text={f.test} />{:else}Not written yet{/if}</dd>
+                  <dt>Lessons from failure</dt>
+                  <dd class:blank={!f.lesson}>{#if f.lesson}<Linked text={f.lesson} />{:else}Not written yet{/if}</dd>
+                </dl>
+              {/if}
             </article>
           {/if}
         {:else}
@@ -241,7 +253,7 @@
 
 <style>
   .intro { font-size: 0.9rem; max-width: 46rem; }
-  .bar, header, .top, footer, .theme-form { display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; font-family: var(--font-ui); }
+  .bar, header, .theme-form { display: flex; flex-wrap: wrap; gap: 0.4rem 0.6rem; font-family: var(--font-ui); }
   .bar { margin-bottom: 1rem; }
   header { align-items: baseline; border-bottom: 1px solid var(--rule); padding-bottom: 0.3rem; }
   header h2 { margin: 0; font-family: var(--font); min-width: 0; overflow-wrap: anywhere; }
@@ -253,23 +265,39 @@
   .theme-form label { display: grid; gap: 0.2rem; flex: 1 1 16rem; font-size: 0.8rem; color: var(--ink-soft); }
   .danger { color: var(--danger); }
   .card {
-    border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem 0.9rem; margin-top: 0.6rem;
+    padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--rule); font-family: var(--font-ui);
     scroll-margin-top: 4.5rem;
   }
+  .card:hover { background: var(--panel); }
   .card.target { animation: lit 3s ease-out; }
   @keyframes lit { from, 40% { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
-  .top { flex-wrap: nowrap; align-items: flex-start; }
-  .top h3 { flex: 1; min-width: 0; margin: 0; font-family: var(--font); font-size: 1.02rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  /* the same columns on every line, so dates line up down the list */
+  .line1, .line2 { display: grid; grid-template-columns: minmax(0, 1fr) 8.5rem 11rem auto; gap: 0.2rem 0.8rem; align-items: baseline; }
+  .line2 { display: flex; flex-wrap: wrap; gap: 0.2rem 0.5rem; padding-left: 1.2rem; font-size: 0.78rem; }
+  .hypothesis {
+    display: flex; gap: 0.3rem; align-items: baseline; min-width: 0; padding: 0; border: none; background: none;
+    text-align: left; font-size: 0.92rem; font-weight: 600; color: var(--ink);
+  }
+  .hypothesis .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .caret { flex: none; width: 0.9rem; font-size: 0.7rem; color: var(--ink-soft); }
+  .date { font-size: 0.78rem; color: var(--ink-soft); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .where { flex: 1; min-width: 0; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .where.none { color: var(--ink-soft); }
   dl {
-    display: grid; grid-template-columns: 10rem minmax(0, 1fr); gap: 0.3rem 0.8rem; margin: 0.5rem 0;
-    font-family: var(--font-ui); font-size: 0.88rem;
+    display: grid; grid-template-columns: 10rem minmax(0, 1fr); gap: 0.3rem 0.8rem; margin: 0.4rem 0 0.2rem 1.2rem;
+    font-size: 0.86rem;
   }
   dt { color: var(--ink-soft); }
   dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
   dd.blank { color: var(--ink-soft); font-style: italic; }
-  footer { align-items: baseline; font-size: 0.78rem; color: var(--ink-soft); }
-  .where { color: var(--ink); min-width: 0; overflow-wrap: anywhere; }
   .overdue { color: var(--danger); }
-  .mini { font-size: 0.75rem; padding: 0.15rem 0.55rem; white-space: nowrap; }
-  @media (max-width: 40rem) { dl { grid-template-columns: minmax(0, 1fr); } }
+  .mini { font-size: 0.75rem; padding: 0.1rem 0.5rem; white-space: nowrap; }
+  @media (max-width: 40rem) {
+    .line1 { display: flex; flex-wrap: wrap; gap: 0.1rem 0.7rem; }
+    .line1 .hypothesis { flex: 1 0 100%; }
+    .line1 .date:first-of-type { padding-left: 1.2rem; }
+    .line1 .mini { margin-left: auto; }
+    .line2 .where { flex-basis: 100%; }
+    dl { grid-template-columns: minmax(0, 1fr); margin-left: 0; }
+  }
 </style>

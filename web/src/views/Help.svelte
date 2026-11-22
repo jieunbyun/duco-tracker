@@ -248,7 +248,9 @@
     <dt>Failures</dt>
     <dd>
       Hypotheses under general themes of yours: each with its test, the lessons from failure, the date it was created
-      and a deadline (in red once it has passed with no lesson written). A hypothesis can be on a project or one of
+      and a deadline (in red once it has passed with no lesson written). Each takes two lines — the hypothesis, its
+      dates and Edit; then its project and milestone, and the way there — so many fit in view; click a hypothesis to
+      read its test and lessons. A hypothesis can be on a project or one of
       its milestones, from Planning or a shared project; where a Planning project stands for a shared one, it shows
       in both. They appear in an opened project in Planning and on projects in Members, and on a milestone when you
       click it. <em>Open in Failures ›</em> and <em>+ Hypothesis ›</em> there bring you to this tab;
