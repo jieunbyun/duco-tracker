@@ -21,6 +21,19 @@
   import type { Action, ActionComment } from "../lib/actions";
   import GroupProjects from "../lib/GroupProjects.svelte";
   import { preview } from "../lib/preview.svelte";
+  import { tick } from "svelte";
+  import { loadBoardBeside, failuresHash } from "../lib/failures";
+  import type { Board } from "../lib/failures";
+  import BackLink from "../lib/BackLink.svelte";
+
+  // #/supervision?u=<person>&p=<shared project>&m=<milestone>&f=<hypothesis> (Open in Members, in Failures):
+  // that person's project, with the milestone brought into view
+  const arrived = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  if (arrived.size) history.replaceState(null, "", "#/supervision");
+  const backToFailures = arrived.get("f") ? failuresHash(arrived.get("f")) : null;
+  let target = $state(arrived.get("p") ? { project: arrived.get("p")!, milestone: arrived.get("m") } : null);
+  let board = $state<Board | null>(null); // your Failures, shown on their projects and milestones
+  let planningProjects = $state<Project[]>([]); // those standing for shared ones share their Failures
 
   let me = $state("");
   let members = $state<Member[]>([]);
@@ -40,9 +53,11 @@
 
   async function load() {
     try {
-      const [id, m, p, ms, es, planning, tax] = await Promise.all([
+      const [id, m, p, ms, es, planning, tax, b] = await Promise.all([
         myId(), loadMembers(), loadGroupProjects(true), loadMilestones(), loadEntries(), loadProjects(), loadTaxonomy(),
+        loadBoardBeside(),
       ]);
+      [board, planningProjects] = [b, planning];
       const ids = es.map((e) => e.id);
       const [cs, ed] = await Promise.all([loadComments(ids), revisionCounts(ids)]);
       const supCats = new Set(tax.allCategories.filter((c) => c.code === "RES_SUP").map((c) => c.id));
@@ -69,13 +84,23 @@
       loading = false;
     }
   }
-  load();
+  load().then(arrive);
+  async function arrive() {
+    if (!target) return;
+    await tick();
+    const ms = target.milestone ? document.getElementById(`gms-${target.milestone}`) : null;
+    const el = ms ?? document.getElementById(`gp-${target.project}`);
+    el?.scrollIntoView({ block: ms ? "center" : "start", behavior: "smooth" });
+  }
 
   // ---- Members › a person (you first) ---------------------------------------------------
   const SEL_KEY = "supervision.student";
-  let selected = $state<string | null>((() => { try { return localStorage.getItem(SEL_KEY); } catch { return null; } })());
+  let selected = $state<string | null>(
+    arrived.get("u") ?? (() => { try { return localStorage.getItem(SEL_KEY); } catch { return null; } })(),
+  );
   function pick(id: string) {
     selected = id;
+    target = null;
     adding = false;
     try { localStorage.setItem(SEL_KEY, id); } catch {}
   }
@@ -285,7 +310,8 @@
           {#if !isMe}<button role="tab" aria-selected={tab === "time"} class:on={tab === "time"} onclick={() => (tab = "time")}>Time</button>{/if}
         </div>
         {#if tab === "projects"}
-          <GroupProjects projects={theirProjects} {milestones} {members} {activity} supervisor newFor={current.user_id} onchanged={load} />
+          <GroupProjects projects={theirProjects} {milestones} {members} {activity} supervisor newFor={current.user_id} onchanged={load}
+                         failures={board && { board, planning: planningProjects, member: current.user_id }} {target} />
         {:else if tab === "time" && !isMe}
           <MemberTime userId={current.user_id} {projects} />
         {:else}
@@ -305,6 +331,8 @@
     </div>
   </div>
 </section>
+
+{#if backToFailures}<BackLink href={backToFailures} text="Back to Failures" />{/if}
 
 <style>
   .layout { display: grid; grid-template-columns: 15rem minmax(0, 1fr); gap: 1.2rem; align-items: start; margin-top: 0.8rem; }

@@ -244,6 +244,18 @@
       results, Enter opens one (or creates it, if nothing matches), and <kbd>/</kbd> or <kbd>Ctrl</kbd>+<kbd>K</kbd>
       goes back to the search box. Private to you.
     </dd>
+
+    <dt>Failures</dt>
+    <dd>
+      Hypotheses under general themes of yours: each with its test, the lessons from failure, the date it was created
+      and a deadline (in red once it has passed with no lesson written). A hypothesis can be on a project or one of
+      its milestones, from Planning or a shared project; where a Planning project stands for a shared one, it shows
+      in both. They appear in an opened project in Planning and on projects in Members, and on a milestone when you
+      click it. <em>Open in Failures ›</em> and <em>+ Hypothesis ›</em> there bring you to this tab;
+      <em>Open in Planning ›</em> and <em>Open in Members ›</em> here take you to the project, and each way leaves a
+      ← Back button. A theme can be deleted once it is empty. Private to you: members don't see them, on shared
+      projects or anywhere else.
+    </dd>
   </dl>
 
   <h2>Categories</h2>

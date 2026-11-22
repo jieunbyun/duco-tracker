@@ -15,21 +15,27 @@
   import { shareEmail } from "../lib/email";
   import { loadGroupProjects, loadMilestones as loadSharedMilestones } from "../lib/group";
   import type { GroupProject } from "../lib/group";
+  import { loadBoardBeside, onProject, onMilestone, planningHash, failuresHash, NOWHERE } from "../lib/failures";
+  import type { Board } from "../lib/failures";
+  import FailureList from "../lib/FailureList.svelte";
+  import BackLink from "../lib/BackLink.svelte";
 
   let tax = $state<Taxonomy | null>(null);
   let projects = $state<Project[]>([]);
   let hours = $state<HourRow[]>([]);
   let groupProjects = $state<GroupProject[]>([]); // shared projects a Planning project can stand for
   let privateShared = $state(new Map<string, boolean>()); // their milestones: private (only you) or public
+  let board = $state<Board | null>(null); // Failures, shown on their projects and milestones
   let loading = $state(true);
   let error = $state("");
 
   async function load() {
     try {
-      const [t, p, h, g, gm] = await Promise.all([
+      const [t, p, h, g, gm, b] = await Promise.all([
         loadTaxonomy(), loadProjects(), loadAllHours(), loadGroupProjects(true).catch(() => [] as GroupProject[]),
-        loadSharedMilestones().catch(() => []),
+        loadSharedMilestones().catch(() => []), loadBoardBeside(),
       ]);
+      board = b;
       privateShared = new Map(gm.map((m) => [m.id, m.is_private]));
       tax = t;
       projects = p;
@@ -42,29 +48,35 @@
       loading = false;
     }
   }
-  load().then(goToMilestone);
+  load().then(arrive);
 
-  // #/planning?m=<milestone id> (a milestone's name in Week's + From milestones):
-  // open its project and bring the milestone into view, lit up for a moment
+  // #/planning?m=<milestone id> (a milestone's name in Week's + From milestones), or
+  // ?p=<project id>&m=…&f=<hypothesis id> (Open in Planning, in Failures): open the
+  // project and bring it, or the milestone, into view, lit up for a moment
   let target = $state<string | null>(null);
   let backToWeek = $state<string | null>(null); // that week, with + From milestones open again
-  async function goToMilestone() {
+  let backToFailures = $state<string | null>(null);
+  async function arrive() {
     const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
     const id = params.get("m");
-    if (!id) return;
+    const pid = params.get("p");
+    if (!id && !pid) return;
     history.replaceState(null, "", "#/planning");
     const w = params.get("w");
     if (w) backToWeek = `#/week?w=${w}&ms=1`;
-    const p = projects.find((x) => x.milestone.some((m) => m.id === id));
+    const f = params.get("f");
+    if (f) backToFailures = failuresHash(f);
+    const p = projects.find((x) => x.milestone.some((m) => m.id === id)) ?? projects.find((x) => x.id === pid);
     if (!p) return;
     if (["done", "dropped"].includes(p.status)) showFinished = true;
     expanded = p.id;
     target = id;
     await tick();
-    const el = document.getElementById(`ms-${id}`);
+    const ms = id ? document.getElementById(`ms-${id}`) : null;
+    const el = ms ?? document.getElementById(`pl-${p.id}`);
     const folded = el?.closest("details");
     if (folded) folded.open = true;
-    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    el?.scrollIntoView({ block: ms ? "center" : "start", behavior: "smooth" });
   }
 
   // ---- derived figures ----------------------------------------------------
@@ -351,7 +363,7 @@
           {#each projectsIn(c) as p (p.id)}
             {@const l = loads.get(p.id)!}
             {@const plan = plannedOf(p)}
-            <div class="project" class:open={expanded === p.id} class:complete={p.status === "done"}>
+            <div class="project" id={`pl-${p.id}`} class:open={expanded === p.id} class:complete={p.status === "done"}>
               <div class="p-line">
               <button class="p-row" onclick={() => toggle(p.id)} aria-expanded={expanded === p.id}>
                 <span class="p-name">
@@ -377,10 +389,15 @@
                      onchange={(ev) => setComplete(p, (ev.target as HTMLInputElement).checked)} />
               </div>
               {#if expanded === p.id}
-                <div class="p-body">
+                <div class="p-body" data-unsaved-scope>
                   <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id} shared={sharedChoices}
                                  onsaved={changed} oncancel={() => (expanded = null)} />
-                  <Milestones project={p} {actualByMilestone} {privateShared} {target} onchange={load} />
+                  <Milestones project={p} {actualByMilestone} {privateShared} {target} {board} onchange={load} />
+                  {#if board}
+                    <FailureList {board} items={board.items.filter((f) => onProject(f, p, p.group_project_id))}
+                                 here={planningHash(p.id)} attach={{ ...NOWHERE, project_id: p.id }}
+                                 milestoneOf={(f) => p.milestone.find((m) => onMilestone(f, m, m.group_milestone_id))?.title} />
+                  {/if}
                 </div>
               {/if}
             </div>
@@ -470,6 +487,8 @@
   <a class="back-week" href={backToWeek}>← Back to + From milestones</a>
 {/if}
 
+{#if backToFailures}<BackLink href={backToFailures} text="Back to Failures" />{/if}
+
 {#if flash}
   <div class="flash" role="status">
     <span>{flash.text}</span>
@@ -552,7 +571,7 @@
   .cats summary h2 { display: inline; margin: 0; }
   .cats summary .muted { font-size: 0.82rem; margin-left: 0.4rem; }
   .cats[open] summary { margin-bottom: 0.8rem; }
-  .project { border-radius: var(--radius); }
+  .project { border-radius: var(--radius); scroll-margin-top: 4.5rem; }
   .p-line { display: flex; align-items: flex-start; gap: 0.2rem; }
   .p-done { width: auto; flex: none; margin: 0.75rem 0.6rem 0 0.2rem; }
   .project.complete .p-name { text-decoration: line-through; color: var(--ink-soft); }

@@ -6,13 +6,18 @@
   import { plannedOf } from "./horizon";
   import { milestoneDates } from "./plan";
   import type { DateSource } from "./plan";
+  import { onMilestone, planningHash, NOWHERE } from "./failures";
+  import type { Board } from "./failures";
+  import FailureList from "./FailureList.svelte";
 
   type Props = {
     project: Project; actualByMilestone: Map<string, number>; onchange: () => void;
     privateShared?: Map<string, boolean>; // shared milestone id → whether it is private (only you)
-    target?: string | null; // a milestone just gone to from Week, lit up for a moment
+    target?: string | null; // a milestone just gone to from Week or Failures, lit up for a moment
+    board?: Board | null; // Failures, to show on the milestones they are on
   };
-  let { project, actualByMilestone, onchange, privateShared = new Map(), target = null }: Props = $props();
+  let { project, actualByMilestone, onchange, privateShared = new Map(), target = null, board = null }: Props = $props();
+  const failuresOn = (m: Milestone) => board?.items.filter((f) => onMilestone(f, m, m.group_milestone_id)) ?? [];
 
   // Which row is open for editing: a milestone id, "new", or nothing.
   let editing = $state<string | null>(null);
@@ -160,6 +165,12 @@
       </fieldset>
     {/if}
     <label class="wide">Notes <textarea rows="2" bind:value={draft.notes}></textarea></label>
+    {#if m && board}
+      <div class="wide">
+        <FailureList {board} items={failuresOn(m)} here={planningHash(project.id, m.id)}
+                     attach={{ ...NOWHERE, project_id: project.id, milestone_id: m.id }} />
+      </div>
+    {/if}
     {#if error}<p class="error wide">{error}</p>{/if}
     <div class="actions wide">
       <button class="primary" type="submit" disabled={busy || !draft.title.trim()}>{m ? "Save" : "Add milestone"}</button>
@@ -192,12 +203,14 @@
           {:else}
             {@const actual = actualByMilestone.get(m.id) ?? 0}
             {@const d = milestoneDates(project, m)}
+            {@const tried = failuresOn(m).length}
             <div class="ms-line" id={`ms-${m.id}`} class:complete={m.status === "done"} class:target={m.id === target}>
             <button class="ms-row" onclick={() => open(m)}>
               <span class="title">
                 {#if linked}<span class="shared" title={isPrivate(m) ? "On the shared project, private: only you see it" : "A public milestone of the shared project"}>{isPrivate(m) ? "🔒" : "⇄"}</span>{/if}
                 {m.title}
                 {#if m.hard_deadline}<small class="hard">hard deadline</small>{/if}
+                {#if tried}<small class="after-of">{tried} {tried === 1 ? "hypothesis" : "hypotheses"}</small>{/if}
                 {#if m.after_ids.some(titleOf)}<small class="after-of">after {m.after_ids.map(titleOf).filter(Boolean).join(", ")}</small>{/if}
               </span>
               <span class="chip status-{m.status}">{m.status}</span>

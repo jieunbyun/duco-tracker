@@ -12,13 +12,23 @@
   import type { DateSource } from "./plan";
   import { fmtDay, today } from "./dates";
   import Sortable from "./Sortable.svelte";
+  import { onMilestone, membersHash, NOWHERE } from "./failures";
+  import type { Board } from "./failures";
+  import type { Project } from "./data";
+  import FailureList from "./FailureList.svelte";
 
   type Props = {
     project: GroupProject; milestones: GroupMilestone[]; members?: Member[]; readonly?: boolean;
     act: (f: () => Promise<unknown>) => Promise<boolean>;
     onediting?: (open: boolean) => void; // a milestone's form is open (so the project's Delete can step aside)
+    // your Failures, in Members only (never in a member's own tab, or the preview of it);
+    // `planning` is the Planning project standing for this one
+    failures?: { board: Board; planning?: Project; member: string } | null;
+    target?: string | null; // a milestone just gone to from Failures, lit up for a moment
   };
-  let { project, milestones, members = [], readonly = false, act, onediting }: Props = $props();
+  let { project, milestones, members = [], readonly = false, act, onediting, failures = null, target = null }: Props = $props();
+  const failuresOn = (m: GroupMilestone) => failures?.board.items.filter(
+    (f) => onMilestone(f, failures.planning?.milestone.find((x) => x.group_milestone_id === m.id), m.id)) ?? [];
   // a public milestone's lead: one of the people on the project (a label only)
   const nameOf = (id: string) => members.find((x) => x.user_id === id)?.display_name ?? "—";
   const people = $derived(members.filter((x) => project.members.includes(x.user_id) || x.role === "supervisor"));
@@ -154,6 +164,12 @@
       </fieldset>
     {/if}
     <label class="wide">Notes <textarea rows="2" bind:value={draft.notes}></textarea></label>
+    {#if m && failures}
+      <div class="wide">
+        <FailureList board={failures.board} items={failuresOn(m)} here={membersHash(failures.member, project.id, m.id)}
+                     attach={{ ...NOWHERE, group_project_id: project.id, group_milestone_id: m.id }} />
+      </div>
+    {/if}
     {#if error}<p class="error wide">{error}</p>{/if}
     <div class="actions wide">
       <button class="primary" type="submit" disabled={!draft.title.trim()}>{m ? "Save" : "Add milestone"}</button>
@@ -168,13 +184,15 @@
             {@render form(m)}
           {:else}
             {@const d = datesOf(m)}
-            <div class="ms-line" class:complete={m.done}>
+            {@const tried = failuresOn(m).length}
+            <div class="ms-line" id={`gms-${m.id}`} class:complete={m.done} class:target={m.id === target}>
               <button class="ms-row" onclick={() => open(m)} disabled={readonly} title={readonly ? "" : "Click to edit"}>
                 <span class="title">
                   {#if m.is_private}<span class="lock" title="Private — only you see it">🔒</span>{/if}
                   {m.title}
                   {#if m.lead_id && !m.is_private}<small class="after-of">lead: {nameOf(m.lead_id)}</small>{/if}
                   {#if m.hard_deadline}<small class="hard">hard deadline</small>{/if}
+                  {#if tried}<small class="after-of">{tried} {tried === 1 ? "hypothesis" : "hypotheses"}</small>{/if}
                   {#if m.after_ids.some(titleOf)}<small class="after-of">after {m.after_ids.map(titleOf).filter(Boolean).join(", ")}</small>{/if}
                   {#if m.done && m.done_on}<small class="after-of">done {fmtDay(m.done_on)}</small>{/if}
                 </span>
@@ -211,6 +229,8 @@
 </div>
 
 <style>
+  .ms-line.target { animation: lit 3s ease-out; }
+  @keyframes lit { from, 40% { background: color-mix(in srgb, var(--accent) 22%, transparent); } to { background: transparent; } }
   .milestones { margin-top: 0.4rem; font-family: var(--font-ui); }
   .ms-row {
     width: 100%;

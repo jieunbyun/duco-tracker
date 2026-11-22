@@ -10,6 +10,11 @@
   import GroupMilestones from "./GroupMilestones.svelte";
   import ProjectShow from "./ProjectShow.svelte";
   import { Minimised } from "./minimised.svelte";
+  import { untrack } from "svelte";
+  import { onProject, onMilestone, membersHash, NOWHERE } from "./failures";
+  import type { Board, Failure } from "./failures";
+  import type { Project } from "./data";
+  import FailureList from "./FailureList.svelte";
 
   type Props = {
     projects: GroupProject[];
@@ -20,8 +25,11 @@
     newFor?: string | null; // when set, "+ Project" puts this person on the new project
     readonly?: boolean; // previewing what a member sees
     onchanged: () => Promise<void>;
+    failures?: { board: Board; planning: Project[]; member: string } | null; // your Failures, in Members only
+    target?: { project: string; milestone: string | null } | null; // gone to from Failures
   };
-  let { projects, milestones, members, activity = new Map(), supervisor, newFor = null, readonly = false, onchanged }: Props = $props();
+  let { projects, milestones, members, activity = new Map(), supervisor, newFor = null, readonly = false, onchanged,
+        failures = null, target = null }: Props = $props();
 
   let error = $state("");
   /** Run a change and reload; false (with the message shown) if it failed. */
@@ -35,17 +43,31 @@
   let msOpen = $state<Record<string, boolean>>({});
 
   // ---- what to show, and what you keep minimised ---------------------------------------
-  let show = $state("");
+  // gone to from Failures: in sight even if it is done or minimised (without changing what you keep minimised)
+  const gone = untrack(() => projects.find((p) => p.id === target?.project));
+  let show = $state(gone?.status === "done" ? gone.id : "");
+  let revealed = $state<string | null>(gone?.id ?? null);
   const shown = $derived(projectsToShow(projects, show));
   const folded = new Minimised(() => !readonly);
   folded.load();
   async function toggle(p: GroupProject) {
     try {
       error = "";
+      if (revealed === p.id) {
+        revealed = null;
+        if (folded.has(p.id)) return; // it was open only for the visit: minimised again
+      }
       await folded.toggle(p.id);
     } catch (e) {
       error = (e as Error).message;
     }
+  }
+
+  const standIn = (p: GroupProject) => failures?.planning.find((x) => x.group_project_id === p.id);
+  function milestoneOf(f: Failure, p: GroupProject): string | undefined {
+    const copies = standIn(p)?.milestone ?? [];
+    return milestones.find((m) => m.project_id === p.id
+      && onMilestone(f, copies.find((x) => x.group_milestone_id === m.id), m.id))?.title;
   }
 
   // ---- a project's details (new or edited) ------------------------------------------
@@ -110,8 +132,8 @@
 
 {#each shown as p (p.id)}
   {@const ms = milestones.filter((m) => m.project_id === p.id)}
-  {@const small = folded.has(p.id)}
-  <section class="gp" class:quiet={p.status !== "active"}>
+  {@const small = folded.has(p.id) && revealed !== p.id}
+  <section class="gp" id={`gp-${p.id}`} data-unsaved-scope class:quiet={p.status !== "active"}>
     {#if draft?.id === p.id}
       {@render editor()}
     {:else}
@@ -157,7 +179,14 @@
       {/if}
     </div>
 
-    <GroupMilestones project={p} milestones={ms} {members} {readonly} {act} onediting={(on) => (msOpen[p.id] = on)} />
+    <GroupMilestones project={p} milestones={ms} {members} {readonly} {act} onediting={(on) => (msOpen[p.id] = on)}
+                     failures={failures && { board: failures.board, planning: standIn(p), member: failures.member }}
+                     target={target?.milestone} />
+    {#if failures}
+      <FailureList board={failures.board} items={failures.board.items.filter((f) => onProject(f, standIn(p), p.id))}
+                   here={membersHash(failures.member, p.id)} attach={{ ...NOWHERE, group_project_id: p.id }}
+                   milestoneOf={(f) => milestoneOf(f, p)} />
+    {/if}
     {/if}
   </section>
 {:else}
@@ -171,7 +200,7 @@
 <style>
   .bar { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-bottom: 0.7rem; font-family: var(--font-ui); }
   .fold { background: none; border: none; padding: 0 0.1rem; color: var(--ink-soft); font-size: 0.85rem; cursor: pointer; }
-  .gp { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem 0.9rem; margin-bottom: 0.8rem; font-family: var(--font-ui); }
+  .gp { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.7rem 0.9rem; margin-bottom: 0.8rem; font-family: var(--font-ui); scroll-margin-top: 4.5rem; }
   .gp.quiet { opacity: 0.7; }
   .gp header { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: baseline; }
   .gp h3 { margin: 0; font-size: 1rem; }
