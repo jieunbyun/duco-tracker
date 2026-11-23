@@ -2,21 +2,25 @@
 // kept them — and the way back to .tex, and in from it.
 import { supabase } from "./supabase";
 import { check } from "./data";
-import { today } from "./dates";
+import { today, addDays } from "./dates";
 
-export type Section = { heading: string; body: string; closed?: boolean; sent?: string[] };
+/** `sent`: action lines sent to Week or ticked off; `done`: agenda items covered. */
+export type Section = { heading: string; body: string; closed?: boolean; sent?: string[]; done?: string[] };
 export type Series = { id: string; name: string; headings: string[]; project_id: string | null; created_at: string };
 export type Meeting = {
   id: string; series_id: string; met_on: string; title: string | null; people: string | null;
   sections: Section[]; created_at: string; updated_at: string;
+  todo_id?: string | null; // its entry on the Week calendar (0064)
 };
-export type MeetingFields = Pick<Meeting, "series_id" | "met_on" | "title" | "people" | "sections">;
+export type MeetingFields = Pick<Meeting, "series_id" | "met_on" | "title" | "people" | "sections" | "todo_id">;
 
-/** A meeting has two parts, always: what was discussed, and the actions. */
+/** A meeting has its agenda (planned ahead), what was discussed, and the actions. */
+export const AGENDA = "Agenda";
 export const DISCUSSION = "Discussion";
 export const ACTIONS = "Actions";
 /** The actions: each line can go to Week as a to-do. */
 export const isAction = (h: string) => h === ACTIONS;
+export const isAgenda = (h: string) => h === AGENDA;
 /** A section's lines, without their "- " (an empty or "N/A" line is no line). */
 export const linesOf = (body: string) =>
   body.split("\n").map((l) => l.replace(/^\s*-\s*/, "").trim()).filter((l) => l && !/^n\/?a$/i.test(l));
@@ -28,17 +32,18 @@ function labelled(h: string, body: string): string {
   return [`- ${h}:`, ...lines.map((l) => `  ${/^\s*-\s/.test(l) ? l : `- ${l.trim()}`}`)].join("\n");
 }
 /**
- * Any meeting's sections as the two: I will, Actions, Next steps and To do go to Actions
+ * Any meeting's sections as its three (the agenda, and the two): I will, Actions, Next steps and To do go to Actions
  * (They will too, labelled); Discussion and untitled notes go to Discussion, and every other
  * heading (Purpose, Update, Decided, Open, Impressions…) goes there as a labelled line.
  */
 export function asTwo(sections: Section[]): Section[] {
-  const discussion: string[] = [], actions: string[] = [], sent: string[] = [];
+  const discussion: string[] = [], actions: string[] = [], sent: string[] = [], agenda: string[] = [], done: string[] = [];
   for (const s of sections) {
     const h = s.heading.trim().replace(/[.:]\s*$/, "");
     const body = s.body.replace(/\s+$/, "");
     if (!linesOf(body).length) continue;
-    if (/^(actions?|i will|next steps|to ?dos?)$/i.test(h)) { actions.push(body); sent.push(...(s.sent ?? [])); }
+    if (/^agendas?$/i.test(h)) { agenda.push(body); done.push(...(s.done ?? [])); }
+    else if (/^(actions?|i will|next steps|to ?dos?)$/i.test(h)) { actions.push(body); sent.push(...(s.sent ?? [])); }
     else if (/^they will$/i.test(h)) actions.push(labelled(h, body));
     else if (!h || /^(discussion|notes)$/i.test(h)) discussion.push(body);
     else discussion.push(labelled(h, body));
@@ -47,6 +52,7 @@ export function asTwo(sections: Section[]): Section[] {
   const join = (parts: string[]) => parts.length < 2 ? (parts[0] ?? "")
     : parts.join("\n").split("\n").filter((l) => l.trim()).map((l) => (/^\s*-\s/.test(l) ? l : `- ${l.trim()}`)).join("\n");
   return [
+    { heading: AGENDA, body: join(agenda), ...(done.length ? { done } : {}) },
     { heading: DISCUSSION, body: join(discussion) },
     { heading: ACTIONS, body: join(actions), ...(sent.length ? { sent } : {}) },
   ];
@@ -57,21 +63,25 @@ const PAGE = 1000;
 const missing = (code?: string) => code === "PGRST205" || code === "42P01";
 
 /** Every series and meeting; null until 0060 is run. */
-export async function loadAll(): Promise<{ series: Series[]; meetings: Meeting[] } | null> {
+export async function loadAll(): Promise<{ series: Series[]; meetings: Meeting[]; canLink: boolean } | null> {
   const s = await supabase.from("meeting_series").select("id,name,headings,project_id,created_at").order("name");
   if (s.error) {
     if (missing(s.error.code)) return null;
     throw new Error(s.error.message);
   }
   const meetings: Meeting[] = [];
+  const COLS = "id,series_id,met_on,title,people,sections,created_at,updated_at";
+  let canLink = true;
   for (let from = 0; ; from += PAGE) {
-    const m = await supabase.from("meeting").select("id,series_id,met_on,title,people,sections,created_at,updated_at")
+    const page = (cols: string) => supabase.from("meeting").select(cols)
       .order("met_on", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, from + PAGE - 1);
+    let m = await page(canLink ? `${COLS},todo_id` : COLS);
+    if (m.error && m.error.message.includes("todo_id")) { canLink = false; m = await page(COLS); } // 0064 not run yet
     if (m.error) throw new Error(m.error.message);
-    meetings.push(...(m.data as Meeting[]).map((x) => ({ ...x, sections: asTwo(Array.isArray(x.sections) ? x.sections : []) })));
+    meetings.push(...(m.data as unknown as Meeting[]).map((x) => ({ ...x, sections: asTwo(Array.isArray(x.sections) ? x.sections : []) })));
     if (m.data.length < PAGE) break;
   }
-  return { series: s.data as Series[], meetings };
+  return { series: s.data as Series[], meetings, canLink };
 }
 export async function saveSeries(id: string | null, fields: Partial<Pick<Series, "name" | "headings" | "project_id">>): Promise<string> {
   if (id) {
@@ -108,6 +118,58 @@ export async function importLog(log: ParsedLog): Promise<string> {
 export async function sendToWeek(title: string, note: string, day = today()): Promise<void> {
   await check(supabase.from("todo").insert({ kind: "task", title, due_on: day, note }));
 }
+
+// ---- the Week calendar ------------------------------------------------------------------
+/** A meeting on the Week calendar: its to-do, and the day and times it is planned. */
+export type CalendarEntry = { todo_id: string; title: string; day: string; start: string | null; end: string | null; source: string | null };
+
+/** The calendar's meetings (kind "meeting") with a day from `from` to `to`, by day and time. */
+export async function calendarBetween(from: string, to: string): Promise<CalendarEntry[]> {
+  const slots = await check<{ todo_id: string; planned_on: string; start_time: string | null; end_time: string | null; is_cancelled: boolean }[]>(
+    supabase.from("todo_slot").select("todo_id,planned_on,start_time,end_time,is_cancelled").gte("planned_on", from).lte("planned_on", to));
+  const ids = [...new Set((slots ?? []).filter((x) => !x.is_cancelled).map((x) => x.todo_id))];
+  if (!ids.length) return [];
+  const todos = await check<{ id: string; title: string; kind: string; source: string | null; is_cancelled: boolean }[]>(
+    supabase.from("todo").select("id,title,kind,source,is_cancelled").in("id", ids));
+  const meeting = new Map((todos ?? []).filter((t) => t.kind === "meeting" && !t.is_cancelled).map((t) => [t.id, t]));
+  return (slots ?? []).filter((x) => !x.is_cancelled && meeting.has(x.todo_id))
+    .map((x) => ({ todo_id: x.todo_id, title: meeting.get(x.todo_id)!.title, day: x.planned_on, start: x.start_time, end: x.end_time, source: meeting.get(x.todo_id)!.source }))
+    .sort((a, b) => a.day.localeCompare(b.day) || (a.start ?? "").localeCompare(b.start ?? ""));
+}
+/** Where the given calendar meetings are (their first day planned): todo id → entry. */
+export async function calendarFor(todoIds: string[]): Promise<Map<string, CalendarEntry>> {
+  const out = new Map<string, CalendarEntry>();
+  if (!todoIds.length) return out;
+  const [todos, slots] = await Promise.all([
+    check<{ id: string; title: string; source: string | null }[]>(supabase.from("todo").select("id,title,source").in("id", todoIds)),
+    check<{ todo_id: string; planned_on: string; start_time: string | null; end_time: string | null }[]>(
+      supabase.from("todo_slot").select("todo_id,planned_on,start_time,end_time").in("todo_id", todoIds).order("planned_on")),
+  ]);
+  for (const t of todos ?? []) {
+    const x = (slots ?? []).find((y) => y.todo_id === t.id);
+    if (x) out.set(t.id, { todo_id: t.id, title: t.title, day: x.planned_on, start: x.start_time, end: x.end_time, source: t.source });
+  }
+  return out;
+}
+/** A new meeting on the Week calendar, on `day` from `start` to `end` ("HH:MM"); its to-do's id. */
+export async function addToCalendar(title: string, day: string, start: string, end: string): Promise<string> {
+  const todo = await check<{ id: string }>(supabase.from("todo").insert({ kind: "meeting", title, due_on: day }).select("id").single());
+  await check(supabase.from("todo_slot").insert({ todo_id: todo!.id, planned_on: day, start_time: start || null, end_time: end || null }));
+  return todo!.id;
+}
+/** For Week: which of its calendar meetings have a meeting log here — todo id → meeting id. Empty until 0064 is run. */
+export async function agendasFor(todoIds: string[]): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  if (!todoIds.length) return out;
+  const r = await supabase.from("meeting").select("id,todo_id").in("todo_id", todoIds);
+  if (r.error) return out;
+  for (const m of r.data as { id: string; todo_id: string }[]) out.set(m.todo_id, m.id);
+  return out;
+}
+/** Week's address for a calendar meeting: its week, with the meeting picked out. */
+export const weekHash = (day: string, todoId: string, weekStartOf: (d: string) => string) =>
+  `#/week?w=${weekStartOf(day)}&show=${todoId}`;
+export const soon = (day: string) => day >= today() && day <= addDays(today(), 14);
 
 // ---- from .tex ---------------------------------------------------------------------------
 export type ParsedMeeting = Omit<MeetingFields, "series_id">;

@@ -4,18 +4,21 @@
 </script>
 
 <script lang="ts">
-  // Meetings: your meeting logs, one series per log (as your .tex files were), each meeting
-  // in two parts — Discussion and Actions; the actions not yet done, sent to Week; search
-  // across them all; and .tex out and in.
+  // Meetings: your meeting logs, one series per log (as your .tex files were). A meeting is
+  // planned with its agenda — tied, if you like, to its entry on the Week calendar, each
+  // leading to the other — and kept with what was discussed and the actions; the actions
+  // not yet done go to Week; search across them all; and .tex out and in.
   import {
     loadAll, saveSeries, deleteSeries, saveMeeting, deleteMeeting, importLog, sendToWeek, parseTex, toTex, downloadTex,
-    DISCUSSION, ACTIONS, isAction, linesOf,
+    AGENDA, DISCUSSION, ACTIONS, isAction, isAgenda, linesOf, calendarBetween, calendarFor, addToCalendar,
   } from "../lib/meetings";
-  import type { Series, Meeting, Section, ParsedLog } from "../lib/meetings";
+  import type { Series, Meeting, Section, ParsedLog, CalendarEntry } from "../lib/meetings";
+  import BackLink from "../lib/BackLink.svelte";
+  import { tick } from "svelte";
   import { loadProjects } from "../lib/data";
   import type { Project } from "../lib/data";
   import { undoable } from "../lib/undo.svelte";
-  import { fmtDay, today } from "../lib/dates";
+  import { fmtDay, today, weekStart } from "../lib/dates";
 
   let series = $state<Series[]>([]);
   let meetings = $state<Meeting[]>([]);
@@ -26,6 +29,17 @@
   let selected = $state<string | null>(last.selected);
   let query = $state(last.query);
   let opened = $state(false); // on a phone: the series is showing instead of the list
+  let canLink = $state(true); // false until 0064 is run
+  let cal = $state(new Map<string, CalendarEntry>()); // the linked calendar entries, by to-do
+  let flash = $state<string | null>(null); // a meeting lit up for a moment, arrived at from Week
+
+  // from Week: #/meetings?m=<meeting>&back=…  or  ?new=1&todo=<to-do>&date=…&title=…&back=…
+  const arrived = new URLSearchParams(location.hash.split("?")[1] ?? "");
+  const back = /^#\/week(\?[\w=&%.-]*)?$/.test(arrived.get("back") ?? "") ? arrived.get("back") : null;
+  let goTo = arrived.get("m");
+  let fromCalendar = arrived.get("new") && arrived.get("todo")
+    ? { todo: arrived.get("todo")!, date: arrived.get("date") ?? today(), title: arrived.get("title") ?? "" } : null;
+  if (arrived.size) history.replaceState(null, "", "#/meetings");
 
   $effect(() => {
     Object.assign(last, { selected, query });
@@ -37,9 +51,12 @@
       missing = all === null;
       series = all?.series ?? [];
       meetings = all?.meetings ?? [];
+      canLink = all?.canLink ?? true;
       projects = p;
+      cal = await calendarFor([...new Set(meetings.map((m) => m.todo_id).filter((x): x is string => !!x))]).catch(() => new Map());
       if (!selected || !series.some((s) => s.id === selected)) selected = series[0]?.id ?? null;
       error = "";
+      arrive();
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -47,6 +64,31 @@
     }
   }
   load();
+
+  /** Arrived from Week: show that meeting, or start one for that calendar entry. */
+  async function arrive() {
+    if (goTo) {
+      const m = meetings.find((x) => x.id === goTo);
+      goTo = null;
+      if (!m) return;
+      selected = m.series_id;
+      query = "";
+      opened = true;
+      flash = m.id;
+      await tick();
+      document.querySelector(`[data-meeting="${m.id}"]`)?.scrollIntoView({ block: "center" });
+      setTimeout(() => (flash = null), 2500);
+    } else if (fromCalendar) {
+      const c = fromCalendar;
+      fromCalendar = null;
+      if (!series.length) return void (error = "Add a series first (+ New series), then come back from the calendar to start its agenda.");
+      opened = true;
+      newMeeting({ date: c.date, title: c.title, todo: c.todo });
+      // its time, to show while you write the agenda
+      const found = await calendarFor([c.todo]).catch(() => new Map<string, CalendarEntry>());
+      cal = new Map([...cal, ...found]);
+    }
+  }
 
   async function act(label: string, run: () => Promise<unknown>): Promise<boolean> {
     try {
@@ -102,23 +144,73 @@
   }
 
   // ---- a meeting -----------------------------------------------------------------------
-  type Draft = { id: string | null; met_on: string; title: string; people: string; sections: Section[] };
+  type Draft = {
+    id: string | null; series_id: string; met_on: string; title: string; people: string; sections: Section[];
+    todo_id: string | null; newCal: { start: string; end: string } | null; // newCal: add it to the calendar on saving
+  };
   let draft = $state<Draft | null>(null);
-  function newMeeting() {
-    draft = { id: null, met_on: today(), title: "", people: "", sections: [{ heading: DISCUSSION, body: "" }, { heading: ACTIONS, body: "" }] };
+  const blankSections = (): Section[] => [{ heading: AGENDA, body: "" }, { heading: DISCUSSION, body: "" }, { heading: ACTIONS, body: "" }];
+  function newMeeting(from?: { date: string; title: string; todo: string }) {
+    choices = null;
+    draft = {
+      id: null, series_id: selected ?? series[0]?.id ?? "", met_on: from?.date ?? today(), title: from?.title ?? "", people: "",
+      sections: blankSections(), todo_id: from?.todo ?? null, newCal: null,
+    };
   }
   function editMeeting(m: Meeting) {
-    draft = { id: m.id, met_on: m.met_on, title: m.title ?? "", people: m.people ?? "", sections: structuredClone($state.snapshot(m.sections)) };
+    choices = null;
+    draft = {
+      id: m.id, series_id: m.series_id, met_on: m.met_on, title: m.title ?? "", people: m.people ?? "",
+      sections: structuredClone($state.snapshot(m.sections)), todo_id: m.todo_id ?? null, newCal: null,
+    };
   }
   async function keepMeeting() {
     const d = draft!;
-    const s = current!;
+    if (!d.series_id) return void (error = "Pick a series for the meeting.");
     const fields = {
-      series_id: d.id ? meetings.find((m) => m.id === d.id)!.series_id : s.id, met_on: d.met_on,
-      title: d.title.trim() || null, people: d.people.trim() || null,
+      series_id: d.series_id, met_on: d.met_on, title: d.title.trim() || null, people: d.people.trim() || null,
       sections: d.sections.map((x) => ({ ...x, body: x.body.replace(/\s+$/, "") })),
     };
-    if (await act(d.id ? "Changed meeting" : "Added meeting", () => saveMeeting(d.id, fields))) draft = null;
+    let id = d.id;
+    if (await act(d.id ? "Changed meeting" : "Added meeting", async () => {
+      let todo = d.todo_id;
+      if (d.newCal) todo = await addToCalendar(fields.title ?? seriesName(d.series_id), d.met_on, d.newCal.start, d.newCal.end);
+      id = await saveMeeting(d.id, canLink ? { ...fields, todo_id: todo } : fields);
+    })) {
+      draft = null;
+      selected = d.series_id;
+      flash = id;
+      setTimeout(() => (flash = null), 1500);
+    }
+  }
+
+  // ---- the calendar entry: one of the day's meetings in Week, or a new one ----------------------
+  let choices = $state<CalendarEntry[] | null>(null);
+  async function findOnCalendar() {
+    try {
+      choices = await calendarBetween(draft!.met_on, draft!.met_on);
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+  const hhmm = (t: string | null) => (t ? t.slice(0, 5) : "");
+  const when = (c: CalendarEntry) => `${fmtDay(c.day)}${c.start ? ` ${hhmm(c.start)}${c.end ? `–${hhmm(c.end)}` : ""}` : ""}`;
+  /** To Week, at the meeting's week, with the meeting picked out; Week's Back comes here. */
+  function toCalendar(m: Meeting) {
+    const c = cal.get(m.todo_id!);
+    if (!c) return;
+    history.replaceState(null, "", "#/meetings");
+    location.hash = `#/week?w=${weekStart(c.day)}&show=${m.todo_id}&agenda=${m.id}`;
+  }
+  const upcoming = (m: Meeting) => m.met_on >= today();
+
+  // the agenda, ticked off on the day
+  function tickAgenda(m: Meeting, si: number, line: string) {
+    const s = m.sections[si];
+    const done = s.done?.includes(line) ? s.done.filter((x) => x !== line) : [...(s.done ?? []), line];
+    meetings = meetings.map((x) => (x.id === m.id ? { ...x, sections: x.sections.map((y, i) => (i === si ? { ...y, done } : y)) } : x));
+    act(s.done?.includes(line) ? "Unticked an agenda item" : "Ticked an agenda item",
+      () => saveMeeting(m.id, { sections: m.sections.map((y, i) => (i === si ? { ...y, done } : y)) }));
   }
   function removeMeeting(m: Meeting) {
     if (!confirm(`Delete the meeting of ${fmtDay(m.met_on)}${m.title ? ` (${m.title})` : ""}? (Undo brings it back.)`)) return;
@@ -201,6 +293,8 @@
     return html;
   }
 </script>
+
+{#if back}<BackLink href={back} text="Back to Week" />{/if}
 
 <section class="meetings" class:opened>
   <div class="head">
@@ -297,7 +391,7 @@
               <span class="muted small">{countOf(current.id)} {countOf(current.id) === 1 ? "meeting" : "meetings"}{current.project_id ? ` · ${projectName(current.project_id)}` : ""}</span>
             </div>
             <span class="tools">
-              <button class="primary" onclick={newMeeting}>+ Meeting</button>
+              <button class="primary" onclick={() => newMeeting()}>+ Meeting</button>
               <button onclick={() => exportSeries(current)} title="Download as a .tex file, laid out as your logs are">Export .tex</button>
               <button onclick={() => editSeries(current)}>Edit</button>
               <button class="del" onclick={() => removeSeries(current)}>Delete</button>
@@ -324,7 +418,13 @@
           {/if}
 
           {#if draft && !draft.id}{@render editor()}{/if}
-          {#each ofSeries(current.id) as m (m.id)}{@render card(m, false)}{/each}
+          {@const ahead = ofSeries(current.id).filter(upcoming).sort((a, b) => a.met_on.localeCompare(b.met_on))}
+          {#if ahead.length}
+            <h3 class="group">Coming up</h3>
+            {#each ahead as m (m.id)}{@render card(m, false)}{/each}
+            {#if ofSeries(current.id).length > ahead.length}<h3 class="group">Past</h3>{/if}
+          {/if}
+          {#each ofSeries(current.id).filter((m) => !upcoming(m)) as m (m.id)}{@render card(m, false)}{/each}
           {#if !countOf(current.id) && !draft}
             <p class="muted">No meetings in this series yet.</p>
           {/if}
@@ -340,22 +440,41 @@
   {#if draft?.id === m.id}
     {@render editor()}
   {:else}
-    <article class="meeting">
+    <article class="meeting" class:ahead={upcoming(m)} class:flash={flash === m.id} data-meeting={m.id}>
       <div class="m-head">
         <span class="date">{fmtDay(m.met_on)}</span>
+        {#if upcoming(m)}<span class="badge">{m.met_on === today() ? "Today" : "Upcoming"}</span>{/if}
         {#if m.title}<strong>{m.title}</strong>{/if}
         {#if m.people}<span class="muted small">with {m.people}</span>{/if}
         {#if withSeries}<button class="link small" onclick={() => { selected = m.series_id; query = ""; }}>{seriesName(m.series_id)}</button>{/if}
+        {#if m.todo_id}
+          {@const c = cal.get(m.todo_id)}
+          {#if c}<button class="link small cal" title="Open it on the Week calendar" onclick={() => toCalendar(m)}>📅 {when(c)} ›</button>
+          {:else}<span class="muted small">📅 calendar entry gone</span>{/if}
+        {/if}
         <span class="tools">
           <button class="mini" onclick={() => { if (withSeries) { selected = m.series_id; query = ""; } editMeeting(m); }}>Edit</button>
           <button class="mini del" onclick={() => removeMeeting(m)}>Delete</button>
         </span>
       </div>
-      {#each m.sections.filter((s) => s.body.trim()) as s, i (i)}
-        <div class="sec">
-          <span class="heading">{s.heading}</span>
-          <div class="body">{@html rich(s.body)}</div>
-        </div>
+      {#each m.sections as s, si (si)}
+        {#if s.body.trim()}
+          <div class="sec">
+            <span class="heading">{s.heading}</span>
+            {#if isAgenda(s.heading)}
+              <ul class="agenda">
+                {#each linesOf(s.body) as line (line)}
+                  <li class:done={s.done?.includes(line)}>
+                    <label><input type="checkbox" checked={!!s.done?.includes(line)} onchange={() => tickAgenda(m, si, line)} />
+                      <span>{@html inline(line)}</span></label>
+                  </li>
+                {/each}
+              </ul>
+            {:else}
+              <div class="body">{@html rich(s.body)}</div>
+            {/if}
+          </div>
+        {/if}
       {/each}
     </article>
   {/if}
@@ -365,15 +484,44 @@
   {#if draft}
     <form class="panel meeting-form" onsubmit={(ev) => { ev.preventDefault(); keepMeeting(); }}>
       <div class="row">
-        <label>Date <input type="date" bind:value={draft.met_on} required /></label>
+        {#if !draft.id && series.length > 1}
+          <label>Series
+            <select bind:value={draft.series_id}>{#each series as x (x.id)}<option value={x.id}>{x.name}</option>{/each}</select>
+          </label>
+        {/if}
+        <label>Date <input type="date" bind:value={draft.met_on} required onchange={() => (choices = null)} /></label>
         <label class="grow">Title <input bind:value={draft.title} placeholder="e.g. PhD interview, or Bi-weekly meeting" /></label>
         <label class="grow">With <input bind:value={draft.people} placeholder="Who was there (optional)" /></label>
       </div>
+      {#if canLink}
+        <div class="cal-row">
+          <span class="sec-head">Calendar</span>
+          {#if draft.todo_id}
+            {@const c = cal.get(draft.todo_id) ?? choices?.find((x) => x.todo_id === draft!.todo_id)}
+            <span>📅 {c ? `${c.title} · ${when(c)}` : "linked to a calendar entry"}</span>
+            <button type="button" class="link small" onclick={() => (draft!.todo_id = null)}>Unlink</button>
+          {:else if draft.newCal}
+            <span>📅 New on {fmtDay(draft.met_on)}</span>
+            <input type="time" bind:value={draft.newCal.start} aria-label="Starts" />–<input type="time" bind:value={draft.newCal.end} aria-label="Ends" />
+            <button type="button" class="link small" onclick={() => (draft!.newCal = null)}>Cancel</button>
+          {:else if choices}
+            <span class="choices">
+              {#each choices as c (c.todo_id + c.day)}
+                <button type="button" class="chip" onclick={() => { draft!.todo_id = c.todo_id; cal = new Map(cal).set(c.todo_id, c); if (!draft!.title) draft!.title = c.title; }}>
+                  {hhmm(c.start)} {c.title}</button>
+              {:else}<span class="muted small">Nothing on the calendar on {fmtDay(draft.met_on)}.</span>{/each}
+              <button type="button" class="link small" onclick={() => (draft!.newCal = { start: "10:00", end: "11:00" })}>+ Add to the calendar</button>
+            </span>
+          {:else}
+            <button type="button" class="link small" onclick={findOnCalendar}>Link to the calendar…</button>
+          {/if}
+        </div>
+      {/if}
       {#each draft.sections as s (s.heading)}
         <label class="sec-edit">
-          <span class="sec-head">{s.heading}{#if isAction(s.heading)}<span class="muted small"> · one a line; each can go to Week</span>{/if}</span>
-          <textarea rows={isAction(s.heading) ? 2 : 4} bind:value={s.body}
-                    placeholder={isAction(s.heading) ? "One action a line, e.g. Send the HPC request" : "One point a line; start a line with “- ” for a bullet, “  - ” to nest it"}></textarea>
+          <span class="sec-head">{s.heading}{#if isAction(s.heading)}<span class="muted small"> · one a line; each can go to Week</span>{:else if isAgenda(s.heading)}<span class="muted small"> · one item a line; tick them off on the day</span>{/if}</span>
+          <textarea rows={isAction(s.heading) ? 2 : isAgenda(s.heading) ? 3 : 4} bind:value={s.body}
+                    placeholder={isAction(s.heading) ? "One action a line, e.g. Send the HPC request" : isAgenda(s.heading) ? "One item a line, e.g. Results on the larger graph" : "One point a line; start a line with “- ” for a bullet, “  - ” to nest it"}></textarea>
         </label>
       {/each}
       <div class="buttons">
@@ -422,6 +570,20 @@
   .follow .acts { display: flex; gap: 0.25rem; flex-shrink: 0; }
 
   .meeting { border-top: 1px solid var(--rule); padding: 0.8rem 0; display: grid; gap: 0.45rem; }
+  .meeting.ahead { background: var(--panel); border-radius: var(--radius); border-top: none; padding: 0.8rem; margin-bottom: 0.5rem; }
+  .meeting.flash { animation: lit 2.5s ease-out; }
+  @keyframes lit { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+  .badge { font-family: var(--font-ui); font-size: 0.7rem; font-weight: 600; color: var(--accent-ink); background: var(--accent); border-radius: 999px; padding: 0.05rem 0.5rem; }
+  .cal { font-family: var(--font-ui); }
+  h3.group { font-size: 0.95rem; margin: 1rem 0 0.4rem; color: var(--ink-soft); }
+  .agenda { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.2rem; }
+  .agenda label { display: flex; gap: 0.45rem; align-items: flex-start; cursor: pointer; font-size: 0.93rem; }
+  .agenda input { width: auto; margin-top: 0.25rem; flex-shrink: 0; }
+  .agenda li.done span { text-decoration: line-through; color: var(--ink-soft); }
+  .cal-row { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.6rem; font-size: 0.9rem; }
+  .cal-row input[type="time"] { width: auto; padding: 0.2rem 0.3rem; }
+  .choices { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+  .chip { font-size: 0.8rem; padding: 0.15rem 0.6rem; border-radius: 999px; background: none; font-family: var(--font-ui); }
   .m-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.3rem 0.7rem; }
   .m-head .tools { margin-left: auto; }
   .date { font-family: var(--font-ui); font-size: 0.82rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }

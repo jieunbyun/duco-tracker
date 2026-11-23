@@ -305,10 +305,17 @@
     <dt>Meetings</dt>
     <dd>
       Your meeting logs, one <em>series</em> for each (a person, a group, or general meetings), linked to a Planning
-      project if you like. Every meeting has two parts: <em>Discussion</em> and <em>Actions</em>. Write a line for each
-      point; start it with “- ” for a bullet (“  - ” to nest it), and write links as [text](https://…). The actions not
-      yet done are listed at the top of the series as <em>Open actions</em>: <em>→ Week</em> makes one a to-do this
-      week, ✓ takes it off the list. Search finds meetings with every word you type, across all series.
+      project if you like. A meeting can be planned ahead with its <em>Agenda</em> — one item a line, ticked off on the
+      day — and then kept with what was <em>Discussion</em>ed and its <em>Actions</em>. Write a line for each point; start
+      it with “- ” for a bullet (“  - ” to nest it), and write links as [text](https://…). Meetings still to come are
+      listed first, under <em>Coming up</em>, soonest first. A meeting can be tied to its entry on the Week calendar
+      (<em>Link to the calendar…</em> in its form: one of that day's meetings, or <em>+ Add to the calendar</em> with
+      its times); its <em>📅 date and time ›</em> then opens that week with the meeting picked out, and
+      <em>← Back to the agenda</em> returns. From the calendar, a meeting's menu has <em>📋 + Agenda…</em> (a new
+      meeting here for it, with its date and title) or <em>📋 Open agenda ›</em>, and meetings with an agenda show 📋;
+      <em>← Back to Week</em> returns. The actions not yet done are listed at the top of the series as <em>Open
+      actions</em>: <em>→ Week</em> makes one a to-do this week, ✓ takes it off the list. Search finds meetings with
+      every word you type, across all series.
       <em>Import .tex…</em> reads your LaTeX logs (<code>\section*{'{'}DD-MM-YY. Title{'}'}</code> and
       <code>\paragraph{'{'}Heading.{'}'}</code>) into a new series or one you have, never adding a meeting twice:
       I will, Actions and Next steps become the actions (They will too, labelled); every other heading — Purpose,

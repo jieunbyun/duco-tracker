@@ -23,6 +23,9 @@
   import type { Feed } from "../lib/outlook";
   import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
   import { loadTidies, addTidy, saveTidy, deleteTidy, cleanLink } from "../lib/tidy";
+  import { agendasFor } from "../lib/meetings";
+  import BackLink from "../lib/BackLink.svelte";
+  import { tick } from "svelte";
   import type { Tidy } from "../lib/tidy";
 
   const SHOW_LOGGED = "week.showLogged";
@@ -60,6 +63,10 @@
   // back from the Logbook (#/week?w=<week>): that week
   const arrivedWith = new URLSearchParams(location.hash.split("?")[1] ?? "");
   let reopenMs = !!arrivedWith.get("ms");
+  // from Meetings (#/week?w=<week>&show=<to-do>&agenda=<meeting>): that meeting picked out, and Back to its agenda
+  let showTodo = arrivedWith.get("show");
+  const agendaBack = /^[\w-]+$/.test(arrivedWith.get("agenda") ?? "") ? `#/meetings?m=${arrivedWith.get("agenda")}` : null;
+  let lit = $state<string | null>(null);
   if (arrivedWith.get("w")) {
     history.replaceState(null, "", "#/week");
     offset = Math.round((daysIn({ from: weekStart(today()), to: weekStart(arrivedWith.get("w")!) }) - 1) / 7);
@@ -137,8 +144,18 @@
       ideaNotes = thoughtNotes;
       todos = plan.todos;
       slots = plan.slots;
+      // which calendar meetings have an agenda in Meetings (none until 0064 is run)
+      agendaOf = await agendasFor(plan.todos.filter((t) => t.kind === "meeting").map((t) => t.id)).catch(() => new Map());
+      if (id !== request) return;
       entries = logged;
       error = "";
+      if (showTodo) {
+        const t = showTodo;
+        showTodo = null;
+        lit = t;
+        tick().then(() => document.querySelector(`[data-todo="${t}"]`)?.scrollIntoView({ block: "center" }));
+        setTimeout(() => (lit = null), 2500);
+      }
       if (reopenMs) {
         reopenMs = false;
         openMilestones();
@@ -574,6 +591,20 @@
       () => saveTodo(t.id, { is_cancelled: false }));
   }
 
+  // ---- a meeting's agenda, kept in Meetings: there and back ------------------------------------
+  let agendaOf = $state(new Map<string, string>()); // calendar meeting (to-do) → its meeting in Meetings
+  function toAgenda(t: Todo, day: string) {
+    const here = `#/week?w=${start}`;
+    const back = encodeURIComponent(`${here}&show=${t.id}`);
+    history.replaceState(null, "", here); // so the browser's Back lands here too
+    const m = agendaOf.get(t.id);
+    location.hash = m ? `#/meetings?m=${m}&back=${back}`
+      : `#/meetings?new=1&todo=${t.id}&date=${day}&title=${encodeURIComponent(t.title)}&back=${back}`;
+  }
+  function agendaItem(t: Todo, day: string): Item[] {
+    return [{ label: agendaOf.has(t.id) ? "📋 Open agenda ›" : "📋 + Agenda…", run: () => toAgenda(t, day) }];
+  }
+
   // ---- small tasks / deadlines: a checkbox and a few words on a day, no hours, under each day ----
   // A checkbox and a few words; moved like a to-do's card (the day before, the day after, or
   // any date), renamed or deleted from its menu. Never counted as planned or logged time.
@@ -760,7 +791,7 @@
         ? [{ label: `Move the remaining ${fmtHours(rest)} to the day after ›`, run: () => moveRest(s, 1) }]
         : [];
       const another: Item[] = meeting ? [] : [{ label: "+ Another session on this day", run: () => addSession(t, m.day) }];
-      return [...done, ...another, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []),
+      return [...(meeting ? agendaItem(t, m.day) : []), ...done, ...another, ...restItems, ...(e ? [{ label: "Open logged entry", run: () => openEntry(e, m.day) }] : []),
               ...logbookItem(s, t), edit, remove];
     }
     const back: Item = { label: "‹ Back", go: "main" };
@@ -785,6 +816,7 @@
     return [
       ...(t.is_tentative ? [tentativeItem] : []),
       { label: "✓ Log time", run: () => openLog(t, s, m.day) },
+      ...(meeting ? agendaItem(t, m.day) : []),
       ...logbookItem(s, t),
       edit,
       ...done,
@@ -1691,12 +1723,12 @@
         {#each meetings as s (s.id)}
           {@const t = todoById.get(s.todo_id)!}
           <div class="card meeting" class:logged={!!s.entry_id} class:cancelled={s.is_cancelled} class:review={pending(t)}
-               class:tentative={tentative(t)}
+               class:tentative={tentative(t)} class:lit={lit === t.id} data-todo={t.id}
                role="group" oncontextmenu={(ev) => openMenu(ev, s, d)}>
             <button class="card-body" aria-haspopup="menu" title="Actions (click or right-click)"
                     onclick={(ev) => openMenu(ev, s, d)}>
               <span class="time">{hhmm(s.start_time)}–{hhmm(s.end_time)}</span>
-              <span class="title">{t.is_core ? "🎯 " : ""}{t.title}</span>
+              <span class="title">{t.is_core ? "🎯 " : ""}{t.title}{#if agendaOf.has(t.id)}<span class="has-agenda" title="Has an agenda in Meetings"> 📋</span>{/if}</span>
               {#if label(t)}<span class="sub">{label(t)}</span>{/if}
               {#if s.is_cancelled}<span class="off">cancelled</span>{:else if s.entry_id}<span class="ok">✓ logged</span>{:else if pending(t)}<span class="off">from Outlook — to review{t.source_tentative ? " · tentative" : ""}</span>{:else if tentative(t)}<span class="off">tentative</span>{/if}
             </button>
@@ -1951,6 +1983,8 @@
     {#if importNote}<p class="muted small">{importNote}</p>{/if}
   </details>
 </section>
+
+{#if agendaBack}<BackLink href={agendaBack} text="Back to the agenda" />{/if}
 
 <svelte:window onkeydown={keys} onresize={closeMenu} onscroll={closeMenu} />
 
@@ -2528,6 +2562,9 @@
   .card .grip { font-size: 0.8rem; padding: 0; line-height: 1.4; opacity: 0.45; }
   .card .grip:hover, .card .grip:focus-visible { opacity: 1; }
   .card.dragging { box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
+  .card.lit { animation: lit 2.5s ease-out; }
+  @keyframes lit { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
+  .has-agenda { font-size: 0.8em; }
   .card.logged { opacity: 0.7; }
   .card.done .title { text-decoration: line-through; color: var(--ink-soft); }
   .card.stale { border-left-color: var(--danger); }
