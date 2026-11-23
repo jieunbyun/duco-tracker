@@ -22,6 +22,8 @@
   import { loadFeed, syncOutlook, isStale, loadUnreviewed, dismissOutlook } from "../lib/outlook";
   import type { Feed } from "../lib/outlook";
   import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
+  import { loadTidies, addTidy, saveTidy, deleteTidy } from "../lib/tidy";
+  import type { Tidy } from "../lib/tidy";
 
   const SHOW_LOGGED = "week.showLogged";
   const MS_PICKS = "week.msPicks"; // + From milestones as you last left it (this browser)
@@ -121,10 +123,13 @@
     const [from, to] = [start, end];
     loading = true;
     try {
-      const [plan, logged, p, review, thoughts, thoughtNotes] = await Promise.all([
+      const [plan, logged, p, review, thoughts, thoughtNotes, tidyUps] = await Promise.all([
         loadWeekPlan(from, to), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(), loadIdeaNotes(),
+        loadTidies(from, to).catch(() => null), // tidy-ups must never keep the week from opening
       ]);
       if (id !== request) return;
+      tidyMissing = tidyUps === null;
+      tidies = tidyUps ?? [];
       projects = p;
       inbox = review;
       ideas = thoughts;
@@ -566,6 +571,63 @@
       () => saveTodo(t.id, { is_cancelled: false }));
   }
 
+  // ---- tidy-ups: small daily tasks with no hours, under each day ---------------------------
+  // A checkbox and a few words; moved like a to-do's card (the day before, the day after, or
+  // any date), renamed or deleted from its menu. Never counted as planned or logged time.
+  let tidies = $state<Tidy[]>([]);
+  let tidyMissing = $state(false); // until 0058 is run
+  let tidyDraft = $state<Record<string, string>>({});
+  let tidyEdit = $state<{ id: string; title: string } | null>(null);
+  let tidyMenu = $state<{ t: Tidy; x: number; y: number } | null>(null);
+  const tidiesOn = (day: string) => tidies.filter((x) => x.day === day);
+
+  async function addTidyOn(day: string) {
+    const title = (tidyDraft[day] ?? "").trim();
+    if (!title) return;
+    tidyDraft[day] = "";
+    const order = Math.max(0, ...tidiesOn(day).map((x) => x.sort_order ?? 0)) + 10;
+    await change(`Added tidy-up ${q({ title })} on ${dayName(day)} ${dayNum(day)}`, () => addTidy(day, title, order));
+  }
+  function tickTidy(t: Tidy, done: boolean) {
+    tidies = tidies.map((x) => (x.id === t.id ? { ...x, is_done: done } : x)); // at once; the reload confirms it
+    return change(done ? `Ticked off ${q(t)}` : `Unticked ${q(t)}`, () => saveTidy(t.id, { is_done: done }));
+  }
+  function moveTidy(t: Tidy, to: string) {
+    if (!to || to === t.day) return;
+    // goes to the end of that day's list
+    return change(`Moved tidy-up ${q(t)} to ${fmtDay(to)}`, () => saveTidy(t.id, { day: to, sort_order: null }));
+  }
+  async function renameTidy() {
+    const e = tidyEdit;
+    tidyEdit = null;
+    const t = e && tidies.find((x) => x.id === e.id);
+    const title = e?.title.trim();
+    if (!t || !title || title === t.title) return;
+    await change(`Renamed tidy-up ${q(t)}`, () => saveTidy(t.id, { title }));
+  }
+  function removeTidy(t: Tidy) {
+    return change(`Deleted tidy-up ${q(t)}`, () => deleteTidy(t.id)); // Undo brings it back
+  }
+  function openTidyMenu(ev: MouseEvent, t: Tidy) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    menu = null;
+    tidyMenu = { t, ...menuAt(ev) };
+  }
+  function tidyItems(t: Tidy): Item[] {
+    return [
+      { label: "‹ Move to the day before", run: () => moveTidy(t, addDays(t.day, -1)) },
+      { label: "Move to the day after ›", run: () => moveTidy(t, addDays(t.day, 1)) },
+      { label: "Move to a date…", run: () => { moveDate = t.day; panel = { kind: "tidyMove", tidy: t }; } },
+      { label: "Rename", run: () => (tidyEdit = { id: t.id, title: t.title }) },
+      { label: "Delete", run: () => removeTidy(t), danger: true },
+    ];
+  }
+  function focusSelect(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
   // ---- card menu: click or right-click a card ------------------------------------------
   // The cards stay quiet (title, tick, status); their actions live in one menu.
   // `sub`: one of its groups (Move…, Cancel / change status…) shown in its place
@@ -577,9 +639,8 @@
   const MENU_W = 220;
   const MENU_H = 290;
 
-  function openMenu(ev: MouseEvent, slot: Slot, day: string) {
-    ev.preventDefault();
-    ev.stopPropagation();
+  /** Where a menu opens: at the pointer for a right-click, under the thing clicked otherwise. */
+  function menuAt(ev: MouseEvent): { x: number; y: number } {
     let x: number;
     let y: number;
     if (ev.type === "contextmenu") {
@@ -590,14 +651,18 @@
       x = r.left;
       y = r.bottom + 2;
     }
-    menu = {
-      slot,
-      day,
+    return {
       x: Math.max(8, Math.min(x, window.innerWidth - MENU_W - 8)),
       y: Math.max(8, Math.min(y, window.innerHeight - MENU_H - 8)),
     };
   }
-  const closeMenu = () => (menu = null);
+  function openMenu(ev: MouseEvent, slot: Slot, day: string) {
+    ev.preventDefault();
+    ev.stopPropagation();
+    tidyMenu = null;
+    menu = { slot, day, ...menuAt(ev) };
+  }
+  const closeMenu = () => { menu = null; tidyMenu = null; };
 
   // a card's project (its logged entry's, once logged) in the Logbook, at its milestone;
   // the browser's Back, or the Logbook's link, comes back to this week
@@ -693,14 +758,14 @@
 
   // (Ctrl/Cmd+Z is the app's, for every tab.)
   function keys(ev: KeyboardEvent) {
-    if (menu) return menuKeys(ev);
+    if (menu || tidyMenu) return menuKeys(ev);
   }
 
   function focusFirst(node: HTMLElement) {
     (node.querySelector("button") as HTMLButtonElement | null)?.focus();
   }
   function menuKeys(ev: KeyboardEvent) {
-    if (!menu) return;
+    if (!menu && !tidyMenu) return;
     if (ev.key === "Escape") return closeMenu();
     if (ev.key !== "ArrowDown" && ev.key !== "ArrowUp") return;
     ev.preventDefault();
@@ -716,6 +781,7 @@
     | { kind: "entry"; entry: TimeEntry | null; day: string }
     | { kind: "spread"; todo: Todo }
     | { kind: "moveTo"; todo: Todo; slot: Slot }
+    | { kind: "tidyMove"; tidy: Tidy }
     | { kind: "email" }
     | { kind: "forward" }
     | { kind: "outlook" }
@@ -1627,6 +1693,31 @@
           <button onclick={() => (panel = { kind: "todo", todo: null, as: "meeting", day: d })}>+ meeting</button>
           <button onclick={() => (panel = { kind: "todo", todo: null, as: "task", day: d, place: true })}>+ to-do</button>
         </div>
+
+        {#if !tidyMissing}
+          <div class="tidy" role="group" aria-label={`Tidy-ups on ${dayName(d)} ${dayNum(d)}`}>
+            {#each tidiesOn(d) as t (t.id)}
+              <div class="tidy-row" class:done={t.is_done}>
+                <input type="checkbox" checked={t.is_done} aria-label={`Done: ${t.title}`}
+                       onchange={(ev) => tickTidy(t, ev.currentTarget.checked)} />
+                {#if tidyEdit?.id === t.id}
+                  <input class="tidy-input" bind:value={tidyEdit.title} aria-label="Rename tidy-up" use:focusSelect
+                         onkeydown={(ev) => {
+                           if (ev.key === "Enter") { ev.preventDefault(); renameTidy(); }
+                           if (ev.key === "Escape") { ev.preventDefault(); tidyEdit = null; }
+                         }}
+                         onblur={renameTidy} />
+                {:else}
+                  <button class="tidy-title" aria-haspopup="menu" title={`${t.title} — click or right-click to move, rename or delete`}
+                          onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
+                {/if}
+              </div>
+            {/each}
+            <input class="tidy-input tidy-add" placeholder="+ tidy-up" bind:value={tidyDraft[d]}
+                   aria-label={`Add a tidy-up on ${dayName(d)} ${dayNum(d)}`}
+                   onkeydown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); addTidyOn(d); } }} />
+          </div>
+        {/if}
       </div>
     {/each}
   </div>
@@ -1861,6 +1952,17 @@
   {/key}
 {/if}
 
+{#if tidyMenu}
+  {@const tm = tidyMenu}
+  <div class="menu-backdrop" role="presentation" onclick={closeMenu}
+       oncontextmenu={(ev) => { ev.preventDefault(); closeMenu(); }}></div>
+  <div class="menu" role="menu" style:left={`${tm.x}px`} style:top={`${tm.y}px`} use:focusFirst>
+    {#each tidyItems(tm.t) as item (item.label)}
+      <button role="menuitem" class:danger={item.danger} onclick={() => { closeMenu(); item.run?.(); }}>{item.label}</button>
+    {/each}
+  </div>
+{/if}
+
 <dialog bind:this={dialog} onclose={() => (panel = null)}>
   {#if panel && tax}
     {#if panel.kind === "todo"}
@@ -1976,6 +2078,17 @@
         </p>
         <div class="pick-actions">
           <button class="primary" type="submit" disabled={!moveDate || moveDate === mv.slot.planned_on}>Move</button>
+          <button type="button" onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </form>
+    {:else if panel.kind === "tidyMove"}
+      {@const mt = panel.tidy}
+      <h2>Move “{mt.title}”</h2>
+      <form class="move-to" onsubmit={(ev) => { ev.preventDefault(); const t = mt, to = moveDate; panel = null; moveTidy(t, to); }}>
+        <label>To <input type="date" bind:value={moveDate} required /></label>
+        <p class="muted small">Now on {fmtDay(mt.day)}. Any day will do, in this week or another.</p>
+        <div class="pick-actions">
+          <button class="primary" type="submit" disabled={!moveDate || moveDate === mt.day}>Move</button>
           <button type="button" onclick={() => (panel = null)}>Cancel</button>
         </div>
       </form>
@@ -2335,6 +2448,18 @@
   .cv-add h3 { font-size: 0.92rem; font-family: var(--font-ui); }
   .add-day { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.25rem; }
   .add-day button { font-size: 0.72rem; padding: 0.15rem; background: none; border: 1px dashed var(--rule); color: var(--ink-soft); }
+  .tidy { display: grid; gap: 0.05rem; padding-top: 0.3rem; border-top: 1px dashed var(--rule); font-family: var(--font-ui); }
+  .tidy-row { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
+  .tidy-row input[type="checkbox"] { width: auto; margin: 0; flex-shrink: 0; }
+  .tidy-title {
+    flex: 1; min-width: 0; text-align: left; background: none; border: none; padding: 0.1rem 0.15rem; border-radius: 3px;
+    font-size: 0.74rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .tidy-title:hover { background: var(--paper); }
+  .tidy-row.done .tidy-title { text-decoration: line-through; color: var(--ink-soft); }
+  .tidy-input { flex: 1; min-width: 0; font-size: 0.74rem; padding: 0.1rem 0.3rem; }
+  .tidy-add { background: none; border: 1px dashed transparent; color: var(--ink-soft); }
+  .tidy-add:hover, .tidy-add:focus { border-color: var(--rule); background: var(--paper); color: var(--ink); }
 
   .week h2 { margin-top: 2rem; }
   .group { margin-top: 1rem; font-family: var(--font-ui); }
