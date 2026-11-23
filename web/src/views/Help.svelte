@@ -273,6 +273,30 @@
       projects or anywhere else.
     </dd>
 
+    <dt>Budget</dt>
+    <dd>
+      Your grant and project budgets, each with its total, dates and (if you like) its Planning project. A budget has
+      <em>lines</em> — what the money is for, with a plan and an account code — and <em>expenses</em>: a date, a line,
+      what for, a detail and the amount. What is used and what remains are added up from the expenses, for each line
+      and for the whole; a line over its plan is marked ⚠, and the total shows how much is not yet in any line. Click a
+      line to see only its expenses (and to add one to it). <em>Import .xlsx…</em> reads a sheet laid out as yours: a
+      header row with <em>Plan</em> and <em>Used</em>, the lines below it down to <em>Sum</em> (the total), and further
+      down a table with <em>Amount</em> and <em>Date</em>, whose <em>Category</em> names the line. A “Used” written as
+      a sum of numbers (=425+450…) comes in as one expense a number. Private to you.
+    </dd>
+
+    <dt>Network</dt>
+    <dd>
+      The people you know: names (and another name, or what they go by), title, institution, country, e-mail, what
+      they work on, notes, and tags of your own (Industry, Academia…; a person can have several). Each time you met is
+      a dated note under them, newest first; the list sorts by name or by when you last met, filters by tag, and
+      search looks through everything, notes included. <em>Opportunities</em> lists schemes and calls by deadline (⚠
+      once passed, “soon” within 30 days; tick them done). <em>Organisations</em> lists the bodies you deal with and
+      the people whose institution names them. <em>Import .xlsx…</em> reads a workbook laid out as yours: each sheet of
+      people becomes a tag, someone on two sheets becomes one person with both, and the Interactions cells are split
+      into dated notes; importing again adds only what is new. Private to you.
+    </dd>
+
     <dt>Meetings</dt>
     <dd>
       Your meeting logs, one <em>series</em> for each (a person, a group, or general meetings), linked to a Planning
