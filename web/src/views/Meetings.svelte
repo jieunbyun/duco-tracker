@@ -10,7 +10,7 @@
   // not yet done go to Week; search across them all; and .tex out and in.
   import {
     loadAll, saveSeries, deleteSeries, saveMeeting, deleteMeeting, importLog, sendToWeek, parseTex, toTex, downloadTex,
-    AGENDA, DISCUSSION, ACTIONS, isAction, isAgenda, linesOf, calendarBetween, calendarFor, addToCalendar,
+    AGENDA, DISCUSSION, ACTIONS, OTHERS, isAction, isOthers, isAgenda, tickField, linesOf, calendarBetween, calendarFor, addToCalendar,
   } from "../lib/meetings";
   import type { Series, Meeting, Section, ParsedLog, CalendarEntry } from "../lib/meetings";
   import BackLink from "../lib/BackLink.svelte";
@@ -127,7 +127,7 @@
     if (!name) return;
     let id = f.id;
     if (await act(f.id ? "Changed meeting series" : "Added meeting series", async () => {
-      id = await saveSeries(f.id, { name, headings: [DISCUSSION, ACTIONS], project_id: f.project_id });
+      id = await saveSeries(f.id, { name, headings: [AGENDA, DISCUSSION, ACTIONS, OTHERS], project_id: f.project_id });
     })) {
       seriesForm = null;
       selected = id;
@@ -149,7 +149,7 @@
     todo_id: string | null; newCal: { start: string; end: string } | null; // newCal: add it to the calendar on saving
   };
   let draft = $state<Draft | null>(null);
-  const blankSections = (): Section[] => [{ heading: AGENDA, body: "" }, { heading: DISCUSSION, body: "" }, { heading: ACTIONS, body: "" }];
+  const blankSections = (): Section[] => [AGENDA, DISCUSSION, ACTIONS, OTHERS].map((heading) => ({ heading, body: "" }));
   function newMeeting(from?: { date: string; title: string; todo: string }) {
     choices = null;
     draft = {
@@ -204,13 +204,16 @@
   }
   const upcoming = (m: Meeting) => m.met_on >= today();
 
-  // the agenda, ticked off on the day
-  function tickAgenda(m: Meeting, si: number, line: string) {
+  // tick boxes: the agenda's items, ticked off on the day, and the actions, ticked off when done
+  function tickLine(m: Meeting, si: number, line: string) {
     const s = m.sections[si];
-    const done = s.done?.includes(line) ? s.done.filter((x) => x !== line) : [...(s.done ?? []), line];
-    meetings = meetings.map((x) => (x.id === m.id ? { ...x, sections: x.sections.map((y, i) => (i === si ? { ...y, done } : y)) } : x));
-    act(s.done?.includes(line) ? "Unticked an agenda item" : "Ticked an agenda item",
-      () => saveMeeting(m.id, { sections: m.sections.map((y, i) => (i === si ? { ...y, done } : y)) }));
+    const field = tickField(s.heading)!;
+    const had = s[field] ?? [];
+    const next = had.includes(line) ? had.filter((x) => x !== line) : [...had, line];
+    const sections = m.sections.map((y, i) => (i === si ? { ...y, [field]: next } : y));
+    meetings = meetings.map((x) => (x.id === m.id ? { ...x, sections } : x)); // at once; the reload confirms it
+    const what = isAgenda(s.heading) ? "an agenda item" : "an action";
+    act(had.includes(line) ? `Unticked ${what}` : `Ticked ${what}`, () => saveMeeting(m.id, { sections }));
   }
   function removeMeeting(m: Meeting) {
     if (!confirm(`Delete the meeting of ${fmtDay(m.met_on)}${m.title ? ` (${m.title})` : ""}? (Undo brings it back.)`)) return;
@@ -219,8 +222,11 @@
 
   // ---- the actions not yet done ---------------------------------------------------------------
   type Todo = { m: Meeting; si: number; line: string };
-  const toDo = $derived(current ? ofSeries(current.id).flatMap((m) => m.sections.flatMap((s, si) =>
-    isAction(s.heading) ? linesOf(s.body).filter((l) => !s.sent?.includes(l)).map((line) => ({ m, si, line })) : [])) : []);
+  const openOf = (which: (h: string) => boolean): Todo[] => current ? ofSeries(current.id).flatMap((m) => m.sections.flatMap((s, si) =>
+    which(s.heading) ? linesOf(s.body).filter((l) => !s.sent?.includes(l)).map((line) => ({ m, si, line })) : [])) : [];
+  const toDo = $derived(openOf(isAction)); // yours
+  const waiting = $derived(openOf(isOthers)); // others'
+
   function withSection(m: Meeting, si: number, change: (s: Section) => Section): Section[] {
     return m.sections.map((s, i) => (i === si ? change({ ...s }) : s));
   }
@@ -278,12 +284,13 @@
   function inline(s: string): string {
     return escapeHtml(s).replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t || u}</a>`);
   }
-  function rich(body: string): string {
+  function rich(body: string, bullets = false): string {
     let html = "";
     let depth = 0;
     for (const raw of body.split("\n")) {
       if (!raw.trim()) continue;
-      const m = raw.match(/^(\s*)-\s+(.*)$/);
+      // with bullets: a plain line is a bullet too
+      const m = raw.match(/^(\s*)-\s+(.*)$/) ?? (bullets ? (["", "", raw.trim()] as unknown as RegExpMatchArray) : null);
       const want = m ? Math.floor(m[1].replace(/\t/g, "  ").length / 2) + 1 : 0;
       while (depth < want) { html += "<ul>"; depth++; }
       while (depth > want) { html += "</ul>"; depth--; }
@@ -398,10 +405,11 @@
             </span>
           </div>
 
-          {#if toDo.length}
+          {#if toDo.length || waiting.length}
             <div class="follow">
+              {#if toDo.length}
                 <div>
-                  <span class="eyebrow">Open actions</span>
+                  <span class="eyebrow">My open actions</span>
                   <ul>
                     {#each toDo as t (`${t.m.id}|${t.si}|${t.line}`)}
                       <li>
@@ -414,6 +422,20 @@
                     {/each}
                   </ul>
                 </div>
+              {/if}
+              {#if waiting.length}
+                <div>
+                  <span class="eyebrow">Waiting on others</span>
+                  <ul>
+                    {#each waiting as t (`${t.m.id}|${t.si}|${t.line}`)}
+                      <li>
+                        <span class="what">{t.line} <span class="muted small">· {fmtDay(t.m.met_on)}</span></span>
+                        <span class="acts"><button class="mini" title="Done: off this list" onclick={() => handled(t, false)}>✓</button></span>
+                      </li>
+                    {/each}
+                  </ul>
+                </div>
+              {/if}
             </div>
           {/if}
 
@@ -461,17 +483,18 @@
         {#if s.body.trim()}
           <div class="sec">
             <span class="heading">{s.heading}</span>
-            {#if isAgenda(s.heading)}
+            {#if tickField(s.heading)}
+              {@const f = tickField(s.heading)!}
               <ul class="agenda">
                 {#each linesOf(s.body) as line (line)}
-                  <li class:done={s.done?.includes(line)}>
-                    <label><input type="checkbox" checked={!!s.done?.includes(line)} onchange={() => tickAgenda(m, si, line)} />
+                  <li class:done={s[f]?.includes(line)}>
+                    <label><input type="checkbox" checked={!!s[f]?.includes(line)} onchange={() => tickLine(m, si, line)} />
                       <span>{@html inline(line)}</span></label>
                   </li>
                 {/each}
               </ul>
             {:else}
-              <div class="body">{@html rich(s.body)}</div>
+              <div class="body">{@html rich(s.body, true)}</div>
             {/if}
           </div>
         {/if}
@@ -519,9 +542,12 @@
       {/if}
       {#each draft.sections as s (s.heading)}
         <label class="sec-edit">
-          <span class="sec-head">{s.heading}{#if isAction(s.heading)}<span class="muted small"> · one a line; each can go to Week</span>{:else if isAgenda(s.heading)}<span class="muted small"> · one item a line; tick them off on the day</span>{/if}</span>
-          <textarea rows={isAction(s.heading) ? 2 : isAgenda(s.heading) ? 3 : 4} bind:value={s.body}
-                    placeholder={isAction(s.heading) ? "One action a line, e.g. Send the HPC request" : isAgenda(s.heading) ? "One item a line, e.g. Results on the larger graph" : "One point a line; start a line with “- ” for a bullet, “  - ” to nest it"}></textarea>
+          <span class="sec-head">{s.heading}<span class="muted small">{isAction(s.heading) ? " · one a line, each a tick box; it can go to Week"
+            : isOthers(s.heading) ? " · one a line, each a tick box" : isAgenda(s.heading) ? " · one item a line, each a tick box for the day"
+            : " · one point a line, each a bullet (“  - ” nests one)"}</span></span>
+          <textarea rows={isAction(s.heading) || isOthers(s.heading) ? 2 : isAgenda(s.heading) ? 3 : 4} bind:value={s.body}
+                    placeholder={isAction(s.heading) ? "e.g. Send the HPC request" : isOthers(s.heading) ? "e.g. RH: check the EQ inputs"
+                      : isAgenda(s.heading) ? "e.g. Results on the larger graph" : "e.g. ShakeMap added; layout revised"}></textarea>
         </label>
       {/each}
       <div class="buttons">

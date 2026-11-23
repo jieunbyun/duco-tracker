@@ -311,19 +311,21 @@
     <dd>
       Your meeting logs, one <em>series</em> for each (a person, a group, or general meetings), linked to a Planning
       project if you like. A meeting can be planned ahead with its <em>Agenda</em> — one item a line, ticked off on the
-      day — and then kept with its <em>Discussion</em> and <em>Actions</em>. Write a line for each point; start
-      it with “- ” for a bullet (“  - ” to nest it), and write links as [text](https://…). Meetings still to come are
+      day — and then kept with its <em>Discussion</em>, <em>My actions</em> and <em>Others' actions</em>. Write a
+      line for each point: in the discussion each line is a bullet (“  - ” nests one); in the agenda and both lists of
+      actions each line is a tick box, ticked on the meeting itself. Write links as [text](https://…). Meetings still to come are
       listed first, under <em>Coming up</em>, soonest first. A meeting can be tied to its entry on the Week calendar
       (<em>Link to the calendar…</em> in its form: one of that day's meetings, or <em>+ Add to the calendar</em> with
       its times); its <em>📅 date and time ›</em> then opens that week with the meeting picked out, and
       <em>← Back to the agenda</em> returns. From the calendar, a meeting's menu has <em>📋 + Agenda…</em> (a new
       meeting here for it, with its date and title) or <em>📋 Open agenda ›</em>, and meetings with an agenda show 📋;
-      <em>← Back to Week</em> returns. The actions not yet done are listed at the top of the series as <em>Open
-      actions</em>: <em>→ Week</em> makes one a to-do this week, ✓ takes it off the list. Search finds meetings with
+      <em>← Back to Week</em> returns. Actions not yet ticked are listed at the top of the series: <em>My open
+      actions</em> (<em>→ Week</em> makes one a to-do this week, ✓ ticks it) and <em>Waiting on others</em> (✓ when
+      it is done). Search finds meetings with
       every word you type, across all series.
       <em>Import .tex…</em> reads your LaTeX logs (<code>\section*{'{'}DD-MM-YY. Title{'}'}</code> and
       <code>\paragraph{'{'}Heading.{'}'}</code>) into a new series or one you have, never adding a meeting twice:
-      I will, Actions and Next steps become the actions (They will too, labelled); every other heading — Purpose,
+      I will, Actions and Next steps become My actions, They will becomes Others' actions; every other heading — Purpose,
       Update, Decided, Open, Impressions… — becomes a labelled line of the discussion, so nothing is lost.
       <em>Export .tex</em> writes a series back as a .tex file with the two parts. Private to you: nobody else sees
       them, not on shared projects either.
