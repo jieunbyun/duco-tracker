@@ -63,10 +63,13 @@
       linked to one) stands for it: marking the to-do done marks the milestone done as well, and reopening the to-do
       reopens the milestone; one Undo takes back both. Cancel keeps a to-do in the list, struck
       through and restorable; Delete removes it. A red edge marks a planned day that has passed without being logged.
-      <em>Tidy-ups</em>, at the foot of each day, are small daily tasks with no hours: type one into <em>+ tidy-up</em>
-      and press Enter, tick it when it's done (it stays, struck through), and click or right-click it to move it to the
-      day before, the day after or any date, to rename it or to delete it. They are never counted as planned or
-      logged time.
+      <em>Small tasks / deadlines</em>, at the foot of each day, have no hours: type one into
+      <em>+ task / deadline</em> and press Enter, tick it when it's done (it stays, struck through), and click or
+      right-click it to move it to the day before, the day after or any date, to rename it or to delete it. A long
+      one wraps to two lines (hover for all of it). They are never counted as planned or logged time.
+      <em>Month · small tasks</em>, above the days, swaps the week for a month of them alone — ‹ › for other months,
+      each day's list scrolling in its box, and all of them working as in the week; on a phone the month is a list of
+      its days, opened at today. <em>Week</em> brings the days back; the choice is remembered in this browser.
       Click or right-click a meeting or duty on the calendar for its actions: log time, mark the to-do done (or
       reopen it), or edit it. <em>Move… ›</em> opens the moves: a day before, a day after, or <em>Move to a date…</em>,
       which takes it to any day, in this week or another — a to-do with no other day planned goes along to that week.

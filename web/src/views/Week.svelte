@@ -125,7 +125,8 @@
     try {
       const [plan, logged, p, review, thoughts, thoughtNotes, tidyUps] = await Promise.all([
         loadWeekPlan(from, to), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(), loadIdeaNotes(),
-        loadTidies(from, to).catch(() => null), // tidy-ups must never keep the week from opening
+        // small tasks must never keep the week from opening; the month view takes the month's
+        loadTidies(monthView ? gridFrom : from, monthView ? gridTo : to).catch(() => null),
       ]);
       if (id !== request) return;
       tidyMissing = tidyUps === null;
@@ -150,6 +151,8 @@
   }
   $effect(() => {
     void start;
+    void monthView;
+    void monthFirst;
     load();
   });
 
@@ -571,7 +574,7 @@
       () => saveTodo(t.id, { is_cancelled: false }));
   }
 
-  // ---- tidy-ups: small daily tasks with no hours, under each day ---------------------------
+  // ---- small tasks / deadlines: a checkbox and a few words on a day, no hours, under each day ----
   // A checkbox and a few words; moved like a to-do's card (the day before, the day after, or
   // any date), renamed or deleted from its menu. Never counted as planned or logged time.
   let tidies = $state<Tidy[]>([]);
@@ -581,12 +584,40 @@
   let tidyMenu = $state<{ t: Tidy; x: number; y: number } | null>(null);
   const tidiesOn = (day: string) => tidies.filter((x) => x.day === day);
 
+  // the month view: only the small tasks / deadlines, a month at a time (remembered in this browser)
+  const MONTH_VIEW = "week.monthView";
+  let monthView = $state((() => { try { return localStorage.getItem(MONTH_VIEW) === "1"; } catch { return false; } })());
+  let monthAt = $state(""); // the first day of the month shown ("" until one is picked)
+  const shiftMonth = (m: string, n: number) => {
+    const d = parse(m);
+    d.setMonth(d.getMonth() + n, 1);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  };
+  const thisMonth = $derived(`${today().slice(0, 7)}-01`);
+  const monthFirst = $derived(monthAt || `${(isCurrent ? today() : start).slice(0, 7)}-01`);
+  const monthLast = $derived(addDays(shiftMonth(monthFirst, 1), -1));
+  const gridFrom = $derived(weekStart(monthFirst));
+  const gridTo = $derived(addDays(weekStart(monthLast), 6));
+  const span = (a: string, b: string) => { const out: string[] = []; for (let d = a; d <= b; d = addDays(d, 1)) out.push(d); return out; };
+  const gridDays = $derived(span(gridFrom, gridTo));
+  const monthDays = $derived(span(monthFirst, monthLast));
+  const monthLabel = $derived(parse(monthFirst).toLocaleDateString("en-GB", { month: "long", year: "numeric" }));
+  function setMonthView(on: boolean) {
+    monthView = on;
+    if (on) monthAt = `${(isCurrent ? today() : start).slice(0, 7)}-01`;
+    try { localStorage.setItem(MONTH_VIEW, on ? "1" : "0"); } catch {}
+  }
+  // on a phone the month is a list of its days: open it at today
+  function toToday(node: HTMLElement) {
+    requestAnimationFrame(() => node.querySelector<HTMLElement>(".m-cell.today")?.scrollIntoView({ block: "start" }));
+  }
+
   async function addTidyOn(day: string) {
     const title = (tidyDraft[day] ?? "").trim();
     if (!title) return;
     tidyDraft[day] = "";
     const order = Math.max(0, ...tidiesOn(day).map((x) => x.sort_order ?? 0)) + 10;
-    await change(`Added tidy-up ${q({ title })} on ${dayName(day)} ${dayNum(day)}`, () => addTidy(day, title, order));
+    await change(`Added small task ${q({ title })} on ${dayName(day)} ${dayNum(day)}`, () => addTidy(day, title, order));
   }
   function tickTidy(t: Tidy, done: boolean) {
     tidies = tidies.map((x) => (x.id === t.id ? { ...x, is_done: done } : x)); // at once; the reload confirms it
@@ -595,7 +626,7 @@
   function moveTidy(t: Tidy, to: string) {
     if (!to || to === t.day) return;
     // goes to the end of that day's list
-    return change(`Moved tidy-up ${q(t)} to ${fmtDay(to)}`, () => saveTidy(t.id, { day: to, sort_order: null }));
+    return change(`Moved small task ${q(t)} to ${fmtDay(to)}`, () => saveTidy(t.id, { day: to, sort_order: null }));
   }
   async function renameTidy() {
     const e = tidyEdit;
@@ -603,10 +634,10 @@
     const t = e && tidies.find((x) => x.id === e.id);
     const title = e?.title.trim();
     if (!t || !title || title === t.title) return;
-    await change(`Renamed tidy-up ${q(t)}`, () => saveTidy(t.id, { title }));
+    await change(`Renamed small task ${q(t)}`, () => saveTidy(t.id, { title }));
   }
   function removeTidy(t: Tidy) {
-    return change(`Deleted tidy-up ${q(t)}`, () => deleteTidy(t.id)); // Undo brings it back
+    return change(`Deleted small task ${q(t)}`, () => deleteTidy(t.id)); // Undo brings it back
   }
   function openTidyMenu(ev: MouseEvent, t: Tidy) {
     ev.preventDefault();
@@ -1611,6 +1642,15 @@
 
   <!-- ================= days ================= -->
   {#if !phone || mobileView === "calendar"}
+  {#if !tidyMissing}
+    <div class="cal-switch" role="group" aria-label="Calendar">
+      <button class:on={!monthView} aria-pressed={!monthView} onclick={() => setMonthView(false)}>Week</button>
+      <button class:on={monthView} aria-pressed={monthView} onclick={() => setMonthView(true)}>Month · small tasks</button>
+    </div>
+  {/if}
+  {#if monthView && !tidyMissing}
+    {@render monthGrid()}
+  {:else}
   {#if phone}
     <div class="m-days" role="tablist" aria-label="Day">
       {#each days as d (d)}
@@ -1694,33 +1734,11 @@
           <button onclick={() => (panel = { kind: "todo", todo: null, as: "task", day: d, place: true })}>+ to-do</button>
         </div>
 
-        {#if !tidyMissing}
-          <div class="tidy" role="group" aria-label={`Tidy-ups on ${dayName(d)} ${dayNum(d)}`}>
-            {#each tidiesOn(d) as t (t.id)}
-              <div class="tidy-row" class:done={t.is_done}>
-                <input type="checkbox" checked={t.is_done} aria-label={`Done: ${t.title}`}
-                       onchange={(ev) => tickTidy(t, ev.currentTarget.checked)} />
-                {#if tidyEdit?.id === t.id}
-                  <input class="tidy-input" bind:value={tidyEdit.title} aria-label="Rename tidy-up" use:focusSelect
-                         onkeydown={(ev) => {
-                           if (ev.key === "Enter") { ev.preventDefault(); renameTidy(); }
-                           if (ev.key === "Escape") { ev.preventDefault(); tidyEdit = null; }
-                         }}
-                         onblur={renameTidy} />
-                {:else}
-                  <button class="tidy-title" aria-haspopup="menu" title={`${t.title} — click or right-click to move, rename or delete`}
-                          onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
-                {/if}
-              </div>
-            {/each}
-            <input class="tidy-input tidy-add" placeholder="+ tidy-up" bind:value={tidyDraft[d]}
-                   aria-label={`Add a tidy-up on ${dayName(d)} ${dayNum(d)}`}
-                   onkeydown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); addTidyOn(d); } }} />
-          </div>
-        {/if}
+        {#if !tidyMissing}{@render tidyList(d)}{/if}
       </div>
     {/each}
   </div>
+  {/if}
   <div class="below-days">
     <button onclick={openEmail}>✉ Create email checks (Mon–Fri)</button>
     <button onclick={() => openForward()}>↪ Carry forward unfinished to-dos…</button>
@@ -1951,6 +1969,67 @@
     </div>
   {/key}
 {/if}
+
+{#snippet tidyList(d: string, short = false)}
+  <div class="tidy" role="group" aria-label={`Small tasks / deadlines on ${dayName(d)} ${dayNum(d)}`}>
+    {#each tidiesOn(d) as t (t.id)}
+      <div class="tidy-row" class:done={t.is_done}>
+        <input type="checkbox" checked={t.is_done} aria-label={`Done: ${t.title}`}
+               onchange={(ev) => tickTidy(t, ev.currentTarget.checked)} />
+        {#if tidyEdit?.id === t.id}
+          <input class="tidy-input" bind:value={tidyEdit.title} aria-label="Rename small task" use:focusSelect
+                 onkeydown={(ev) => {
+                   if (ev.key === "Enter") { ev.preventDefault(); renameTidy(); }
+                   if (ev.key === "Escape") { ev.preventDefault(); tidyEdit = null; }
+                 }}
+                 onblur={renameTidy} />
+        {:else}
+          <button class="tidy-title" aria-haspopup="menu" title={`${t.title} — click or right-click to move, rename or delete`}
+                  onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
+        {/if}
+      </div>
+    {/each}
+    <input class="tidy-input tidy-add" placeholder={short ? "+ add" : "+ task / deadline"} bind:value={tidyDraft[d]}
+           aria-label={`Add a small task or deadline on ${dayName(d)} ${dayNum(d)}`}
+           onkeydown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); addTidyOn(d); } }} />
+  </div>
+{/snippet}
+
+{#snippet monthGrid()}
+  <section class="month" aria-label={`Small tasks / deadlines, ${monthLabel}`}>
+    <div class="month-nav">
+      <button aria-label="The month before" onclick={() => (monthAt = shiftMonth(monthFirst, -1))}>‹</button>
+      <h2>{monthLabel}</h2>
+      <button aria-label="The month after" onclick={() => (monthAt = shiftMonth(monthFirst, 1))}>›</button>
+      {#if monthFirst !== thisMonth}<button class="link" onclick={() => (monthAt = thisMonth)}>This month</button>{/if}
+      <span class="muted small">{tidies.filter((t) => t.day >= monthFirst && t.day <= monthLast && !t.is_done).length} open</span>
+    </div>
+    {#if phone}
+      {#key monthFirst}
+        <div class="month-list" use:toToday>
+          {#each monthDays as d (d)}
+            <div class="m-cell" class:today={d === today()} class:past={d < today()} class:empty={!tidiesOn(d).length}>
+              <div class="m-date">{dayName(d)} <strong>{dayNum(d)}</strong></div>
+              {@render tidyList(d)}
+            </div>
+          {/each}
+        </div>
+      {/key}
+    {:else}
+      <div class="month-scroll">
+        <div class="month-grid">
+          {#each gridDays.slice(0, 7) as d (d)}<div class="m-dow">{dayName(d)}</div>{/each}
+          {#each gridDays as d (d)}
+            <div class="m-cell" class:out={d < monthFirst || d > monthLast} class:today={d === today()} class:past={d < today()}>
+              <div class="m-date">{dayNum(d) === 1 ? parse(d).toLocaleDateString("en-GB", { day: "numeric", month: "short" }) : dayNum(d)}</div>
+              {@render tidyList(d, true)}
+            </div>
+          {/each}
+        </div>
+      </div>
+    {/if}
+  </section>
+{/snippet}
 
 {#if tidyMenu}
   {@const tm = tidyMenu}
@@ -2449,17 +2528,50 @@
   .add-day { margin-top: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 0.25rem; }
   .add-day button { font-size: 0.72rem; padding: 0.15rem; background: none; border: 1px dashed var(--rule); color: var(--ink-soft); }
   .tidy { display: grid; gap: 0.05rem; padding-top: 0.3rem; border-top: 1px dashed var(--rule); font-family: var(--font-ui); }
-  .tidy-row { display: flex; align-items: center; gap: 0.3rem; min-width: 0; }
-  .tidy-row input[type="checkbox"] { width: auto; margin: 0; flex-shrink: 0; }
+  .tidy-row { display: flex; align-items: flex-start; gap: 0.3rem; min-width: 0; }
+  .tidy-row input[type="checkbox"] { width: auto; margin: 0.2rem 0 0; flex-shrink: 0; }
   .tidy-title {
     flex: 1; min-width: 0; text-align: left; background: none; border: none; padding: 0.1rem 0.15rem; border-radius: 3px;
-    font-size: 0.74rem; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    font-size: 0.74rem; line-height: 1.3; color: var(--ink); white-space: normal; overflow-wrap: anywhere;
+    /* up to two lines, then … */
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
   }
   .tidy-title:hover { background: var(--paper); }
   .tidy-row.done .tidy-title { text-decoration: line-through; color: var(--ink-soft); }
   .tidy-input { flex: 1; min-width: 0; font-size: 0.74rem; padding: 0.1rem 0.3rem; }
   .tidy-add { background: none; border: 1px dashed transparent; color: var(--ink-soft); }
   .tidy-add:hover, .tidy-add:focus { border-color: var(--rule); background: var(--paper); color: var(--ink); }
+
+  .cal-switch { display: inline-flex; margin: 0 0 0.6rem; border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; font-family: var(--font-ui); }
+  .cal-switch button { border: none; border-radius: 0; background: none; padding: 0.3rem 0.8rem; font-size: 0.82rem; color: var(--ink-soft); }
+  .cal-switch button.on { background: var(--accent); color: var(--accent-ink); }
+  .month-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .month .month-nav h2 { margin: 0; font-size: 1.1rem; min-width: 9.5rem; text-align: center; }
+  .month-nav button:not(.link) { padding: 0.25rem 0.7rem; }
+  .month-nav .link { background: none; border: none; padding: 0; color: var(--accent); cursor: pointer; font-family: var(--font-ui); font-size: 0.85rem; }
+  /* the month scrolls in its own box; the weekday names stay on top */
+  .month-scroll { max-height: calc(100vh - 12rem); min-height: 20rem; overflow-y: auto; border-radius: var(--radius); }
+  .month-grid { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 0.3rem; }
+  .m-dow { position: sticky; top: 0; z-index: 1; background: var(--paper); font-family: var(--font-ui); font-size: 0.75rem; font-weight: 600; color: var(--ink-soft); padding: 0.25rem 0.3rem; }
+  .m-cell { background: var(--panel); border-radius: var(--radius); padding: 0.35rem; min-height: 6.5rem; display: flex; flex-direction: column; gap: 0.2rem; min-width: 0; }
+  .m-cell.out { opacity: 0.45; }
+  .m-cell.today { outline: 2px solid var(--accent); }
+  .m-cell .tidy { border-top: none; padding-top: 0; max-height: 9rem; overflow-y: auto; }
+  .m-date { font-family: var(--font-ui); font-size: 0.78rem; font-weight: 600; color: var(--ink-soft); }
+  .m-cell.today .m-date { color: var(--accent); }
+  /* a phone: the month as a list of its days, opened at today */
+  .month-list { display: grid; gap: 0.35rem; }
+  .month-list .m-cell { min-height: 0; display: grid; grid-template-columns: 3.4rem minmax(0, 1fr); gap: 0.5rem; padding: 0.45rem 0.55rem; scroll-margin-top: 4.5rem; }
+  .month-list .m-cell .tidy { max-height: none; overflow: visible; }
+  .month-list .m-cell.empty { background: none; border-bottom: 1px solid var(--rule); border-radius: 0; }
+  .month-list .m-date { font-weight: 400; padding-top: 0.15rem; }
+  .month-list .m-date strong { font-size: 0.95rem; color: var(--ink); }
+  @media (max-width: 48rem) {
+    .tidy-title { font-size: 0.88rem; }
+    .tidy-input { font-size: 0.88rem; padding: 0.3rem 0.4rem; }
+    .tidy-row input[type="checkbox"] { width: 1.15rem; height: 1.15rem; }
+    .tidy-row { gap: 0.45rem; }
+  }
 
   .week h2 { margin-top: 2rem; }
   .group { margin-top: 1rem; font-family: var(--font-ui); }
