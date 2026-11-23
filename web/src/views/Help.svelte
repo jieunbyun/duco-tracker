@@ -67,7 +67,9 @@
       <em>+ task / deadline</em> and press Enter, tick it when it's done (it stays, struck through), and click or
       right-click it to move it to the day before, the day after or any date, to rename it, to delete it, or to
       <em>Add link…</em> — any web address, such as an email in Outlook on the web (… › Share › Copy link), a
-      document or a form; 🔗 beside the task then opens it in a new tab. A long one wraps to two lines (hover for all
+      document or a form; 🔗 beside the task then opens it in a new tab. <em>☐ Tidy-up</em> in the same menu ticks a
+      task as a tidy-up, shown in green (tick it again to undo). Drag a task's ⠿ handle (or press ↑ ↓ on it) to
+      reorder a day's tasks. A long one wraps to two lines (hover for all
       of it). They are never counted as planned or logged time.
       <em>Month · small tasks</em>, above the days, swaps the week for a month of them alone — ‹ › for other months,
       each day's list scrolling in its box, and all of them working as in the week; on a phone the month is a list of

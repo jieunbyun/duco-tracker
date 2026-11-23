@@ -613,7 +613,72 @@
   let tidyDraft = $state<Record<string, string>>({});
   let tidyEdit = $state<{ id: string; title: string } | null>(null);
   let tidyMenu = $state<{ t: Tidy; x: number; y: number } | null>(null);
-  const tidiesOn = (day: string) => tidies.filter((x) => x.day === day);
+  // a day's small tasks in the order you have dragged them into (new ones at the end)
+  const tidyOrder = (a: Tidy, b: Tidy) =>
+    (a.sort_order ?? Infinity) - (b.sort_order ?? Infinity) || a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id);
+  function tidiesOn(day: string): Tidy[] {
+    const list = tidies.filter((x) => x.day === day).sort(tidyOrder);
+    if (tidyDrag?.day !== day) return list;
+    return tidyDrag.order.map((id) => list.find((t) => t.id === id)).filter((t): t is Tidy => !!t);
+  }
+
+  // ---- rearranging a day's small tasks: drag the ⠿ handle (mouse or touch), or arrow keys on it ----
+  let tidyDrag = $state<{ day: string; id: string; from: string[]; order: string[] } | null>(null);
+  function startTidyDrag(ev: PointerEvent, t: Tidy) {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    const order = tidies.filter((x) => x.day === t.day).sort(tidyOrder).map((x) => x.id);
+    tidyDrag = { day: t.day, id: t.id, from: order, order };
+    window.addEventListener("pointermove", tidyDragMove);
+    window.addEventListener("pointerup", endTidyDrag);
+    window.addEventListener("pointercancel", endTidyDrag);
+  }
+  function tidyDragMove(ev: PointerEvent) {
+    if (!tidyDrag) return;
+    const over = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>(".tidy-row");
+    const overId = over?.dataset.id;
+    if (!overId || overId === tidyDrag.id || over!.dataset.day !== tidyDrag.day) return;
+    const order = tidyDrag.order.filter((id) => id !== tidyDrag!.id);
+    const r = over!.getBoundingClientRect();
+    order.splice(order.indexOf(overId) + (ev.clientY > r.top + r.height / 2 ? 1 : 0), 0, tidyDrag.id);
+    if (order.join() !== tidyDrag.order.join()) tidyDrag.order = order;
+  }
+  async function endTidyDrag() {
+    window.removeEventListener("pointermove", tidyDragMove);
+    window.removeEventListener("pointerup", endTidyDrag);
+    window.removeEventListener("pointercancel", endTidyDrag);
+    if (!tidyDrag) return;
+    const { day, from, order } = tidyDrag;
+    tidyDrag = null;
+    if (order.join() !== from.join()) await saveTidyOrder(day, order);
+  }
+  function tidyKeyMove(ev: KeyboardEvent, t: Tidy) {
+    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+    ev.preventDefault();
+    const order = tidies.filter((x) => x.day === t.day).sort(tidyOrder).map((x) => x.id);
+    const i = order.indexOf(t.id);
+    const j = i + (ev.key === "ArrowUp" ? -1 : 1);
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    saveTidyOrder(t.day, order).then(() =>
+      requestAnimationFrame(() => document.querySelector<HTMLElement>(`.tidy-row[data-id="${t.id}"] .tgrip`)?.focus()));
+  }
+  /** Store a day's order as sort_order 10, 20, 30…, changing only what moved. */
+  async function saveTidyOrder(day: string, order: string[]) {
+    const changes = order.map((id, i) => ({ id, sort_order: (i + 1) * 10 }))
+      .filter((c) => tidies.find((t) => t.id === c.id)?.sort_order !== c.sort_order);
+    if (!changes.length) return;
+    const at = new Map(changes.map((c) => [c.id, c.sort_order]));
+    tidies = tidies.map((t) => (at.has(t.id) ? { ...t, sort_order: at.get(t.id)! } : t)); // at once; the reload confirms it
+    await change(`Reordered the small tasks on ${dayName(day)} ${dayNum(day)}`,
+      async () => { for (const c of changes) await saveTidy(c.id, { sort_order: c.sort_order }); });
+  }
+
+  // a tidy-up: ticked so in the menu, and coloured
+  async function setTidyUp(t: Tidy, on: boolean) {
+    const ok = await change(on ? `Marked ${q(t)} a tidy-up` : `${q(t)} no longer a tidy-up`, () => saveTidy(t.id, { is_tidy: on }));
+    if (!ok && /is_tidy/i.test(error)) error = "Marking tidy-ups needs web/db/0066_tidy_kind.sql run first, in the Supabase SQL editor.";
+  }
 
   // the month view: only the small tasks / deadlines, a month at a time (remembered in this browser)
   const MONTH_VIEW = "week.monthView";
@@ -688,6 +753,7 @@
       { label: "‹ Move to the day before", run: () => moveTidy(t, addDays(t.day, -1)) },
       { label: "Move to the day after ›", run: () => moveTidy(t, addDays(t.day, 1)) },
       { label: "Move to a date…", run: () => { moveDate = t.day; panel = { kind: "tidyMove", tidy: t }; } },
+      { label: t.is_tidy ? "☑ Tidy-up" : "☐ Tidy-up", run: () => setTidyUp(t, !t.is_tidy) },
       { label: "Rename", run: () => (tidyEdit = { id: t.id, title: t.title }) },
       { label: t.link ? "Change link…" : "Add link…", run: () => { linkDraft = t.link ?? ""; panel = { kind: "tidyLink", tidy: t }; } },
       ...(t.link ? [{ label: "Remove link", run: () => setTidyLink(t, null) }] : []),
@@ -2015,9 +2081,15 @@
 {/if}
 
 {#snippet tidyList(d: string, short = false)}
+  {@const list = tidiesOn(d)}
   <div class="tidy" role="group" aria-label={`Small tasks / deadlines on ${dayName(d)} ${dayNum(d)}`}>
-    {#each tidiesOn(d) as t (t.id)}
-      <div class="tidy-row" class:done={t.is_done}>
+    {#each list as t (t.id)}
+      <div class="tidy-row" class:done={t.is_done} class:tidyup={t.is_tidy} class:dragging={tidyDrag?.id === t.id}
+           data-id={t.id} data-day={d}>
+        {#if list.length > 1}
+          <button type="button" class="tgrip" title="Drag to reorder (or use ↑ ↓)" aria-label={`Move “${t.title}”: drag, or press up or down`}
+                  onpointerdown={(ev) => startTidyDrag(ev, t)} onkeydown={(ev) => tidyKeyMove(ev, t)}>⠿</button>
+        {/if}
         <input type="checkbox" checked={t.is_done} aria-label={`Done: ${t.title}`}
                onchange={(ev) => tickTidy(t, ev.currentTarget.checked)} />
         {#if tidyEdit?.id === t.id}
@@ -2028,7 +2100,7 @@
                  }}
                  onblur={renameTidy} />
         {:else}
-          <button class="tidy-title" aria-haspopup="menu" title={`${t.title} — click or right-click to move, rename or delete`}
+          <button class="tidy-title" aria-haspopup="menu" title={`${t.title}${t.is_tidy ? " (tidy-up)" : ""} — click or right-click to move, rename, mark as a tidy-up or delete`}
                   onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
           {#if t.link}
             <a class="tidy-link" href={t.link} target="_blank" rel="noopener noreferrer" title={`Open ${t.link}`}
@@ -2607,6 +2679,16 @@
   .tidy-link { flex-shrink: 0; text-decoration: none; font-size: 0.72rem; line-height: 1.3; padding: 0.1rem 0.1rem; border-radius: 3px; opacity: 0.8; }
   .tidy-link:hover, .tidy-link:focus-visible { opacity: 1; background: var(--paper); }
   .tidy-row.done .tidy-title { text-decoration: line-through; color: var(--ink-soft); }
+  .tidy-row { border-radius: 3px; border-left: 3px solid transparent; padding-left: 0.1rem; }
+  /* a tidy-up: its own colour, with the word in the tooltip and the menu, not colour alone */
+  .tidy-row.tidyup { border-left-color: var(--series-3); background: color-mix(in srgb, var(--series-3) 12%, transparent); }
+  .tidy-row.dragging { background: var(--paper); box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
+  .tgrip {
+    background: none; border: none; padding: 0 0.05rem; font-size: 0.72rem; line-height: 1.5; color: var(--ink-soft);
+    cursor: grab; touch-action: none; user-select: none; opacity: 0.45; flex-shrink: 0;
+  }
+  .tgrip:hover, .tgrip:focus-visible { opacity: 1; }
+  .tgrip:active { cursor: grabbing; }
   .tidy-input { flex: 1; min-width: 0; font-size: 0.74rem; padding: 0.1rem 0.3rem; }
   .tidy-add { background: none; border: 1px dashed transparent; color: var(--ink-soft); }
   .tidy-add:hover, .tidy-add:focus { border-color: var(--rule); background: var(--paper); color: var(--ink); }
@@ -2639,6 +2721,7 @@
     .tidy-title { font-size: 0.88rem; }
     .tidy-input { font-size: 0.88rem; padding: 0.3rem 0.4rem; }
     .tidy-row input[type="checkbox"] { width: 1.15rem; height: 1.15rem; }
+    .tgrip { font-size: 1rem; padding: 0 0.15rem; opacity: 0.6; }
     .tidy-row { gap: 0.45rem; }
   }
 
