@@ -306,7 +306,7 @@
     <dd>
       Your meeting logs, one <em>series</em> for each (a person, a group, or general meetings), linked to a Planning
       project if you like. A meeting can be planned ahead with its <em>Agenda</em> — one item a line, ticked off on the
-      day — and then kept with what was <em>Discussion</em>ed and its <em>Actions</em>. Write a line for each point; start
+      day — and then kept with its <em>Discussion</em> and <em>Actions</em>. Write a line for each point; start
       it with “- ” for a bullet (“  - ” to nest it), and write links as [text](https://…). Meetings still to come are
       listed first, under <em>Coming up</em>, soonest first. A meeting can be tied to its entry on the Week calendar
       (<em>Link to the calendar…</em> in its form: one of that day's meetings, or <em>+ Add to the calendar</em> with
