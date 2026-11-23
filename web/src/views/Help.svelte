@@ -278,6 +278,13 @@
       session to read its feedback, edit or delete it; <em>Reading</em>, <em>Writing</em> or <em>Speaking</em> at the
       top shows only that skill's sessions. <em>Finish</em> puts a practice under <em>Finished</em> (<em>Reopen</em>
       brings it back). Private to you.
+      <br /><em>+ Problem formulation</em> on a practice formalises a debate as a twin of its conflicting views: the
+      question; the <em>views</em> side by side, each with its own objectives (and what measures them) and its
+      underlying assumptions; the <em>conflicts</em> — two objectives that pull against each other, and why; and the
+      <em>data for validation</em>, each dataset linked to the objectives and assumptions it would test (O and A
+      chips), with those not yet backed by any data listed beneath. Edit freely, then <em>Save</em> (one undo);
+      <em>Revert</em> goes back to what was saved. Log the days spent on it as <em>Formulation</em> sessions, rated on
+      their own criteria.
     </dd>
   </dl>
 

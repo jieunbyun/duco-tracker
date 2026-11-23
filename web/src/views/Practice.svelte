@@ -1,16 +1,19 @@
 <script module lang="ts">
   // kept while the app is open, so an undo (which reloads the tab) leaves you where you were
-  const last = { skill: null as string | null, opened: {} as Record<string, boolean>, showDone: false };
+  const last = { skill: null as string | null, opened: {} as Record<string, boolean>, showDone: false, formOpen: null as string | null };
 </script>
 
 <script lang="ts">
   // Practice: goals practised over days, and under each the day's sessions of reading,
   // writing or speaking, each with your own evaluation.
-  import { loadBook, savePractice, deletePractice, saveSession, deleteSession, SKILLS, CRITERIA, skillLabel, average } from "../lib/practice";
-  import type { Book, Practice, Session, Skill } from "../lib/practice";
+  import {
+    loadBook, savePractice, deletePractice, saveSession, deleteSession, SKILLS, CRITERIA, skillLabel, average, formulationSize,
+  } from "../lib/practice";
+  import type { Book, Practice, Session, Skill, Formulation } from "../lib/practice";
   import { undoable } from "../lib/undo.svelte";
   import { fmtDay, today } from "../lib/dates";
   import PracticeSession from "../lib/PracticeSession.svelte";
+  import FormulationEditor from "../lib/FormulationEditor.svelte";
 
   let book = $state<Book | null>(null);
   let missing = $state(false);
@@ -23,9 +26,10 @@
   let editing = $state<string | null>(null);
   let draft = $state({ title: "", goal: "" });
   let sessionForm = $state<{ practice: string; session: Session | null } | null>(null);
+  let formOpen = $state<string | null>(last.formOpen); // the practice whose problem formulation is open
 
   $effect(() => {
-    Object.assign(last, { skill, opened, showDone });
+    Object.assign(last, { skill, opened, showDone, formOpen });
   });
 
   async function load() {
@@ -55,9 +59,15 @@
       await load();
       return true;
     } catch (e) {
-      error = `Not saved: ${(e as Error).message}`;
+      const m = (e as Error).message;
+      error = /formulation|skill_check/.test(m)
+        ? "Problem formulation needs web/db/0057_practice_formulation.sql run first, in the Supabase SQL editor."
+        : `Not saved: ${m}`;
       return false;
     }
+  }
+  function saveFormulation(p: Practice, f: Formulation) {
+    return act("Saved problem formulation", () => savePractice(p.id, { formulation: f }));
   }
 
   function startEdit(p: Practice | null) {
@@ -78,7 +88,8 @@
   }
   function remove(p: Practice) {
     const n = sessionsOf(p.id).length;
-    if (!confirm(`Delete “${p.title}”${n ? ` and its ${n} ${n === 1 ? "session" : "sessions"}` : ""}?`)) return;
+    const parts = [n ? `its ${n} ${n === 1 ? "session" : "sessions"}` : "", p.formulation ? "its problem formulation" : ""].filter(Boolean);
+    if (!confirm(`Delete “${p.title}”${parts.length ? ` and ${parts.join(" and ")}` : ""}?`)) return;
     act("Deleted practice", () => deletePractice(p.id));
   }
 
@@ -176,6 +187,20 @@
       {/if}
     {/if}
 
+    {#if formOpen === p.id}
+      <FormulationEditor formulation={p.formulation ?? null} onsave={(f) => saveFormulation(p, f)} onclose={() => (formOpen = null)} />
+    {:else if p.formulation}
+      {@const n = formulationSize(p.formulation)}
+      <button class="formulation-line" onclick={() => (formOpen = p.id)}>
+        <span class="eyebrow">Problem formulation ›</span>
+        <span class="q">{p.formulation.question.trim() || "The debate, not yet written"}</span>
+        <span class="muted small">{n.views} {n.views === 1 ? "view" : "views"} · {n.objectives} objectives · {n.assumptions} assumptions ·
+          {n.conflicts} {n.conflicts === 1 ? "conflict" : "conflicts"} · {n.data} {n.data === 1 ? "dataset" : "datasets"}</span>
+      </button>
+    {:else}
+      <button class="add-formulation" onclick={() => (formOpen = p.id)}>+ Problem formulation</button>
+    {/if}
+
     {#if sessionForm?.practice === p.id && !sessionForm.session}
       <PracticeSession skill={skill ?? "reading"} {focus} onsave={storeSession} oncancel={() => (sessionForm = null)} />
     {/if}
@@ -243,7 +268,7 @@
   .sessions > li { border-bottom: 1px solid var(--rule); }
   .sessions > li.editing { padding: 0.5rem 0; border-bottom: none; }
   .line {
-    width: 100%; display: grid; grid-template-columns: 7.5rem 5.5rem minmax(0, 1fr) auto; gap: 0.6rem; align-items: baseline;
+    width: 100%; display: grid; grid-template-columns: 7.5rem 6.5rem minmax(0, 1fr) auto; gap: 0.6rem; align-items: baseline;
     text-align: left; background: none; border: none; border-radius: 0; padding: 0.45rem 0.2rem; font-size: 0.9rem;
   }
   .line:hover { background: var(--panel); }
@@ -252,6 +277,12 @@
   .skill.reading { border-color: var(--series-1); }
   .skill.writing { border-color: var(--series-2); }
   .skill.speaking { border-color: var(--series-3); }
+  .skill.formulation { border-color: var(--series-4); }
+  .formulation-line { display: grid; gap: 0.15rem; text-align: left; background: var(--panel); border: 1px solid var(--rule); padding: 0.5rem 0.7rem; }
+  .formulation-line:hover { border-color: var(--accent); }
+  .formulation-line .q { white-space: pre-wrap; }
+  .formulation-line .small { font-family: var(--font-ui); font-size: 0.78rem; }
+  .add-formulation { justify-self: start; font-size: 0.82rem; padding: 0.25rem 0.7rem; background: none; border-style: dashed; color: var(--ink-soft); }
   .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .nums { font-family: var(--font-ui); font-size: 0.8rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .feedback { display: grid; gap: 0.5rem; padding: 0.3rem 0.2rem 0.8rem; }

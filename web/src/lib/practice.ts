@@ -1,13 +1,15 @@
 // Practice (0055_practice.sql): a goal practised over days, and under it one session a
-// skill a day — reading, writing or speaking — with your own feedback and ratings.
+// skill a day — reading, writing, speaking or formulation — with your own feedback and
+// ratings; and, on a practice, the formulation of a debate (0057).
 import { supabase } from "./supabase";
 import { check } from "./data";
 
-export type Skill = "reading" | "writing" | "speaking";
+export type Skill = "reading" | "writing" | "speaking" | "formulation";
 export const SKILLS: { key: Skill; label: string }[] = [
   { key: "reading", label: "Reading" },
   { key: "writing", label: "Writing" },
   { key: "speaking", label: "Speaking" },
+  { key: "formulation", label: "Formulation" },
 ];
 export const skillLabel = (s: Skill) => SKILLS.find((k) => k.key === s)?.label ?? s;
 
@@ -16,10 +18,55 @@ export const CRITERIA: Record<Skill, string[]> = {
   reading: ["Understanding the argument", "Judging the evidence", "Notes worth keeping"],
   writing: ["Structure and argument", "Clarity", "Concision", "Use of sources"],
   speaking: ["Structure", "Delivery and pace", "Visuals", "Handling questions"],
+  formulation: ["Objectives made explicit", "Assumptions surfaced", "Fair to each view", "Testable against data"],
 };
+
+// ---- problem formulation (0057): a debate as views, each with its objectives and
+// assumptions; the conflicts between objectives; and the data that would validate them
+export type Item = { id: string; text: string };
+export type Objective = Item & { measure: string };
+export type View = { id: string; name: string; objectives: Objective[]; assumptions: Item[] };
+export type Conflict = { id: string; a: string | null; b: string | null; why: string };
+export type Datum = { id: string; name: string; source: string; notes: string; tests: string[] };
+export type Formulation = { question: string; views: View[]; conflicts: Conflict[]; data: Datum[] };
+
+export const newId = () => crypto.randomUUID();
+export const emptyFormulation = (): Formulation => ({
+  question: "",
+  views: [{ id: newId(), name: "", objectives: [], assumptions: [] }, { id: newId(), name: "", objectives: [], assumptions: [] }],
+  conflicts: [],
+  data: [],
+});
+/** As stored, with every list present (a hand-edited or older document may lack some). */
+export function asFormulation(f: unknown): Formulation | null {
+  if (!f || typeof f !== "object") return null;
+  const o = f as Partial<Formulation>;
+  const arr = <T>(v: T[] | undefined) => (Array.isArray(v) ? v : []);
+  return {
+    question: o.question ?? "",
+    views: arr(o.views).map((v) => ({
+      id: v.id ?? newId(), name: v.name ?? "",
+      objectives: arr(v.objectives).map((x) => ({ id: x.id ?? newId(), text: x.text ?? "", measure: x.measure ?? "" })),
+      assumptions: arr(v.assumptions).map((x) => ({ id: x.id ?? newId(), text: x.text ?? "" })),
+    })),
+    conflicts: arr(o.conflicts).map((c) => ({ id: c.id ?? newId(), a: c.a ?? null, b: c.b ?? null, why: c.why ?? "" })),
+    data: arr(o.data).map((d) => ({ id: d.id ?? newId(), name: d.name ?? "", source: d.source ?? "", notes: d.notes ?? "", tests: arr(d.tests) })),
+  };
+}
+/** Counts for a one-line summary. */
+export function formulationSize(f: Formulation) {
+  return {
+    views: f.views.length,
+    objectives: f.views.reduce((n, v) => n + v.objectives.length, 0),
+    assumptions: f.views.reduce((n, v) => n + v.assumptions.length, 0),
+    conflicts: f.conflicts.length,
+    data: f.data.length,
+  };
+}
 
 export type Practice = {
   id: string; title: string; goal: string | null; started_on: string; done_on: string | null; created_at: string;
+  formulation?: Formulation | null; // absent until 0057 is run
 };
 export type PracticeFields = Omit<Practice, "id" | "created_at">;
 export type Session = {
@@ -48,7 +95,8 @@ export async function loadBook(): Promise<Book | null> {
     sessions.push(...(s.data as Session[]));
     if (s.data.length < PAGE) break;
   }
-  return { practices: p.data as Practice[], sessions };
+  const practices = (p.data as Practice[]).map((x) => ({ ...x, formulation: asFormulation(x.formulation) }));
+  return { practices, sessions };
 }
 
 export async function savePractice(id: string | null, fields: Partial<PracticeFields>): Promise<string> {
