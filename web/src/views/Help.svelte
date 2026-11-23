@@ -56,7 +56,12 @@
       <em>↪ Carry forward unfinished to-dos…</em> (under the calendar) lists the open ones filed before the week they
       go into — the week on screen, or the week after it, to send this week's leftovers on — and the ones you tick are
       filed there; a day planned for one before that week and never logged is cancelled, struck through, so its hours
-      move with it. Cancel keeps a to-do in the list, struck
+      move with it. To take one off that list without bringing it, <em>Mark done</em> it, or <em>Drop</em> it: it
+      stays where it is, open — neither done nor cancelled — and is no longer offered, but is listed under
+      <em>Dropped</em> at the foot of the list, where you can still tick it to bring it forward, or <em>Put back</em>
+      to have it offered again; moving it to another week offers it again too. A to-do made from a milestone (or
+      linked to one) stands for it: marking the to-do done marks the milestone done as well, and reopening the to-do
+      reopens the milestone; one Undo takes back both. Cancel keeps a to-do in the list, struck
       through and restorable; Delete removes it. A red edge marks a planned day that has passed without being logged.
       Click or right-click a meeting or duty on the calendar for its actions: log time, mark the to-do done (or
       reopen it), or edit it. <em>Move… ›</em> opens the moves: a day before, a day after, or <em>Move to a date…</em>,

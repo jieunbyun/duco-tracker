@@ -282,6 +282,7 @@ export type Todo = {
   reviewed: boolean;
   is_tentative: boolean; // on the calendar, not counted as planned until confirmed
   source_tentative: boolean;
+  carry_skip?: boolean; // dropped from carrying forward (0056); only read there
 };
 export type TodoFields = Omit<Todo, "id">;
 
@@ -340,19 +341,28 @@ export async function loadWeekPlan(from: string, to: string): Promise<WeekPlan> 
  * To-dos that could be carried forward into the week from `from`: tasks filed
  * under an earlier week, neither done nor cancelled, not from Outlook (their
  * date follows the calendar), and not already planned on a day from `from` on.
- * Latest week first, with their sittings.
+ * Latest week first, with their sittings. Those you dropped (0056) come apart, in
+ * `dropped`; `canDrop` is false until 0056 is run.
  */
-export async function loadUnfinishedBefore(from: string): Promise<WeekPlan> {
-  const todos = ((await check<Todo[]>(
-    supabase.from("todo").select(TODO_COLS).lt("due_on", from).eq("kind", "task")
+export async function loadUnfinishedBefore(from: string): Promise<WeekPlan & { dropped: Todo[]; canDrop: boolean }> {
+  const query = (cols: string) =>
+    supabase.from("todo").select(cols).lt("due_on", from).eq("kind", "task")
       .eq("is_done", false).eq("is_cancelled", false).is("source", null)
-      .order("due_on", { ascending: false }).order("sort_order"),
-  )) ?? []).map(asTodo);
-  const slots = todos.length
-    ? ((await check<Slot[]>(supabase.from("todo_slot").select(SLOT_COLS).in("todo_id", todos.map((t) => t.id)))) ?? []).map(asSlot)
+      .order("due_on", { ascending: false }).order("sort_order");
+  let canDrop = true;
+  let res = await query(`${TODO_COLS},carry_skip`);
+  if (res.error && res.error.message.includes("carry_skip")) {
+    canDrop = false; // 0056 not run yet
+    res = await query(TODO_COLS);
+  }
+  if (res.error) throw new Error(res.error.message);
+  const all = ((res.data ?? []) as unknown as Todo[]).map((t) => ({ ...asTodo(t), carry_skip: !!t.carry_skip }));
+  const slots = all.length
+    ? ((await check<Slot[]>(supabase.from("todo_slot").select(SLOT_COLS).in("todo_id", all.map((t) => t.id)))) ?? []).map(asSlot)
     : [];
   const ahead = new Set(slots.filter((s) => s.planned_on >= from && !s.is_cancelled).map((s) => s.todo_id));
-  return { todos: todos.filter((t) => !ahead.has(t.id)), slots };
+  const open = all.filter((t) => !ahead.has(t.id));
+  return { todos: open.filter((t) => !t.carry_skip), dropped: open.filter((t) => t.carry_skip), slots, canDrop };
 }
 
 export async function saveTodo(id: string | null, fields: Partial<TodoFields>): Promise<string> {

@@ -295,9 +295,13 @@
     const planned = calendar + must.hours;
     unknown += must.unknown;
     const logged = entries.reduce((sum, e) => sum + e.minutes / 60, 0);
-    // how far through the week's work: what is logged, against that plus what is still
-    // to do — the cards not yet logged (a to-do's card holds what is left of it) and the
-    // must-dos' hours left. Logged cards count once, by what was logged, not as planned.
+    // how far through the week's work: what is logged on the plan, against that plus what
+    // is still to do — the cards not yet logged (a to-do's card holds what is left of it)
+    // and the must-dos' hours left. Logged cards count once, by what was logged, not as
+    // planned. Time logged on nothing planned (no card) is not part of the plan's progress.
+    const onPlan = new Set(slots.filter((s) => s.entry_id && !uncounted(todoById.get(s.todo_id))).map((s) => s.entry_id));
+    const loggedPlanned = entries.reduce((sum, e) => sum + (onPlan.has(e.id) ? e.minutes / 60 : 0), 0);
+    const unplanned = logged - loggedPlanned;
     let toDo = must.hours;
     for (const s of weekSlots) {
       if (s.entry_id || s.is_cancelled) continue;
@@ -305,12 +309,12 @@
       if (!t || uncounted(t) || t.is_done) continue;
       toDo += (t.kind === "meeting" ? s.planned_hours : cardHours(s, t)) ?? 0;
     }
-    const plan = logged + toDo;
+    const plan = loggedPlanned + toDo;
     const target = (tax?.areas ?? []).reduce((sum, a) => {
       const t = targetOn(tax!.targets, a.id, start);
       return sum + (t ? t.weekly_hours + t.email_weekly_hours : 0);
     }, 0);
-    return { planned, calendar, must, flex, unknown, logged, plan, target };
+    return { planned, calendar, must, flex, unknown, logged, loggedPlanned, unplanned, plan, target };
   });
 
   /** Hours still to do on the to-dos in a list (estimate less what is logged), and how many have no estimate. */
@@ -515,9 +519,23 @@
     return change(`${cancelled ? "Cancelled" : "Restored"} ${q(t)} on ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`,
       () => saveSlot(s.id, { is_cancelled: cancelled, cancelled_by_sync: false })); // yours: the Outlook sync leaves it be
   }
+  /**
+   * A to-do on a milestone stands for it: done marks the milestone done as well, and
+   * reopening reopens a milestone that is done. (Undo takes back both as one.)
+   */
+  function milestoneFollows(t: Todo, done: boolean): string | null {
+    if (t.kind !== "task" || !t.milestone_id) return null;
+    const m = projects.flatMap((p) => p.milestone).find((x) => x.id === t.milestone_id);
+    if (!m) return done ? t.milestone_id : null; // not loaded here: done is still safe to set
+    return (done ? m.status !== "done" : m.status === "done") ? m.id : null;
+  }
   function setDone(t: Todo, done: boolean) {
-    return change(done ? `Marked ${q(t)} done` : `Reopened ${q(t)}`,
-      () => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null }));
+    const ms = milestoneFollows(t, done);
+    const also = ms ? " and its milestone" : "";
+    return change(done ? `Marked ${q(t)}${also} done` : `Reopened ${q(t)}${also}`, async () => {
+      await saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null });
+      if (ms) await setMilestoneStatus(ms, done ? "done" : "active");
+    });
   }
   function setMust(t: Todo) {
     const was = t.must_this_week;
@@ -786,7 +804,11 @@
       const day = f.started_at.slice(0, 10);
       if (p.slot) await saveSlot(p.slot.id, { entry_id: entryId, planned_on: day });
       else await saveSlot(null, { todo_id: p.todo.id, planned_on: day, entry_id: entryId });
-      if (markedDone) await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() });
+      if (markedDone) {
+        await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() });
+        const ms = milestoneFollows(p.todo, true);
+        if (ms) await setMilestoneStatus(ms, "done");
+      }
       try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
       remember(`Logged ${q(p.todo)}`);
     } catch (e) {
@@ -1162,7 +1184,12 @@
   let fwdSaving = $state<string | null>(null);
   let fwdError = $state("");
   let fwdTo = $state(""); // the week they go into: the one on screen, or the next
-  const fwdWeeks = $derived([...new Set(fwdRows.map((r) => r.week))]);
+  let fwdCanDrop = $state(true); // false until 0056 is run
+  let fwdShowDropped = $state(false);
+  // dropped ones are listed apart: not offered, but still there to bring forward or put back
+  const fwdMain = $derived(fwdRows.filter((r) => !r.t.carry_skip));
+  const fwdDropped = $derived(fwdRows.filter((r) => r.t.carry_skip));
+  const fwdWeeks = $derived([...new Set(fwdMain.map((r) => r.week))]);
 
   async function openForward(to: string = start) {
     panel = { kind: "forward" };
@@ -1174,7 +1201,8 @@
       const plan = await loadUnfinishedBefore(to);
       if (fwdTo !== to) return; // the choice changed while this was loading
       fwdSlots = plan.slots;
-      fwdRows = plan.todos.map((t) => ({
+      fwdCanDrop = plan.canDrop;
+      fwdRows = [...plan.todos, ...plan.dropped].map((t) => ({
         t, pick: false, week: weekStart(t.due_on),
         loggedDays: plan.slots.filter((s) => s.todo_id === t.id && s.entry_id).length,
       }));
@@ -1191,6 +1219,23 @@
     try {
       if (await setDone(t, true)) {
         fwdRows = fwdRows.filter((r) => r.t.id !== t.id);
+      } else {
+        fwdError = error;
+      }
+    } finally {
+      fwdSaving = null;
+    }
+  }
+  /** Drop: no longer offered here, but left as it is — open, on its own week. Put back offers it again. */
+  async function dropForward(r: FwdRow, drop: boolean) {
+    if (fwdSaving) return;
+    fwdSaving = r.t.id;
+    fwdError = "";
+    try {
+      if (await change(drop ? `Dropped ${q(r.t)} from carrying forward` : `Put ${q(r.t)} back to carry forward`,
+                       () => saveTodo(r.t.id, { carry_skip: drop }))) {
+        r.t = { ...r.t, carry_skip: drop };
+        r.pick = false;
       } else {
         fwdError = error;
       }
@@ -1223,7 +1268,7 @@
           added += Math.max(0, (t.est_hours ?? 0) - logged);
           await saveTodo(t.id, { est_hours: Math.round(logged * 100) / 100, is_done: true, done_at: new Date().toISOString() });
         } else {
-          await saveTodo(t.id, { due_on: to });
+          await saveTodo(t.id, { due_on: to, ...(t.carry_skip ? { carry_skip: false } : {}) });
         }
       }
       if (targetEmail && added > 0) {
@@ -1446,9 +1491,12 @@
     <div class="wt">
       <span class="wt-label">Logged</span>
       <span class="wt-value">{fmtHours(weekTotals.logged)}</span>
+      {#if weekTotals.unplanned >= 0.01}
+        <span class="wt-sub" title="Logged on nothing planned this week (no card): counted in Logged and in % of target, not in % of planned">incl. {fmtHours(weekTotals.unplanned)} unplanned</span>
+      {/if}
       {#if weekTotals.plan || weekTotals.target}
         <span class="wt-sub">
-          {#if weekTotals.plan}<span title="Logged, against logged plus what is still to do (cards not yet logged, and must-dos' hours left)">{Math.round((100 * weekTotals.logged) / weekTotals.plan)}% of planned</span>{/if}{weekTotals.plan && weekTotals.target ? " · " : ""}{#if weekTotals.target}{Math.round((100 * weekTotals.logged) / weekTotals.target)}% of target{/if}
+          {#if weekTotals.plan}<span title="Logged on the plan (cards logged), against that plus what is still to do (cards not yet logged, and must-dos' hours left). Unplanned time is left out.">{Math.round((100 * weekTotals.loggedPlanned) / weekTotals.plan)}% of planned</span>{/if}{weekTotals.plan && weekTotals.target ? " · " : ""}{#if weekTotals.target}{Math.round((100 * weekTotals.logged) / weekTotals.target)}% of target{/if}
         </span>
       {/if}
     </div>
@@ -1948,36 +1996,81 @@
           To-dos filed under any week before that one, neither done nor cancelled — choose the week after to send on
           the week on screen's leftovers. Tick the ones to bring; the rest stay where they are. A day planned for one
           before that week and never logged is cancelled (it stays on its day, struck through), so its hours move with
-          the to-do. You can also mark a to-do done to remove it from this list.
+          the to-do. To take one off this list without bringing it: <em>Mark done</em>, or <em>Drop</em> — it stays
+          where it is, open, and is listed under <em>Dropped</em> below, to bring forward or put back whenever you like.
         </p>
-        {#if fwdError}<p class="error">Could not mark done: {fwdError}</p>{/if}
+        {#if fwdError}<p class="error">Not saved: {fwdError}</p>{/if}
         {#if fwdLoading}
           <p class="muted">Loading…</p>
         {:else if !fwdRows.length}
           <p class="muted">Nothing unfinished before the week of {fmtDay(fwdTo)}.</p>
         {:else}
-          <div class="small">
-            <button class="link" onclick={() => fwdRows.forEach((r) => (r.pick = true))}>Tick all</button> ·
-            <button class="link" onclick={() => fwdRows.forEach((r) => (r.pick = false))}>none</button>
-          </div>
+          {#if !fwdMain.length}
+            <p class="muted">Nothing to carry forward into the week of {fmtDay(fwdTo)} but what you dropped.</p>
+          {:else}
+            <div class="small">
+              <button class="link" onclick={() => fwdMain.forEach((r) => (r.pick = true))}>Tick all</button> ·
+              <button class="link" onclick={() => fwdMain.forEach((r) => (r.pick = false))}>none</button>
+            </div>
+          {/if}
           {#each fwdWeeks as w (w)}
             <div class="fwd-week">
               <h3>Week of {fmtDay(w)}</h3>
               <ul class="fwd">
-                {#each fwdRows.filter((r) => r.week === w) as r (r.t.id)}
+                {#each fwdMain.filter((r) => r.week === w) as r (r.t.id)}
                   <li>
                     <label>
                       <input type="checkbox" bind:checked={r.pick} />
                       <span>{r.t.must_this_week ? "● " : ""}{r.t.is_core ? "🎯 " : ""}{r.t.title}</span>
                       <span class="muted small">{fwdInfo(r)}</span>
                     </label>
-                    <button class="mini" disabled={!!fwdSaving} aria-label={`Mark “${r.t.title}” done`}
-                            onclick={() => finishForward(r.t)}>{fwdSaving === r.t.id ? "Saving…" : "Mark done"}</button>
+                    {#if fwdSaving === r.t.id}
+                      <span class="muted small">Saving…</span>
+                    {:else}
+                      <span class="fwd-acts">
+                        <button class="mini" disabled={!!fwdSaving} aria-label={`Mark “${r.t.title}” done`}
+                                onclick={() => finishForward(r.t)}>Mark done</button>
+                        {#if fwdCanDrop}
+                          <button class="mini" disabled={!!fwdSaving} aria-label={`Drop “${r.t.title}” from this list`}
+                                  title="Not offered here again: it stays where it is, open (not done, not cancelled), under Dropped below."
+                                  onclick={() => dropForward(r, true)}>Drop</button>
+                        {/if}
+                      </span>
+                    {/if}
                   </li>
                 {/each}
               </ul>
             </div>
           {/each}
+          {#if fwdDropped.length}
+            <div class="fwd-week">
+              <button class="link" aria-expanded={fwdShowDropped} onclick={() => (fwdShowDropped = !fwdShowDropped)}>
+                {fwdShowDropped ? "▾" : "▸"} Dropped ({fwdDropped.length})
+              </button>
+              {#if fwdShowDropped}
+                <ul class="fwd">
+                  {#each fwdDropped as r (r.t.id)}
+                    <li>
+                      <label>
+                        <input type="checkbox" bind:checked={r.pick} />
+                        <span>{r.t.title}</span>
+                        <span class="muted small">week of {fmtDay(r.week)} · {fwdInfo(r)}</span>
+                      </label>
+                      {#if fwdSaving === r.t.id}
+                        <span class="muted small">Saving…</span>
+                      {:else}
+                        <button class="mini" disabled={!!fwdSaving} aria-label={`Put “${r.t.title}” back on this list`}
+                                onclick={() => dropForward(r, false)}>Put back</button>
+                      {/if}
+                    </li>
+                  {/each}
+                </ul>
+              {/if}
+            </div>
+          {/if}
+        {/if}
+        {#if !fwdCanDrop && !fwdLoading}
+          <p class="muted small">To drop to-dos from this list, run <code>web/db/0056_todo_carry_skip.sql</code> in the Supabase SQL editor.</p>
         {/if}
         <div class="pick-actions">
           {#if fwdRows.some((r) => r.pick)}
@@ -2130,6 +2223,7 @@
   .fwd { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.25rem; }
   .fwd li { display: flex; align-items: center; gap: 0.6rem; }
   .fwd button { flex-shrink: 0; }
+  .fwd-acts { display: flex; gap: 0.3rem; flex-shrink: 0; }
   .fwd label { display: flex; flex: 1; min-width: 0; flex-wrap: wrap; align-items: baseline; gap: 0.45rem; font-size: 0.88rem; cursor: pointer; }
   .fwd input { width: auto; }
   .ms-groups { display: grid; gap: 0.4rem; max-height: 58vh; overflow-y: auto; padding-right: 0.2rem; }
