@@ -24,6 +24,7 @@
     tips: () => import("./views/Tips.svelte"),
     failures: () => import("./views/Failures.svelte"),
     practice: () => import("./views/Practice.svelte"),
+    diary: () => import("./views/Diary.svelte"),
     help: () => import("./views/Help.svelte"),
     logbook: () => import("./views/MyLogbook.svelte"),
     projects: () => import("./views/MyProjects.svelte"),
@@ -31,15 +32,15 @@
   };
   const labels: Record<keyof typeof views, string> = {
     week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Members", time: "Time", reading: "Reading",
-    cv: "CV", tips: "Tips", failures: "Failures", practice: "Practice", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
+    cv: "CV", tips: "Tips", failures: "Failures", practice: "Practice", diary: "Diary", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
   };
   type Route = keyof typeof views;
 
   // Who sees which tabs: the planner is yours alone; a member sees only their
   // logbook, projects and their own reading list. You keep a logbook too, for
   // the projects you lead.
-  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice"];
-  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice", "supervision", "logbook"];
+  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice", "diary"];
+  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice", "diary", "supervision", "logbook"];
   const MEMBER: Route[] = ["logbook", "projects", "reading"];
 
   let session = $state<Session | null>(null);

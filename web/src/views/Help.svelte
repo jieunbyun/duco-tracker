@@ -273,6 +273,19 @@
       projects or anywhere else.
     </dd>
 
+    <dt>Diary</dt>
+    <dd>
+      A line a day, and a look back each month. For a day: the <em>happiest moment</em> and why it happened, the
+      <em>worst moment</em>, each with a life area if you like (work, family, friends, health, self, other), and your
+      <em>mood</em>, 1–10 (click the same number again to clear it); ‹ › or the date go to another day, and
+      <em>Save</em> keeps it (saving it blank removes the day). Below, the day's month: the average mood (against last
+      month), the highest and lowest days, how many days are written and how many were good (7+) or hard (4 or less);
+      the mood day by day (hover for the day, click to open it; the dashed line is the average); the moments, newest
+      first, with ☆ to star the ones that stand out (and <em>Starred only</em>); where the moments come from, by life
+      area, with the average mood on days whose happiest moment was there; where the time went, from what you logged
+      in Week and Time; and your reflection on the month. Private to you: nobody else can read it.
+    </dd>
+
     <dt>Practice</dt>
     <dd>
       Reading, writing and speaking, practised day by day. A practice has a goal and can run over several days;
