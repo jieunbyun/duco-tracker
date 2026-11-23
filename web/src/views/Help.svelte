@@ -263,6 +263,17 @@
       ← Back button. A theme can be deleted once it is empty. Private to you: members don't see them, on shared
       projects or anywhere else.
     </dd>
+
+    <dt>Practice</dt>
+    <dd>
+      Reading, writing and speaking, practised day by day. A practice has a goal and can run over several days;
+      <em>+ Session</em> adds a day's work on it: the date, the skill, the minutes, what you did, and your own
+      evaluation — 1–5 on that skill's criteria (click a number again to clear it), what went well, what to fix and
+      your focus for next time. That focus shows on the practice, and at the top of the next session's form. Click a
+      session to read its feedback, edit or delete it; <em>Reading</em>, <em>Writing</em> or <em>Speaking</em> at the
+      top shows only that skill's sessions. <em>Finish</em> puts a practice under <em>Finished</em> (<em>Reopen</em>
+      brings it back). Private to you.
+    </dd>
   </dl>
 
   <h2>Categories</h2>
