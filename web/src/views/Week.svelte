@@ -22,7 +22,7 @@
   import { loadFeed, syncOutlook, isStale, loadUnreviewed, dismissOutlook } from "../lib/outlook";
   import type { Feed } from "../lib/outlook";
   import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
-  import { loadTidies, addTidy, saveTidy, deleteTidy } from "../lib/tidy";
+  import { loadTidies, addTidy, saveTidy, deleteTidy, cleanLink } from "../lib/tidy";
   import type { Tidy } from "../lib/tidy";
 
   const SHOW_LOGGED = "week.showLogged";
@@ -639,6 +639,13 @@
   function removeTidy(t: Tidy) {
     return change(`Deleted small task ${q(t)}`, () => deleteTidy(t.id)); // Undo brings it back
   }
+  // a link on a small task: any web address (an email in Outlook on the web, a document, a form…)
+  let linkDraft = $state("");
+  async function setTidyLink(t: Tidy, link: string | null) {
+    const ok = await change(link ? `Linked ${q(t)}` : `Took the link off ${q(t)}`, () => saveTidy(t.id, { link }));
+    if (!ok && /link/i.test(error)) error = "Links on small tasks need web/db/0063_tidy_link.sql run first, in the Supabase SQL editor.";
+  }
+
   function openTidyMenu(ev: MouseEvent, t: Tidy) {
     ev.preventDefault();
     ev.stopPropagation();
@@ -651,6 +658,8 @@
       { label: "Move to the day after ›", run: () => moveTidy(t, addDays(t.day, 1)) },
       { label: "Move to a date…", run: () => { moveDate = t.day; panel = { kind: "tidyMove", tidy: t }; } },
       { label: "Rename", run: () => (tidyEdit = { id: t.id, title: t.title }) },
+      { label: t.link ? "Change link…" : "Add link…", run: () => { linkDraft = t.link ?? ""; panel = { kind: "tidyLink", tidy: t }; } },
+      ...(t.link ? [{ label: "Remove link", run: () => setTidyLink(t, null) }] : []),
       { label: "Delete", run: () => removeTidy(t), danger: true },
     ];
   }
@@ -813,6 +822,7 @@
     | { kind: "spread"; todo: Todo }
     | { kind: "moveTo"; todo: Todo; slot: Slot }
     | { kind: "tidyMove"; tidy: Tidy }
+    | { kind: "tidyLink"; tidy: Tidy }
     | { kind: "email" }
     | { kind: "forward" }
     | { kind: "outlook" }
@@ -1986,6 +1996,10 @@
         {:else}
           <button class="tidy-title" aria-haspopup="menu" title={`${t.title} — click or right-click to move, rename or delete`}
                   onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
+          {#if t.link}
+            <a class="tidy-link" href={t.link} target="_blank" rel="noopener noreferrer" title={`Open ${t.link}`}
+               aria-label={`Open the link for “${t.title}”`}>🔗</a>
+          {/if}
         {/if}
       </div>
     {/each}
@@ -2157,6 +2171,22 @@
         </p>
         <div class="pick-actions">
           <button class="primary" type="submit" disabled={!moveDate || moveDate === mv.slot.planned_on}>Move</button>
+          <button type="button" onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </form>
+    {:else if panel.kind === "tidyLink"}
+      {@const lt = panel.tidy}
+      {@const clean = cleanLink(linkDraft)}
+      <h2>Link for “{lt.title}”</h2>
+      <form class="move-to" onsubmit={(ev) => { ev.preventDefault(); const t = lt, to = clean; if (!to) return; panel = null; setTidyLink(t, to); }}>
+        <label>Web address <input bind:value={linkDraft} placeholder="https://…" autocomplete="off" spellcheck="false" use:focusSelect /></label>
+        <p class="muted small">
+          {#if linkDraft.trim() && !clean}That isn't a web address: it should start with https://, http:// or mailto:.
+          {:else}Paste any link — an email from Outlook on the web (… › Share › Copy link), a document, a form. 🔗 beside the
+            task opens it in a new tab.{/if}
+        </p>
+        <div class="pick-actions">
+          <button class="primary" type="submit" disabled={!clean || clean === lt.link}>Save link</button>
           <button type="button" onclick={() => (panel = null)}>Cancel</button>
         </div>
       </form>
@@ -2537,6 +2567,8 @@
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
   }
   .tidy-title:hover { background: var(--paper); }
+  .tidy-link { flex-shrink: 0; text-decoration: none; font-size: 0.72rem; line-height: 1.3; padding: 0.1rem 0.1rem; border-radius: 3px; opacity: 0.8; }
+  .tidy-link:hover, .tidy-link:focus-visible { opacity: 1; background: var(--paper); }
   .tidy-row.done .tidy-title { text-decoration: line-through; color: var(--ink-soft); }
   .tidy-input { flex: 1; min-width: 0; font-size: 0.74rem; padding: 0.1rem 0.3rem; }
   .tidy-add { background: none; border: 1px dashed transparent; color: var(--ink-soft); }
