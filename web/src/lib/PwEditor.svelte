@@ -11,6 +11,7 @@
   import type { GroupProject, Member } from "./group";
   import { LIVE_STATUSES } from "./plan";
   import { fmtDay } from "./dates";
+  import GoalThoughts from "./GoalThoughts.svelte";
 
   type Props = {
     node: PwNode | null; // null = new
@@ -343,6 +344,10 @@
         <button type="button" class="mini" disabled={!linkTo} onclick={addLink}>Link</button>
       </div>
     </div>
+  {/if}
+
+  {#if n0?.kind === "goal"}
+    <div class="wide"><GoalThoughts nodeId={n0.id} /></div>
   {/if}
 
   {#if revisions.length}

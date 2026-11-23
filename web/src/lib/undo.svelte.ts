@@ -28,7 +28,7 @@ const NOUN: Record<string, string> = {
   calendar_feed: "Outlook settings", calendar_ignore: "ignored event", reading: "reading", reading_note: "note",
   pw_node: "Pathways item", pw_link: "link", pw_revision: "goal wording", pw_asset: "asset",
   action_plan: "projected hours", action_time: "logged time", tip: "tip topic",
-  failure_theme: "theme", failure: "hypothesis", failure_note: "note", tidy: "small task", diary_day: "diary entry", diary_month: "reflection", meeting_series: "meeting series", meeting: "meeting", budget: "budget", budget_line: "budget line", budget_expense: "expense", contact: "person", contact_interaction: "note", opportunity: "opportunity", organisation: "organisation",
+  failure_theme: "theme", failure: "hypothesis", failure_note: "note", tidy: "small task", diary_day: "diary entry", diary_month: "reflection", pw_thought: "thought", meeting_series: "meeting series", meeting: "meeting", budget: "budget", budget_line: "budget line", budget_expense: "expense", contact: "person", contact_interaction: "note", opportunity: "opportunity", organisation: "organisation",
   practice: "practice", practice_session: "practice session",
 };
 function describe(method: string, table: string, prefer: string): string {
