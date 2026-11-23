@@ -1,9 +1,10 @@
 <script lang="ts">
   // Problem formulation: a debate as its views side by side — each with its objectives and
   // underlying assumptions — the conflicts between objectives, and the data that would
-  // validate them. Edited as one draft; Save keeps it (one undo).
-  import { emptyFormulation, newId } from "./practice";
-  import type { Formulation, View } from "./practice";
+  // validate them. Each objective can be tagged as the system's, a member's or a stakeholder
+  // group's. Edited as one draft; Save keeps it (one undo).
+  import { emptyFormulation, newId, TAGS, tagLabel } from "./practice";
+  import type { Formulation, View, Objective, Tag } from "./practice";
 
   let { formulation, onsave, onclose }: {
     formulation: Formulation | null;
@@ -22,9 +23,12 @@
   const viewName = (v: View, i: number) => v.name.trim() || `View ${i + 1}`;
   const objectives = $derived(f.views.flatMap((v, i) => v.objectives.map((o) => ({ ...o, view: viewName(v, i) }))));
   const claims = $derived(f.views.flatMap((v, i) => [
-    ...v.objectives.map((o) => ({ id: o.id, text: o.text, view: viewName(v, i), kind: "objective" as const })),
-    ...v.assumptions.map((a) => ({ id: a.id, text: a.text, view: viewName(v, i), kind: "assumption" as const })),
+    ...v.objectives.map((o) => ({ id: o.id, text: o.text, view: viewName(v, i), kind: "objective" as const, tag: o.tag })),
+    ...v.assumptions.map((a) => ({ id: a.id, text: a.text, view: viewName(v, i), kind: "assumption" as const, tag: "" as Tag })),
   ]));
+  /** "Farmers · Member" — where an objective is, and its tag if it has one. */
+  const whose = (view: string, tag: Tag) => (tag ? `${view} · ${tagLabel(tag)}` : view);
+  const setTag = (o: Objective, t: Tag) => (o.tag = o.tag === t ? "" : t); // the same again clears it
   const backed = $derived(new Set(f.data.flatMap((d) => d.tests)));
   const unbacked = $derived(claims.filter((c) => c.text.trim() && !backed.has(c.id)));
   const short = (s: string, n = 48) => (s.length > n ? `${s.slice(0, n - 1)}…` : s || "(blank)");
@@ -104,11 +108,18 @@
               <div class="fields">
                 <textarea rows="1" bind:value={o.text} placeholder="What this view wants, e.g. Keep minimum river flow" aria-label="Objective"></textarea>
                 <input class="measure" bind:value={o.measure} placeholder="Measured by… (e.g. flow in m³/s, Aug–Sep)" aria-label="Measure" />
+                <span class="tags" role="group" aria-label="Whose objective">
+                  {#each TAGS as t (t.key)}
+                    <button class="tag {t.key}" class:on={o.tag === t.key} aria-pressed={o.tag === t.key}
+                            title={o.tag === t.key ? "Click again to clear" : `Tag as the ${t.label.toLowerCase()}'s objective`}
+                            onclick={() => setTag(o, t.key)}>{t.label}</button>
+                  {/each}
+                </span>
               </div>
               <button class="x" aria-label="Remove objective" onclick={() => removeFrom(v.objectives, oi)}>✕</button>
             </div>
           {/each}
-          <button class="add" onclick={() => v.objectives.push({ id: newId(), text: "", measure: "" })}>+ Objective</button>
+          <button class="add" onclick={() => v.objectives.push({ id: newId(), text: "", measure: "", tag: "" })}>+ Objective</button>
 
           <h4>Assumptions</h4>
           {#each v.assumptions as a, ai (a.id)}
@@ -130,12 +141,12 @@
       <div class="conflict">
         <select bind:value={c.a} aria-label="First objective">
           <option value={null}>Choose an objective…</option>
-          {#each objectives as o (o.id)}<option value={o.id}>{o.view}: {short(o.text)}</option>{/each}
+          {#each objectives as o (o.id)}<option value={o.id}>{whose(o.view, o.tag)}: {short(o.text)}</option>{/each}
         </select>
         <span class="vs">vs</span>
         <select bind:value={c.b} aria-label="Second objective">
           <option value={null}>Choose an objective…</option>
-          {#each objectives as o (o.id)}<option value={o.id}>{o.view}: {short(o.text)}</option>{/each}
+          {#each objectives as o (o.id)}<option value={o.id}>{whose(o.view, o.tag)}: {short(o.text)}</option>{/each}
         </select>
         <textarea rows="1" bind:value={c.why} placeholder="Why they conflict, e.g. the same water in late summer" aria-label="Why they conflict"></textarea>
         <button class="x" aria-label="Remove conflict" onclick={() => f.conflicts.splice(ci, 1)}>✕</button>
@@ -163,7 +174,7 @@
             <span class="muted small">Tests:</span>
             {#each claims as c (c.id)}
               <button class="chip" class:on={d.tests.includes(c.id)} aria-pressed={d.tests.includes(c.id)}
-                      title={`${c.view} · ${c.kind}: ${c.text}`} onclick={() => toggleTest(d, c.id)}>
+                      title={`${whose(c.view, c.tag)} · ${c.kind}: ${c.text}`} onclick={() => toggleTest(d, c.id)}>
                 <span class="kind">{c.kind === "objective" ? "O" : "A"}</span>{c.view}: {short(c.text, 32)}
               </button>
             {/each}
@@ -177,7 +188,7 @@
       <div class="unbacked">
         <span class="eyebrow">Not yet backed by data ({unbacked.length})</span>
         <ul>
-          {#each unbacked as c (c.id)}<li><span class="kind">{c.kind === "objective" ? "O" : "A"}</span>{c.view}: {c.text}</li>{/each}
+          {#each unbacked as c (c.id)}<li><span class="kind">{c.kind === "objective" ? "O" : "A"}</span>{whose(c.view, c.tag)}: {c.text}</li>{/each}
         </ul>
       </div>
     {/if}
@@ -204,6 +215,12 @@
   .entry > textarea, .fields { flex: 1; min-width: 0; }
   .fields { display: grid; gap: 0.2rem; }
   .measure { font-size: 0.82rem; }
+  .tags { display: flex; flex-wrap: wrap; gap: 0.2rem; }
+  .tag { font-family: var(--font-ui); font-size: 0.7rem; padding: 0.05rem 0.5rem; border-radius: 999px; background: none; color: var(--ink-soft); }
+  .tag.on { color: var(--ink); font-weight: 600; }
+  .tag.system.on { border-color: var(--series-1); background: color-mix(in srgb, var(--series-1) 18%, transparent); }
+  .tag.member.on { border-color: var(--series-2); background: color-mix(in srgb, var(--series-2) 18%, transparent); }
+  .tag.group.on { border-color: var(--series-3); background: color-mix(in srgb, var(--series-3) 18%, transparent); }
   .x { background: none; border: none; color: var(--ink-soft); padding: 0.3rem 0.4rem; line-height: 1; }
   .x:hover { color: var(--danger); }
   .add { justify-self: start; font-size: 0.8rem; padding: 0.2rem 0.6rem; background: none; }

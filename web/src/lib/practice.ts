@@ -24,7 +24,15 @@ export const CRITERIA: Record<Skill, string[]> = {
 // ---- problem formulation (0057): a debate as views, each with its objectives and
 // assumptions; the conflicts between objectives; and the data that would validate them
 export type Item = { id: string; text: string };
-export type Objective = Item & { measure: string };
+/** Whose objective it is: the whole system's, a member's, or a stakeholder group's ("" untagged). */
+export type Tag = "system" | "member" | "group" | "";
+export const TAGS: { key: Exclude<Tag, "">; label: string }[] = [
+  { key: "system", label: "System" },
+  { key: "member", label: "Member" },
+  { key: "group", label: "Stakeholder group" },
+];
+export const tagLabel = (t: Tag) => TAGS.find((x) => x.key === t)?.label ?? "";
+export type Objective = Item & { measure: string; tag: Tag };
 export type View = { id: string; name: string; objectives: Objective[]; assumptions: Item[] };
 export type Conflict = { id: string; a: string | null; b: string | null; why: string };
 export type Datum = { id: string; name: string; source: string; notes: string; tests: string[] };
@@ -46,7 +54,10 @@ export function asFormulation(f: unknown): Formulation | null {
     question: o.question ?? "",
     views: arr(o.views).map((v) => ({
       id: v.id ?? newId(), name: v.name ?? "",
-      objectives: arr(v.objectives).map((x) => ({ id: x.id ?? newId(), text: x.text ?? "", measure: x.measure ?? "" })),
+      objectives: arr(v.objectives).map((x) => ({
+        id: x.id ?? newId(), text: x.text ?? "", measure: x.measure ?? "",
+        tag: TAGS.some((t) => t.key === x.tag) ? x.tag : ("" as Tag),
+      })),
       assumptions: arr(v.assumptions).map((x) => ({ id: x.id ?? newId(), text: x.text ?? "" })),
     })),
     conflicts: arr(o.conflicts).map((c) => ({ id: c.id ?? newId(), a: c.a ?? null, b: c.b ?? null, why: c.why ?? "" })),
@@ -58,6 +69,8 @@ export function formulationSize(f: Formulation) {
   return {
     views: f.views.length,
     objectives: f.views.reduce((n, v) => n + v.objectives.length, 0),
+    byTag: TAGS.map((t) => ({ ...t, n: f.views.reduce((n, v) => n + v.objectives.filter((o) => o.tag === t.key).length, 0) }))
+      .filter((t) => t.n),
     assumptions: f.views.reduce((n, v) => n + v.assumptions.length, 0),
     conflicts: f.conflicts.length,
     data: f.data.length,

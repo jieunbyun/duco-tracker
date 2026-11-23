@@ -280,7 +280,9 @@
       brings it back). Private to you.
       <br /><em>+ Problem formulation</em> on a practice formalises a debate as a twin of its conflicting views: the
       question; the <em>views</em> side by side, each with its own objectives (and what measures them) and its
-      underlying assumptions; the <em>conflicts</em> — two objectives that pull against each other, and why; and the
+      underlying assumptions — an objective can be tagged <em>System</em>, <em>Member</em> or <em>Stakeholder
+      group</em>, for whose objective it is (click the tag again to clear it), and the tag shows wherever the
+      objective is picked; the <em>conflicts</em> — two objectives that pull against each other, and why; and the
       <em>data for validation</em>, each dataset linked to the objectives and assumptions it would test (O and A
       chips), with those not yet backed by any data listed beneath. Edit freely, then <em>Save</em> (one undo);
       <em>Revert</em> goes back to what was saved. Log the days spent on it as <em>Formulation</em> sessions, rated on

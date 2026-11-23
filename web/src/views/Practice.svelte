@@ -194,7 +194,7 @@
       <button class="formulation-line" onclick={() => (formOpen = p.id)}>
         <span class="eyebrow">Problem formulation ›</span>
         <span class="q">{p.formulation.question.trim() || "The debate, not yet written"}</span>
-        <span class="muted small">{n.views} {n.views === 1 ? "view" : "views"} · {n.objectives} objectives · {n.assumptions} assumptions ·
+        <span class="muted small">{n.views} {n.views === 1 ? "view" : "views"} · {n.objectives} objectives{n.byTag.length ? ` (${n.byTag.map((t) => `${t.n} ${t.label.toLowerCase()}`).join(", ")})` : ""} · {n.assumptions} assumptions ·
           {n.conflicts} {n.conflicts === 1 ? "conflict" : "conflicts"} · {n.data} {n.data === 1 ? "dataset" : "datasets"}</span>
       </button>
     {:else}
