@@ -5,11 +5,11 @@
 
 <script lang="ts">
   // Meetings: your meeting logs, one series per log (as your .tex files were), each meeting
-  // in the headings you write it in; what you said you would do, sent to Week; open
-  // questions until they are settled; search across them all; and .tex out and in.
+  // in two parts — Discussion and Actions; the actions not yet done, sent to Week; search
+  // across them all; and .tex out and in.
   import {
     loadAll, saveSeries, deleteSeries, saveMeeting, deleteMeeting, importLog, sendToWeek, parseTex, toTex, downloadTex,
-    TEMPLATES, isAction, isOpen, linesOf,
+    DISCUSSION, ACTIONS, isAction, linesOf,
   } from "../lib/meetings";
   import type { Series, Meeting, Section, ParsedLog } from "../lib/meetings";
   import { loadProjects } from "../lib/data";
@@ -74,19 +74,18 @@
   const found = $derived(words.length ? meetings.filter((m) => words.every((w) => haystack(m).includes(w))) : []);
 
   // ---- a series ----------------------------------------------------------------------
-  let seriesForm = $state<{ id: string | null; name: string; headings: string; project_id: string | null } | null>(null);
-  function editSeries(s: Series | null, template = TEMPLATES[0].headings) {
-    seriesForm = { id: s?.id ?? null, name: s?.name ?? "", headings: (s?.headings ?? template).join(", "), project_id: s?.project_id ?? null };
+  let seriesForm = $state<{ id: string | null; name: string; project_id: string | null } | null>(null);
+  function editSeries(s: Series | null) {
+    seriesForm = { id: s?.id ?? null, name: s?.name ?? "", project_id: s?.project_id ?? null };
   }
   async function keepSeries(ev: SubmitEvent) {
     ev.preventDefault();
     const f = seriesForm!;
     const name = f.name.trim();
     if (!name) return;
-    const headings = f.headings.split(",").map((h) => h.trim()).filter(Boolean);
     let id = f.id;
     if (await act(f.id ? "Changed meeting series" : "Added meeting series", async () => {
-      id = await saveSeries(f.id, { name, headings, project_id: f.project_id });
+      id = await saveSeries(f.id, { name, headings: [DISCUSSION, ACTIONS], project_id: f.project_id });
     })) {
       seriesForm = null;
       selected = id;
@@ -105,8 +104,8 @@
   // ---- a meeting -----------------------------------------------------------------------
   type Draft = { id: string | null; met_on: string; title: string; people: string; sections: Section[] };
   let draft = $state<Draft | null>(null);
-  function newMeeting(s: Series) {
-    draft = { id: null, met_on: today(), title: "", people: "", sections: s.headings.map((heading) => ({ heading, body: "" })) };
+  function newMeeting() {
+    draft = { id: null, met_on: today(), title: "", people: "", sections: [{ heading: DISCUSSION, body: "" }, { heading: ACTIONS, body: "" }] };
   }
   function editMeeting(m: Meeting) {
     draft = { id: m.id, met_on: m.met_on, title: m.title ?? "", people: m.people ?? "", sections: structuredClone($state.snapshot(m.sections)) };
@@ -117,11 +116,8 @@
     const fields = {
       series_id: d.id ? meetings.find((m) => m.id === d.id)!.series_id : s.id, met_on: d.met_on,
       title: d.title.trim() || null, people: d.people.trim() || null,
-      sections: d.sections.map((x) => ({ ...x, heading: x.heading.trim() || "Notes", body: x.body.replace(/\s+$/, "") }))
-        .filter((x) => x.body || x.closed || x.sent?.length || (s.headings.includes(x.heading) && !d.id)),
+      sections: d.sections.map((x) => ({ ...x, body: x.body.replace(/\s+$/, "") })),
     };
-    // a new meeting keeps only what was written in it
-    if (!d.id) fields.sections = fields.sections.filter((x) => x.body);
     if (await act(d.id ? "Changed meeting" : "Added meeting", () => saveMeeting(d.id, fields))) draft = null;
   }
   function removeMeeting(m: Meeting) {
@@ -129,12 +125,10 @@
     act("Deleted meeting", () => deleteMeeting(m.id));
   }
 
-  // ---- what you said you would do, and what is still open ------------------------------------
+  // ---- the actions not yet done ---------------------------------------------------------------
   type Todo = { m: Meeting; si: number; line: string };
   const toDo = $derived(current ? ofSeries(current.id).flatMap((m) => m.sections.flatMap((s, si) =>
     isAction(s.heading) ? linesOf(s.body).filter((l) => !s.sent?.includes(l)).map((line) => ({ m, si, line })) : [])) : []);
-  const stillOpen = $derived(current ? ofSeries(current.id).flatMap((m) => m.sections.map((s, si) => ({ m, s, si })))
-    .filter((x) => isOpen(x.s.heading) && !x.s.closed && linesOf(x.s.body).length) : []);
   function withSection(m: Meeting, si: number, change: (s: Section) => Section): Section[] {
     return m.sections.map((s, i) => (i === si ? change({ ...s }) : s));
   }
@@ -144,9 +138,6 @@
       if (toWeek) await sendToWeek(t.line, note);
       await saveMeeting(t.m.id, { sections: withSection(t.m, t.si, (s) => ({ ...s, sent: [...(s.sent ?? []), t.line] })) });
     });
-  }
-  function settle(m: Meeting, si: number) {
-    act("Settled an open question", () => saveMeeting(m.id, { sections: withSection(m, si, (s) => ({ ...s, closed: true })) }));
   }
 
   // ---- import ----------------------------------------------------------------------------
@@ -235,13 +226,6 @@
     {#if seriesForm}
       <form class="panel series-form" onsubmit={keepSeries}>
         <label>Name <input bind:value={seriesForm.name} required placeholder="e.g. Byeongseong Choi, or General meetings" /></label>
-        <label>Headings each meeting starts with <span class="muted small">(comma between)</span>
-          <input bind:value={seriesForm.headings} /></label>
-        {#if !seriesForm.id}
-          <div class="templates small">Start from:
-            {#each TEMPLATES as t (t.name)}<button type="button" class="link" onclick={() => (seriesForm!.headings = t.headings.join(", "))}>{t.name}</button>{/each}
-          </div>
-        {/if}
         <label>Project <span class="muted small">(optional)</span>
           <select bind:value={seriesForm.project_id}>
             <option value={null}>None</option>
@@ -313,18 +297,17 @@
               <span class="muted small">{countOf(current.id)} {countOf(current.id) === 1 ? "meeting" : "meetings"}{current.project_id ? ` · ${projectName(current.project_id)}` : ""}</span>
             </div>
             <span class="tools">
-              <button class="primary" onclick={() => newMeeting(current)}>+ Meeting</button>
+              <button class="primary" onclick={newMeeting}>+ Meeting</button>
               <button onclick={() => exportSeries(current)} title="Download as a .tex file, laid out as your logs are">Export .tex</button>
               <button onclick={() => editSeries(current)}>Edit</button>
               <button class="del" onclick={() => removeSeries(current)}>Delete</button>
             </span>
           </div>
 
-          {#if toDo.length || stillOpen.length}
+          {#if toDo.length}
             <div class="follow">
-              {#if toDo.length}
                 <div>
-                  <span class="eyebrow">You said you would</span>
+                  <span class="eyebrow">Open actions</span>
                   <ul>
                     {#each toDo as t (`${t.m.id}|${t.si}|${t.line}`)}
                       <li>
@@ -337,20 +320,6 @@
                     {/each}
                   </ul>
                 </div>
-              {/if}
-              {#if stillOpen.length}
-                <div>
-                  <span class="eyebrow">Still open</span>
-                  <ul>
-                    {#each stillOpen as o (`${o.m.id}|${o.si}`)}
-                      <li>
-                        <span class="what">{linesOf(o.s.body).join(" · ")} <span class="muted small">· {fmtDay(o.m.met_on)}</span></span>
-                        <span class="acts"><button class="mini" title="Settled: off this list" onclick={() => settle(o.m, o.si)}>Settled</button></span>
-                      </li>
-                    {/each}
-                  </ul>
-                </div>
-              {/if}
             </div>
           {/if}
 
@@ -383,8 +352,8 @@
         </span>
       </div>
       {#each m.sections.filter((s) => s.body.trim()) as s, i (i)}
-        <div class="sec" class:settled={isOpen(s.heading) && s.closed}>
-          <span class="heading">{s.heading}{isOpen(s.heading) && s.closed ? " · settled" : ""}</span>
+        <div class="sec">
+          <span class="heading">{s.heading}</span>
           <div class="body">{@html rich(s.body)}</div>
         </div>
       {/each}
@@ -400,23 +369,13 @@
         <label class="grow">Title <input bind:value={draft.title} placeholder="e.g. PhD interview, or Bi-weekly meeting" /></label>
         <label class="grow">With <input bind:value={draft.people} placeholder="Who was there (optional)" /></label>
       </div>
-      {#each draft.sections as s, i (i)}
-        <div class="sec-edit">
-          <div class="sec-head">
-            <input class="heading-input" bind:value={s.heading} aria-label="Heading" />
-            {#if isAction(s.heading)}<span class="muted small">each line can go to Week</span>{/if}
-            <button type="button" class="x" aria-label={`Remove ${s.heading || "this section"}`} onclick={() => draft!.sections.splice(i, 1)}>✕</button>
-          </div>
-          <textarea rows="2" bind:value={s.body} placeholder="One point a line; start a line with “- ” for a bullet, “  - ” to nest it"></textarea>
-        </div>
+      {#each draft.sections as s (s.heading)}
+        <label class="sec-edit">
+          <span class="sec-head">{s.heading}{#if isAction(s.heading)}<span class="muted small"> · one a line; each can go to Week</span>{/if}</span>
+          <textarea rows={isAction(s.heading) ? 2 : 4} bind:value={s.body}
+                    placeholder={isAction(s.heading) ? "One action a line, e.g. Send the HPC request" : "One point a line; start a line with “- ” for a bullet, “  - ” to nest it"}></textarea>
+        </label>
       {/each}
-      <div class="add-sec small">
-        Add a section:
-        {#each (current?.headings ?? []).filter((h) => !draft!.sections.some((s) => s.heading === h)) as h (h)}
-          <button type="button" class="link" onclick={() => draft!.sections.push({ heading: h, body: "" })}>{h}</button>
-        {/each}
-        <button type="button" class="link" onclick={() => draft!.sections.push({ heading: "", body: "" })}>Other…</button>
-      </div>
       <div class="buttons">
         <button class="primary" type="submit">{draft.id ? "Save" : "Add meeting"}</button>
         <button type="button" onclick={() => (draft = null)}>Cancel</button>
@@ -436,7 +395,6 @@
   .panel { background: var(--panel); border-radius: var(--radius); padding: 0.9rem; display: grid; gap: 0.6rem; margin-bottom: 1rem; }
   .panel h2 { margin: 0; font-size: 1.1rem; }
   .panel label { display: grid; gap: 0.25rem; font-family: var(--font-ui); font-size: 0.85rem; color: var(--ink-soft); }
-  .templates { display: flex; gap: 0.6rem; font-family: var(--font-ui); color: var(--ink-soft); }
   .buttons { display: flex; gap: 0.5rem; }
   .import-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr); gap: 0.3rem 0.8rem; align-items: end; padding-bottom: 0.6rem; border-bottom: 1px solid var(--rule); }
   .import-row strong { grid-column: 1 / -1; font-family: var(--font-ui); font-size: 0.88rem; }
@@ -468,7 +426,6 @@
   .m-head .tools { margin-left: auto; }
   .date { font-family: var(--font-ui); font-size: 0.82rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
   .sec { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: 0.8rem; }
-  .sec.settled { opacity: 0.6; }
   .heading { font-family: var(--font-ui); font-size: 0.78rem; font-weight: 600; color: var(--ink-soft); padding-top: 0.15rem; }
   .body { font-size: 0.93rem; overflow-wrap: anywhere; }
   .body :global(p) { margin: 0 0 0.25rem; }
@@ -479,12 +436,9 @@
   .meeting-form .row label:first-child { width: 10rem; }
   .meeting-form .grow { flex: 1; min-width: 12rem; }
   .sec-edit { display: grid; gap: 0.2rem; }
-  .sec-head { display: flex; gap: 0.5rem; align-items: center; }
-  .heading-input { width: 14rem; font-family: var(--font-ui); font-weight: 600; font-size: 0.82rem; padding: 0.2rem 0.4rem; }
-  .x { background: none; border: none; color: var(--ink-soft); margin-left: auto; padding: 0.2rem 0.4rem; }
-  .x:hover { color: var(--danger); }
+  .sec-head { font-family: var(--font-ui); font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); }
+
   textarea { color: var(--ink); resize: vertical; field-sizing: content; min-height: 2.6rem; }
-  .add-sec { display: flex; flex-wrap: wrap; gap: 0.3rem 0.7rem; font-family: var(--font-ui); color: var(--ink-soft); }
 
   @media (max-width: 48rem) {
     .panes { grid-template-columns: 1fr; }

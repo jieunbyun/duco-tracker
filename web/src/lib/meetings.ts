@@ -12,18 +12,45 @@ export type Meeting = {
 };
 export type MeetingFields = Pick<Meeting, "series_id" | "met_on" | "title" | "people" | "sections">;
 
-/** The headings a new series starts its meetings with. */
-export const TEMPLATES: { name: string; headings: string[] }[] = [
-  { name: "Research", headings: ["Purpose", "Update", "Decided", "They will", "I will", "Open", "Changed my view"] },
-  { name: "General", headings: ["Discussion", "Actions"] },
-];
-/** Sections whose lines are things to do: each line can go to Week as a to-do. */
-export const isAction = (h: string) => /^(i will|actions?|next steps|to ?dos?)\.?$/i.test(h.trim());
-/** An open question: ticked off once it is settled. */
-export const isOpen = (h: string) => /^open( questions?)?\.?$/i.test(h.trim());
+/** A meeting has two parts, always: what was discussed, and the actions. */
+export const DISCUSSION = "Discussion";
+export const ACTIONS = "Actions";
+/** The actions: each line can go to Week as a to-do. */
+export const isAction = (h: string) => h === ACTIONS;
 /** A section's lines, without their "- " (an empty or "N/A" line is no line). */
 export const linesOf = (body: string) =>
   body.split("\n").map((l) => l.replace(/^\s*-\s*/, "").trim()).filter((l) => l && !/^n\/?a$/i.test(l));
+
+/** "Purpose" + "Bi-weekly meeting." → "- Purpose: Bi-weekly meeting." (several lines: nested under it). */
+function labelled(h: string, body: string): string {
+  const lines = body.split("\n").filter((l) => l.trim());
+  if (lines.length === 1) return `- ${h}: ${lines[0].replace(/^\s*-\s*/, "")}`;
+  return [`- ${h}:`, ...lines.map((l) => `  ${/^\s*-\s/.test(l) ? l : `- ${l.trim()}`}`)].join("\n");
+}
+/**
+ * Any meeting's sections as the two: I will, Actions, Next steps and To do go to Actions
+ * (They will too, labelled); Discussion and untitled notes go to Discussion, and every other
+ * heading (Purpose, Update, Decided, Open, Impressions…) goes there as a labelled line.
+ */
+export function asTwo(sections: Section[]): Section[] {
+  const discussion: string[] = [], actions: string[] = [], sent: string[] = [];
+  for (const s of sections) {
+    const h = s.heading.trim().replace(/[.:]\s*$/, "");
+    const body = s.body.replace(/\s+$/, "");
+    if (!linesOf(body).length) continue;
+    if (/^(actions?|i will|next steps|to ?dos?)$/i.test(h)) { actions.push(body); sent.push(...(s.sent ?? [])); }
+    else if (/^they will$/i.test(h)) actions.push(labelled(h, body));
+    else if (!h || /^(discussion|notes)$/i.test(h)) discussion.push(body);
+    else discussion.push(labelled(h, body));
+  }
+  // put together from several headings: every line a bullet, so the list reads as one
+  const join = (parts: string[]) => parts.length < 2 ? (parts[0] ?? "")
+    : parts.join("\n").split("\n").filter((l) => l.trim()).map((l) => (/^\s*-\s/.test(l) ? l : `- ${l.trim()}`)).join("\n");
+  return [
+    { heading: DISCUSSION, body: join(discussion) },
+    { heading: ACTIONS, body: join(actions), ...(sent.length ? { sent } : {}) },
+  ];
+}
 
 // ---- loading and saving ------------------------------------------------------------------
 const PAGE = 1000;
@@ -41,7 +68,7 @@ export async function loadAll(): Promise<{ series: Series[]; meetings: Meeting[]
     const m = await supabase.from("meeting").select("id,series_id,met_on,title,people,sections,created_at,updated_at")
       .order("met_on", { ascending: false }).order("created_at", { ascending: false }).order("id").range(from, from + PAGE - 1);
     if (m.error) throw new Error(m.error.message);
-    meetings.push(...(m.data as Meeting[]).map((x) => ({ ...x, sections: Array.isArray(x.sections) ? x.sections : [] })));
+    meetings.push(...(m.data as Meeting[]).map((x) => ({ ...x, sections: asTwo(Array.isArray(x.sections) ? x.sections : []) })));
     if (m.data.length < PAGE) break;
   }
   return { series: s.data as Series[], meetings };
@@ -143,7 +170,6 @@ export function parseTex(tex: string, fileName = ""): ParsedLog {
   const parts = body.split(/\\section\*?\{/).slice(1);
   const meetings: ParsedMeeting[] = [];
   const skipped: string[] = [];
-  const seen: string[] = [];
   for (const part of parts) {
     // the section's title runs to its closing brace (titles may hold \& and the like)
     let i = 0, level = 1;
@@ -167,12 +193,10 @@ export function parseTex(tex: string, fileName = ""): ParsedLog {
       const text = plain(c.slice(close + 1));
       if (!heading && !text) continue;
       sections.push({ heading: heading || "Notes", body: text });
-      if (heading && !seen.some((h) => h.toLowerCase() === heading.toLowerCase())) seen.push(heading);
     }
-    meetings.push({ ...head, people: null, sections });
+    meetings.push({ ...head, people: null, sections: asTwo(sections) });
   }
-  const research = seen.some((h) => /^i will$/i.test(h));
-  return { name, headings: (research ? TEMPLATES[0] : TEMPLATES[1]).headings, meetings, skipped };
+  return { name, headings: [DISCUSSION, ACTIONS], meetings, skipped };
 }
 
 // ---- to .tex -----------------------------------------------------------------------------

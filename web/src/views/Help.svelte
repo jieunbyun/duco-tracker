@@ -300,16 +300,16 @@
     <dt>Meetings</dt>
     <dd>
       Your meeting logs, one <em>series</em> for each (a person, a group, or general meetings), linked to a Planning
-      project if you like. A series has the headings its meetings start with — <em>Research</em> (Purpose, Update,
-      Decided, They will, I will, Open, Changed my view) or <em>General</em> (Discussion, Actions), or your own — and
-      a meeting can add any other. Write a line for each point; start it with “- ” for a bullet (“  - ” to nest it),
-      and write links as [text](https://…). Lines under <em>I will</em>, <em>Actions</em> or <em>Next steps</em> are
-      listed at the top of the series as <em>You said you would</em>: <em>→ Week</em> makes one a to-do this week, ✓
-      takes it off the list. <em>Open</em> questions stay under <em>Still open</em> until <em>Settled</em>. Search
-      finds meetings with every word you type, across all series. <em>Import .tex…</em> reads your LaTeX logs
-      (<code>\section*{'{'}DD-MM-YY. Title{'}'}</code> and <code>\paragraph{'{'}Heading.{'}'}</code>), into a new series
-      or one you have, never adding a meeting twice; <em>Export .tex</em> writes a series back as a .tex file laid out
-      the same way. Private to you: nobody else sees them, not on shared projects either.
+      project if you like. Every meeting has two parts: <em>Discussion</em> and <em>Actions</em>. Write a line for each
+      point; start it with “- ” for a bullet (“  - ” to nest it), and write links as [text](https://…). The actions not
+      yet done are listed at the top of the series as <em>Open actions</em>: <em>→ Week</em> makes one a to-do this
+      week, ✓ takes it off the list. Search finds meetings with every word you type, across all series.
+      <em>Import .tex…</em> reads your LaTeX logs (<code>\section*{'{'}DD-MM-YY. Title{'}'}</code> and
+      <code>\paragraph{'{'}Heading.{'}'}</code>) into a new series or one you have, never adding a meeting twice:
+      I will, Actions and Next steps become the actions (They will too, labelled); every other heading — Purpose,
+      Update, Decided, Open, Impressions… — becomes a labelled line of the discussion, so nothing is lost.
+      <em>Export .tex</em> writes a series back as a .tex file with the two parts. Private to you: nobody else sees
+      them, not on shared projects either.
     </dd>
 
     <dt>Diary</dt>
