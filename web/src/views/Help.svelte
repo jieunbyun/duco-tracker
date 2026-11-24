@@ -257,7 +257,8 @@
     <dd>
       <em>Life is experiments</em>: Tips, Failures, Practice and Diary in one tab, laid out like the Logbook. Umbrella
       topics, each with subtopics, and notes under either. Every note carries one or more tags — Tip, Hypothesis,
-      Practice, Self — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
+      Practice, Self, Innovation — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
+      <em>By date</em> lists every note newest first, a month at a time, each with its topic; <em>Topics</em> goes back.
       Drag ⠿ to order topics, subtopics and notes (with no search or tag picked). Tick a note when it is outdated: it
       stays where it is, in grey. <em>Edit</em> on a note changes its text and tags, or moves it to another topic.
       Subtopics start folded; click a title to open or fold it. When Experiments was set up, what you had in the four

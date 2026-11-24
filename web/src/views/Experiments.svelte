@@ -352,7 +352,7 @@
   <span class="eyebrow">Experiments</span>
   <h1>Life is experiments</h1>
   <p class="muted intro">
-    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice or Self. Drag ⠿ to put them in
+    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self or Innovation. Drag ⠿ to put them in
     order; tick a note off when it is outdated. Only you see them.
   </p>
   {#if error}<p class="error">{error}</p>{/if}
