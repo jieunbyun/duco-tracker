@@ -152,8 +152,8 @@
   function startNote(t: Topic) {
     editing = { kind: "note", topic: t.id };
     draft = "";
-    // tagged as the filter, else as the topic's last note, else as your last new note
-    const prev = allNotesOf(t).at(-1);
+    // tagged as the filter, else as the topic's newest note, else as your last new note
+    const prev = allNotesOf(t).reduce<Note | null>((a, n) => (!a || n.created_at > a.created_at ? n : a), null);
     draftTags = tag ? [tag] : prev ? [...prev.tags] : (last.tags as Tag[]).filter((x) => TAGS.includes(x));
     if (t.parent_id) { const o = new Set(opened); o.add(t.id); opened = o; }
     else { const c = new Set(closed); c.delete(t.id); closed = c; }
@@ -172,7 +172,8 @@
   function toggleTag(t: Tag) {
     draftTags = draftTags.includes(t) ? draftTags.filter((x) => x !== t) : TAGS.filter((x) => x === t || draftTags.includes(x));
   }
-  const nextOrder = (rows: { sort_order: number }[]) => Math.max(0, ...rows.map((r) => r.sort_order)) + 10;
+  // new topics and notes (and a note moved in) go first: one place before the first
+  const firstOrder = (rows: { sort_order: number }[]) => (rows.length ? Math.min(...rows.map((r) => r.sort_order)) - 10 : 0);
 
   async function submit(ev?: Event) {
     ev?.preventDefault();
@@ -183,20 +184,20 @@
     editing = null;
     if (e.kind === "topic") {
       const siblings = topics.filter((t) => t.parent_id === e.parent);
-      await change(e.parent ? `Added subtopic “${text}”` : `Added topic “${text}”`, () => addTopic(text, e.parent, nextOrder(siblings)));
+      await change(e.parent ? `Added subtopic “${text}”` : `Added topic “${text}”`, () => addTopic(text, e.parent, firstOrder(siblings)));
     } else if (e.kind === "rename") {
       await change(`Renamed “${titleOf(e.id)}” to “${text}”`, () => saveTopic(e.id, { title: text }));
     } else if (e.kind === "note") {
       last.tags = [...draftTags];
       const t = topics.find((x) => x.id === e.topic)!;
       await change(`Added a note to “${t.title}”`, () =>
-        addNote({ topic_id: t.id, body: text, tags: draftTags, sort_order: nextOrder(allNotesOf(t)) }));
+        addNote({ topic_id: t.id, body: text, tags: draftTags, sort_order: firstOrder(allNotesOf(t)) }));
     } else {
       const n = notes.find((x) => x.id === e.id)!;
       const moved = draftTopic !== n.topic_id;
       const to = topics.find((x) => x.id === draftTopic);
       await change(moved ? `Moved a note to “${to?.title ?? ""}”` : "Changed a note", () =>
-        saveNote(n.id, { body: text, tags: draftTags, ...(moved && to ? { topic_id: to.id, sort_order: nextOrder(allNotesOf(to)) } : {}) }));
+        saveNote(n.id, { body: text, tags: draftTags, ...(moved && to ? { topic_id: to.id, sort_order: firstOrder(allNotesOf(to)) } : {}) }));
     }
   }
   function keys(ev: KeyboardEvent) {
@@ -329,19 +330,19 @@
     {/if}
     {#if isOpen(t)}
       <div class="inside">
+        {#if editing?.kind === "note" && editing.topic === t.id}{@render noteForm(null)}{/if}
         {#if list.length}
           <Sortable items={list} row={noteRow} onreorder={(ids) => reorderNotes(t, ids)} disabled={filtering || saving || !!editing} />
         {:else if !(editing?.kind === "note" && editing.topic === t.id) && !subs.length}
           <p class="muted empty">No notes yet.</p>
         {/if}
-        {#if editing?.kind === "note" && editing.topic === t.id}{@render noteForm(null)}{/if}
         {#if !sub}
+          {#if editing?.kind === "topic" && editing.parent === t.id}{@render titleForm("New subtopic")}{/if}
           {#if subs.length}
             <div class="subs">
               <Sortable items={subs} row={topicBlock} onreorder={(ids) => reorderTopics(subsOf(t), ids)} disabled={filtering || saving || !!editing} />
             </div>
           {/if}
-          {#if editing?.kind === "topic" && editing.parent === t.id}{@render titleForm("New subtopic")}{/if}
         {/if}
       </div>
     {/if}
