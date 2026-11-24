@@ -365,7 +365,7 @@
   <span class="eyebrow">Experiments</span>
   <h1>Life is experiments</h1>
   <p class="muted intro">
-    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self or Innovation (a topic's
+    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self, Innovation or Modelling (a topic's
     tags count for everything under it). Drag ⠿ to put them in
     order; tick a note off when it is outdated. Only you see them.
   </p>
