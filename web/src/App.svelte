@@ -21,6 +21,7 @@
     time: () => import("./views/Time.svelte"),
     reading: () => import("./views/Reading.svelte"),
     cv: () => import("./views/CV.svelte"),
+    experiments: () => import("./views/Experiments.svelte"),
     tips: () => import("./views/Tips.svelte"),
     failures: () => import("./views/Failures.svelte"),
     practice: () => import("./views/Practice.svelte"),
@@ -35,16 +36,19 @@
   };
   const labels: Record<keyof typeof views, string> = {
     week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Members", time: "Time", reading: "Reading",
-    cv: "CV", tips: "Tips", failures: "Failures", practice: "Practice", diary: "Diary", meetings: "Meetings", budget: "Budget", network: "Network", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
+    cv: "CV", experiments: "Experiments", tips: "Tips", failures: "Failures", practice: "Practice", diary: "Diary", meetings: "Meetings", budget: "Budget", network: "Network", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
   };
   type Route = keyof typeof views;
 
   // Who sees which tabs: the planner is yours alone; a member sees only their
   // logbook, projects and their own reading list. You keep a logbook too, for
   // the projects you lead.
-  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice", "diary", "meetings", "budget", "network"];
-  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice", "diary", "meetings", "budget", "network", "supervision", "logbook"];
+  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network"];
+  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network", "supervision", "logbook"];
   const MEMBER: Route[] = ["logbook", "projects", "reading"];
+  // Tips, Failures, Practice and Diary are now in Experiments, and off the bar; their
+  // pages stay, for the links to them (a hypothesis on a milestone opens in Failures)
+  const RETIRED: Route[] = ["tips", "failures", "practice", "diary"];
 
   let session = $state<Session | null>(null);
   let ready = $state(false);
@@ -61,7 +65,8 @@
   let hash = $state(fromHash());
   // Help is not a tab; it opens from the ? in the header
   const route = $derived<Route>(
-    tabs.includes(hash as Route) || (hash === "help" && !member && !preview.as) ? (hash as Route) : tabs[0],
+    tabs.includes(hash as Route) || ((hash === "help" || RETIRED.includes(hash as Route)) && !member && !preview.as)
+      ? (hash as Route) : tabs[0],
   );
 
   $effect(() => {
