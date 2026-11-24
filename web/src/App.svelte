@@ -150,12 +150,14 @@
         <a href={`#/${key}`} class:active={route === key}>{labels[key]}</a>
       {/each}
     </nav>
+    <div class="tools">
     {#if !member && !preview.as}<a class="help" href="#/help" class:active={route === "help"} title="How the tracker works">?</a>{/if}
     <button class="undo" onclick={undoLast} disabled={!lastAction}
             title={lastAction ? `Undo: ${lastAction.label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
     <button class="theme" onclick={toggleTheme} aria-label={theme.value === "dark" ? "Switch to light" : "Switch to dark"}
             title={theme.value === "dark" ? "Switch to light" : "Switch to dark"}>{theme.value === "dark" ? "☀" : "☾"}</button>
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
+    </div>
   </header>
   <main>
     {#if settingsError}
@@ -193,19 +195,24 @@
     top: 0;
     z-index: 10;
     display: flex;
-    align-items: center;
-    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.5rem 1rem;
     padding: 0.6rem 16px;
     background: var(--paper);
     border-bottom: 1px solid var(--rule);
   }
+  /* the tabs wrap onto more lines rather than scroll under the buttons; when even
+     a short row will not fit beside them, the buttons drop to a line of their own */
   nav {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.25rem;
-    flex: 1;
-    overflow-x: auto;
+    flex: 1 1 24rem;
+    min-width: 0;
     font-family: var(--font-ui);
   }
+  .tools { display: flex; align-items: center; gap: 1rem; margin-left: auto; }
   nav a {
     padding: 0.4rem 0.75rem;
     border-radius: var(--radius);
