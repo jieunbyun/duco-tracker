@@ -4,8 +4,7 @@
     view: "topics" as "topics" | "date", // under topics, or every note newest first
     tag: null as string | null,
     query: "",
-    closed: new Set<string>(), // umbrella topics folded shut
-    opened: new Set<string>(), // subtopics opened (they start folded)
+    opened: new Set<string>(), // topics and subtopics opened (they all start folded)
     tags: [] as string[], // what the last new note was tagged
   };
 </script>
@@ -35,10 +34,9 @@
   let view = $state(last.view);
   let tag = $state<Tag | null>(last.tag as Tag | null);
   let query = $state(last.query);
-  let closed = $state(new Set(last.closed));
   let opened = $state(new Set(last.opened));
   $effect(() => {
-    Object.assign(last, { view, tag, query, closed, opened });
+    Object.assign(last, { view, tag, query, opened });
   });
   function setView(v: "topics" | "date") {
     editing = null; // its form may not be in the other view
@@ -104,13 +102,15 @@
     !filtering || notesOf(t).length > 0 || subsOf(t).some(topicShows)
     || ((!tag || inTag(t)) && (!query.trim() || matches(`${t.title}\n${titleOf(t.parent_id)}`, query)));
   const shownUmbrellas = $derived(umbrellas.filter(topicShows));
-  const isOpen = (t: Topic) => filtering || (t.parent_id ? opened.has(t.id) : !closed.has(t.id));
+  const isOpen = (t: Topic) => filtering || opened.has(t.id);
   function fold(t: Topic) {
-    const s = new Set(t.parent_id ? opened : closed);
+    const s = new Set(opened);
     if (s.has(t.id)) s.delete(t.id);
     else s.add(t.id);
-    if (t.parent_id) opened = s;
-    else closed = s;
+    opened = s;
+  }
+  function openUp(id: string) {
+    if (!opened.has(id)) opened = new Set([...opened, id]);
   }
   const countOf = (t: Topic) => {
     const every = [...allNotesOf(t), ...subsOf(t).flatMap(allNotesOf)];
@@ -147,7 +147,7 @@
     editing = { kind: "topic", parent };
     draft = "";
     draftTags = tag ? [tag] : []; // so it stays in view under the tag shown
-    if (parent) { const c = new Set(closed); c.delete(parent); closed = c; }
+    if (parent) openUp(parent);
     focusDraft();
   }
   function startRename(t: Topic) {
@@ -162,8 +162,7 @@
     // tagged as the filter, else as the topic's newest note, else as your last new note
     const prev = allNotesOf(t).reduce<Note | null>((a, n) => (!a || n.created_at > a.created_at ? n : a), null);
     draftTags = tag ? [tag] : prev ? [...prev.tags] : (last.tags as Tag[]).filter((x) => TAGS.includes(x));
-    if (t.parent_id) { const o = new Set(opened); o.add(t.id); opened = o; }
-    else { const c = new Set(closed); c.delete(t.id); closed = c; }
+    openUp(t.id);
     focusDraft();
   }
   function startEdit(n: Note) {
