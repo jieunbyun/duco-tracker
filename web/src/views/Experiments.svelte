@@ -324,10 +324,18 @@
       {@render titleForm(sub ? "Subtopic" : "Topic")}
     {:else}
       <header>
-        <button class="fold" aria-expanded={isOpen(t)} onclick={() => fold(t)} disabled={filtering}>
-          <span class="caret" aria-hidden="true">{isOpen(t) ? "▾" : "▸"}</span>
-          {#if sub}<h3>{t.title}</h3>{:else}<h2>{t.title}</h2>{/if}
-        </button>
+        <!-- the caret folds; the title opens it for editing (its name and tags) -->
+        <span class="head">
+          <button class="fold" aria-expanded={isOpen(t)} aria-label={`${isOpen(t) ? "Fold" : "Open"} “${t.title}”`}
+                  onclick={() => fold(t)} disabled={filtering}>
+            <span class="caret" aria-hidden="true">{isOpen(t) ? "▾" : "▸"}</span>
+          </button>
+          {#if sub}
+            <h3><button class="name" onclick={() => startRename(t)} disabled={!!editing} title="Click to edit">{t.title}</button></h3>
+          {:else}
+            <h2><button class="name" onclick={() => startRename(t)} disabled={!!editing} title="Click to edit">{t.title}</button></h2>
+          {/if}
+        </span>
         {#each t.tags as x (x)}<span class="chip tag-chip">{TAG_LABEL[x]}</span>{/each}
         <span class="muted count">{countOf(t)}</span>
         <span class="actions">
@@ -440,14 +448,18 @@
     border-bottom: 1px solid var(--rule); padding-bottom: 0.25rem;
   }
   .topic.sub header { border-bottom-style: dashed; }
-  .fold {
-    display: flex; gap: 0.35rem; align-items: baseline; min-width: 0; padding: 0; border: none; background: none;
-    text-align: left; color: var(--ink); cursor: pointer;
-  }
+  .head { display: flex; gap: 0.15rem; align-items: baseline; min-width: 0; }
+  .fold { flex: none; padding: 0 0.2rem; border: none; background: none; color: var(--ink); cursor: pointer; }
   .fold:disabled { opacity: 1; cursor: default; }
-  .fold h2, .fold h3 { margin: 0; font-family: var(--font); overflow-wrap: anywhere; }
-  .fold h3 { font-size: 1.02rem; font-weight: normal; }
-  .caret { flex: none; width: 0.9rem; font-size: 0.7rem; color: var(--ink-soft); }
+  .head h2, .head h3 { margin: 0; font-family: var(--font); overflow-wrap: anywhere; }
+  .head h3 { font-size: 1.02rem; font-weight: normal; }
+  .name {
+    padding: 0; border: none; background: none; font: inherit; color: var(--ink); text-align: left; cursor: text;
+    overflow-wrap: anywhere;
+  }
+  .name:hover:not(:disabled) { text-decoration: underline dotted; text-underline-offset: 0.2em; }
+  .name:disabled { opacity: 1; cursor: default; }
+  .caret { display: inline-block; width: 0.9rem; font-size: 0.7rem; color: var(--ink-soft); }
   .inside { padding: 0.2rem 0 0 1.1rem; }
 
   .note { display: flex; gap: 0.55rem; align-items: flex-start; padding: 0.3rem 0.2rem; border-bottom: 1px solid var(--rule); }

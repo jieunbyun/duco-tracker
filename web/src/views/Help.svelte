@@ -263,7 +263,8 @@
       <em>By date</em> lists every note newest first, a month at a time, each with its topic; <em>Topics</em> goes back.
       Drag ⠿ to order topics, subtopics and notes (with no search or tag picked). Tick a note when it is outdated: it
       stays where it is, in grey. <em>Edit</em> on a note changes its text and tags, or moves it to another topic.
-      Topics and subtopics start folded, so the list stays short; click a title to open or fold it. When Experiments was set up, what you had in the four
+      Topics and subtopics start folded, so the list stays short; click the ▸ beside a title to open or fold it, and the title itself to edit
+      its name and tags. When Experiments was set up, what you had in the four
       old tabs was copied in as notes (mood, ratings and formulations written out as text); the originals are kept, and
       reachable from the links at the foot of the tab and from hypotheses on Planning and Members. Private to you.
     </dd>
