@@ -175,6 +175,13 @@
   function cancel() {
     editing = null;
   }
+  // clicking a note's text edits it, unless the click is on a link in it or ends a text selection
+  function clickNote(ev: MouseEvent, n: Note) {
+    if (editing || saving) return;
+    if ((ev.target as HTMLElement).closest("a")) return;
+    if (window.getSelection()?.toString()) return;
+    startEdit(n);
+  }
   function toggleTag(t: Tag) {
     draftTags = draftTags.includes(t) ? draftTags.filter((x) => x !== t) : TAGS.filter((x) => x === t || draftTags.includes(x));
   }
@@ -302,7 +309,10 @@
              title={n.outdated ? "Outdated — untick if it holds again" : "Tick off as outdated"}
              aria-label="Outdated" onchange={(e) => setOutdated(n, e.currentTarget.checked)} />
       <div class="note-main">
-        <div class="note-body"><Linked text={n.body} /></div>
+        <!-- click the text to edit it (Edit below is the way by keyboard) -->
+        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <div class="note-body" class:editable={!editing && !saving} title={editing ? undefined : "Click to edit"}
+             onclick={(ev) => clickNote(ev, n)}><Linked text={n.body} /></div>
         <div class="meta">
           {#if view === "date"}<span class="where">{pathOf(n.topic_id)}</span>{/if}
           {#each n.tags as t (t)}<span class="chip tag-chip">{TAG_LABEL[t]}</span>{/each}
@@ -467,6 +477,7 @@
   .tick { width: auto; margin: 0.3rem 0 0; accent-color: var(--accent); cursor: pointer; }
   .note-main { flex: 1; min-width: 0; }
   .note-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; }
+  .note-body.editable { cursor: text; }
   /* outdated: still there to read, in grey */
   .note.outdated .note-body { color: var(--ink-soft); opacity: 0.75; }
   .note.outdated .tag-chip { opacity: 0.7; }
