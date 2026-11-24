@@ -341,22 +341,24 @@
     {@render noteForm(n)}
   {:else}
     <div class="note" class:outdated={n.outdated}>
-      <div class="note-main" class:multi={n.body.trim().includes("\n")}>
+      <!-- the text runs inline; its tags and date float right after it, into the room left on its
+           last line, or onto a line of their own when there is none -->
+      <div class="note-main">
         <!-- click the text (or Tab to it and press Enter) to edit or delete it -->
-        <div class="note-body" class:editable={!editing && !saving} title={editing ? undefined : "Click to edit"}
+        <span class="note-body" class:editable={!editing && !saving} title={editing ? undefined : "Click to edit"}
              role="button" tabindex={editing ? -1 : 0} onclick={(ev) => clickNote(ev, n)}
              onkeydown={(ev) => {
                if ((ev.key === "Enter" || ev.key === " ") && ev.target === ev.currentTarget && !editing && !saving) {
                  ev.preventDefault();
                  startEdit(n);
                }
-             }}><Linked text={n.body} /></div>
-        <div class="meta">
+             }}><Linked text={n.body} /></span>
+        <span class="meta">
           {#if view === "date"}<span class="where">{pathOf(n.topic_id)}</span>{/if}
           {#each n.tags as t (t)}<span class="chip tag-chip">{TAG_LABEL[t]}</span>{/each}
           <span class="date">{fmtDay(n.noted_on)}</span>
           {#if n.outdated}<span class="date">· outdated</span>{/if}
-        </div>
+        </span>
       </div>
       {@render outMark(n.outdated, "this note", () => setOutdated(n, !n.outdated))}
     </div>
@@ -384,6 +386,8 @@
             <h2><button class="name" onclick={() => startRename(t)} disabled={!!editing} title="Click to edit">{t.title}</button></h2>
           {/if}
         </span>
+        <!-- after the title, floated right into the room left on its last line (as a note's) -->
+        <span class="right">
         <span class="topic-meta">
           {#each t.tags as x (x)}<span class="chip tag-chip">{TAG_LABEL[x]}</span>{/each}
           <!-- a subtopic with no tags of its own goes by its topic's: shown lighter -->
@@ -399,6 +403,7 @@
           {#if !sub}<button class="mini" onclick={() => startTopic(t.id)} disabled={!!editing}>+ Subtopic</button>{/if}
         </span>
         {@render outMark(t.outdated, sub ? "this subtopic" : "this topic", () => setTopicOutdated(t, !t.outdated))}
+        </span>
       </header>
     {/if}
     {#if isOpen(t)}
@@ -495,21 +500,29 @@
   .umbrellas > :global(ul.sortable > li) { margin-top: 1.2rem; }
   .subs > :global(ul.sortable > li) { margin-top: 0.6rem; }
   .umbrellas > :global(ul.sortable > li > .grip), .subs > :global(ul.sortable > li > .grip) { padding-top: 0.3rem; }
-  /* a topic's tags and count at the right, as a note's, then its buttons and ⊘ */
-  .topic-meta {
-    display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; justify-content: flex-end; margin-left: auto;
-  }
-  .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
-  .tag-chip.inherited { opacity: 0.55; border-style: dashed; }
+  /* a topic's row: the caret hangs in the left margin, so a long title wraps under itself; the
+     title runs inline and what follows it (tags, count, buttons, ⊘) floats right, into the room
+     left on the title's last line, or onto a line of its own */
   header {
-    display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: baseline; font-family: var(--font-ui);
-    border-bottom: 1px solid var(--rule); padding-bottom: 0.25rem;
+    display: flow-root; padding: 0 0 0.25rem 1.3rem; font-family: var(--font-ui);
+    border-bottom: 1px solid var(--rule);
   }
   .topic.sub header { border-bottom-style: dashed; }
-  .head { display: flex; gap: 0.15rem; align-items: baseline; min-width: 0; }
-  .fold { flex: none; padding: 0 0.2rem; border: none; background: none; color: var(--ink); cursor: pointer; }
+  .head { display: inline; }
+  .fold {
+    display: inline-block; width: 1.3rem; margin-left: -1.3rem; padding: 0 0 0 0.2rem; text-align: left;
+    border: none; background: none; color: var(--ink); cursor: pointer;
+  }
   .fold:disabled { opacity: 1; cursor: default; }
-  .head h2, .head h3 { margin: 0; font-family: var(--font); overflow-wrap: anywhere; }
+  .head h2, .head h3 { display: inline; margin: 0; font-family: var(--font); overflow-wrap: anywhere; }
+  .right {
+    float: right; max-width: 100%; margin: 0.3rem 0 0 0.8rem;
+    display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: center; justify-content: flex-end;
+  }
+  .topic.sub .right { margin-top: 0.1rem; }
+  .topic-meta { display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; justify-content: flex-end; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .tag-chip.inherited { opacity: 0.55; border-style: dashed; }
   .head h3 { font-size: 1.02rem; font-weight: normal; }
   .name {
     padding: 0; border: none; background: none; font: inherit; color: var(--ink); text-align: left; cursor: text;
@@ -527,7 +540,6 @@
     flex: none; padding: 0 0.3rem; border: none; background: none; font-size: 1rem; line-height: 1.4;
     color: var(--ink-soft); cursor: pointer; opacity: 0; transition: opacity 0.12s;
   }
-  header .out { align-self: center; }
   .note:hover .out, header:hover .out, .out:focus-visible { opacity: 0.5; }
   .out:hover:not(:disabled) { opacity: 1; }
   .out.on { opacity: 1; color: var(--danger); }
@@ -538,20 +550,19 @@
   /* an outdated topic: its title in grey, and what is under it faded */
   .topic.outdated > header .name { color: var(--ink-soft); }
   .topic.outdated > .inside { opacity: 0.6; }
-  /* the text, then its tags and date on the same line when they fit (as a topic's title and
-     chips), else on the line below; a note of several lines keeps them below */
-  .note-main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; }
-  .note-main.multi { display: block; }
-  .note-body { flex: 0 1 auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; }
+  /* the text runs inline; its tags and date float right after it (see .meta) */
+  .note-main { flex: 1; min-width: 0; display: flow-root; }
+  .note-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; }
   .note-body.editable { cursor: text; }
   .note-body:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
   /* outdated: still there to read, in grey */
   .note.outdated .note-body { color: var(--ink-soft); opacity: 0.75; }
   .note.outdated .tag-chip { opacity: 0.7; }
-  /* a note's tags and date at the right, on its line or the one below */
+  /* a note's tags and date at the right: in the room left on the text's last line, else below */
   .meta {
+    float: right; max-width: 100%; margin: 0.15rem 0 0 0.8rem;
     display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; justify-content: flex-end;
-    margin-left: auto; font-family: var(--font-ui);
+    font-family: var(--font-ui);
   }
   .tag-chip { margin-left: 0; }
   .where { font-size: 0.75rem; font-weight: 600; color: var(--ink-soft); }
