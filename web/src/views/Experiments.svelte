@@ -1,6 +1,7 @@
 <script module lang="ts">
   // kept while the app is open, so an undo (which reloads the tab) leaves you where you were
   const last = {
+    view: "topics" as "topics" | "date", // under topics, or every note newest first
     tag: null as string | null,
     query: "",
     closed: new Set<string>(), // umbrella topics folded shut
@@ -20,7 +21,7 @@
   } from "../lib/experiments";
   import type { Tag, Topic, Note } from "../lib/experiments";
   import { undoable } from "../lib/undo.svelte";
-  import { fmtDay } from "../lib/dates";
+  import { fmtDay, parse } from "../lib/dates";
   import { download } from "../lib/group";
   import Sortable from "../lib/Sortable.svelte";
   import Linked from "../lib/Linked.svelte";
@@ -31,13 +32,18 @@
   let error = $state("");
   let missing = $state(false); // the SQL has not been run yet
 
+  let view = $state(last.view);
   let tag = $state<Tag | null>(last.tag as Tag | null);
   let query = $state(last.query);
   let closed = $state(new Set(last.closed));
   let opened = $state(new Set(last.opened));
   $effect(() => {
-    Object.assign(last, { tag, query, closed, opened });
+    Object.assign(last, { view, tag, query, closed, opened });
   });
+  function setView(v: "topics" | "date") {
+    editing = null; // its form may not be in the other view
+    view = v;
+  }
 
   // what is being written: a new topic (under a parent, or none), a new note, a rename, a note's edit
   type Editing =
@@ -107,6 +113,25 @@
     return `${every.length} ${every.length === 1 ? "note" : "notes"}${old ? ` · ${old} outdated` : ""}`;
   };
   const shownCount = $derived(filtering ? topics.reduce((a, t) => a + notesOf(t).length, 0) : notes.length);
+
+  // by date: every note that shows, newest first, a group per month
+  const pathOf = (id: string) => {
+    const t = topics.find((x) => x.id === id);
+    return !t ? "" : t.parent_id ? `${titleOf(t.parent_id)} › ${t.title}` : t.title;
+  };
+  const months = $derived.by(() => {
+    const dated = topics.flatMap(notesOf).sort((a, b) =>
+      b.noted_on.localeCompare(a.noted_on) || b.created_at.localeCompare(a.created_at));
+    const out: { key: string; label: string; rows: Note[] }[] = [];
+    for (const n of dated) {
+      const key = n.noted_on.slice(0, 7);
+      if (out.at(-1)?.key !== key) {
+        out.push({ key, label: parse(`${key}-01`).toLocaleDateString("en-GB", { month: "long", year: "numeric" }), rows: [] });
+      }
+      out.at(-1)!.rows.push(n);
+    }
+    return out;
+  });
 
   // ---- writing --------------------------------------------------------------------
   async function focusDraft() {
@@ -269,6 +294,7 @@
       <div class="note-main">
         <div class="note-body"><Linked text={n.body} /></div>
         <div class="meta">
+          {#if view === "date"}<span class="where">{pathOf(n.topic_id)}</span>{/if}
           {#each n.tags as t (t)}<span class="chip tag-chip">{TAG_LABEL[t]}</span>{/each}
           <span class="date">{fmtDay(n.noted_on)}</span>
           {#if n.outdated}<span class="date">· outdated</span>{/if}
@@ -337,7 +363,11 @@
     <p class="muted">Experiments needs its tables first: run <code>web/db/0066_experiments.sql</code> in the Supabase SQL editor, then reload.</p>
   {:else}
     <div class="bar">
-      <button class="primary" onclick={() => startTopic(null)} disabled={!!editing}>+ Topic</button>
+      {#if view === "topics"}<button class="primary" onclick={() => startTopic(null)} disabled={!!editing}>+ Topic</button>{/if}
+      <div class="pick" role="group" aria-label="View">
+        <button class:on={view === "topics"} aria-pressed={view === "topics"} onclick={() => setView("topics")}>Topics</button>
+        <button class:on={view === "date"} aria-pressed={view === "date"} onclick={() => setView("date")}>By date</button>
+      </div>
       <input class="search" type="search" bind:value={query} placeholder="Search notes and topics" aria-label="Search" />
       <div class="pick" role="group" aria-label="Show tag">
         <button class:on={!tag} aria-pressed={!tag} onclick={() => (tag = null)}>All</button>
@@ -349,11 +379,18 @@
       <button class="mini" onclick={exportAll} disabled={!topics.length} title="As a Markdown file, to keep on OneDrive">Export</button>
     </div>
     {#if filtering}
-      <p class="muted count">{shownCount} of {notes.length} {notes.length === 1 ? "note" : "notes"} · clear the search and tag to reorder</p>
+      <p class="muted count">{shownCount} of {notes.length} {notes.length === 1 ? "note" : "notes"}{view === "topics" ? " · clear the search and tag to reorder" : ""}</p>
     {/if}
     {#if editing?.kind === "topic" && editing.parent === null}{@render titleForm("New topic")}{/if}
 
-    {#if shownUmbrellas.length}
+    {#if view === "date"}
+      {#each months as m (m.key)}
+        <h2 class="month">{m.label} <span class="muted count">{m.rows.length}</span></h2>
+        {#each m.rows as n (n.id)}{@render noteRow(n)}{/each}
+      {:else}
+        <p class="muted">{filtering ? "Nothing matches." : "No notes yet. Add them under a topic, in Topics."}</p>
+      {/each}
+    {:else if shownUmbrellas.length}
       <div class="umbrellas">
         <Sortable items={shownUmbrellas} row={topicBlock} onreorder={(ids) => reorderTopics(umbrellas, ids)}
                   disabled={filtering || saving || !!editing} />
@@ -363,12 +400,6 @@
     {:else if !editing}
       <p class="muted">No topics yet. Start with + Topic.</p>
     {/if}
-
-    <p class="muted earlier">
-      What you had in Tips, Failures, Practice and Diary was copied here when Experiments was set up. The originals are
-      still kept: <a href="#/tips">Tips</a> · <a href="#/failures">Failures</a> · <a href="#/practice">Practice</a> ·
-      <a href="#/diary">Diary</a>.
-    </p>
   {/if}
 </section>
 
@@ -402,7 +433,7 @@
   }
   .fold:disabled { opacity: 1; cursor: default; }
   .fold h2, .fold h3 { margin: 0; font-family: var(--font); overflow-wrap: anywhere; }
-  .fold h3 { font-size: 1.02rem; }
+  .fold h3 { font-size: 1.02rem; font-weight: normal; }
   .caret { flex: none; width: 0.9rem; font-size: 0.7rem; color: var(--ink-soft); }
   .inside { padding: 0.2rem 0 0 1.1rem; }
 
@@ -416,6 +447,8 @@
   .note.outdated .tag-chip { opacity: 0.7; }
   .meta { display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; font-family: var(--font-ui); }
   .tag-chip { margin-left: 0; }
+  .where { font-size: 0.75rem; font-weight: 600; color: var(--ink-soft); }
+  .month { margin: 1.2rem 0 0.2rem; font-size: 1.05rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.2rem; }
   .date { font-size: 0.75rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
 
   .title-form, .note-form { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; font-family: var(--font-ui); }
