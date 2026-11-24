@@ -381,8 +381,10 @@
             <h2><button class="name" onclick={() => startRename(t)} disabled={!!editing} title="Click to edit">{t.title}</button></h2>
           {/if}
         </span>
-        {#each t.tags as x (x)}<span class="chip tag-chip">{TAG_LABEL[x]}</span>{/each}
-        <span class="muted count">{countOf(t)}</span>
+        <span class="topic-meta">
+          {#each t.tags as x (x)}<span class="chip tag-chip">{TAG_LABEL[x]}</span>{/each}
+          <span class="muted count">{countOf(t)}</span>
+        </span>
         <span class="actions">
           <button class="mini" onclick={() => startNote(t)} disabled={!!editing}>+ Note</button>
           {#if !sub}<button class="mini" onclick={() => startTopic(t.id)} disabled={!!editing}>+ Subtopic</button>{/if}
@@ -484,7 +486,11 @@
   .umbrellas > :global(ul.sortable > li) { margin-top: 1.2rem; }
   .subs > :global(ul.sortable > li) { margin-top: 0.6rem; }
   .umbrellas > :global(ul.sortable > li > .grip), .subs > :global(ul.sortable > li > .grip) { padding-top: 0.3rem; }
-  .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-left: auto; }
+  /* a topic's tags and count at the right, as a note's, then its buttons and ⊘ */
+  .topic-meta {
+    display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; justify-content: flex-end; margin-left: auto;
+  }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
   header {
     display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: baseline; font-family: var(--font-ui);
     border-bottom: 1px solid var(--rule); padding-bottom: 0.25rem;
