@@ -532,7 +532,11 @@
   /* outdated: still there to read, in grey */
   .note.outdated .note-body { color: var(--ink-soft); opacity: 0.75; }
   .note.outdated .tag-chip { opacity: 0.7; }
-  .meta { display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; font-family: var(--font-ui); }
+  /* a note's tags and date at the right, on its line or the one below */
+  .meta {
+    display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; justify-content: flex-end;
+    margin-left: auto; font-family: var(--font-ui);
+  }
   .tag-chip { margin-left: 0; }
   .where { font-size: 0.75rem; font-weight: 600; color: var(--ink-soft); }
   .month { margin: 1.2rem 0 0.2rem; font-size: 1.05rem; border-bottom: 1px solid var(--rule); padding-bottom: 0.2rem; }
