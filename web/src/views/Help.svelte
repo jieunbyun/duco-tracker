@@ -262,8 +262,9 @@
       under it, so showing a tag shows that topic whole, with its subtopics and notes. A new note starts with its
       subtopic's tags (or, with none there, its topic's); change them before you save it if they do not fit.
       <em>By date</em> lists every note newest first, a month at a time, each with its topic; <em>Topics</em> goes back.
-      Drag ⠿ to order topics, subtopics and notes (with no search or tag picked). Tick a note when it is outdated: it
-      stays where it is, in grey. Click a note's text (or its <em>Edit</em>) to change its text and tags, or move it to another topic.
+      Drag ⠿ to order topics, subtopics and notes (with no search or tag picked). Mark a note, topic or subtopic
+      outdated with the ⊘ at the far right of its row, which shows when the pointer is over it (on a phone, open it and
+      use <em>⊘ Outdated</em> in its form): it stays where it is, in grey, with ⊘ in red; click ⊘ again to make it current. Click a note's text (or its <em>Edit</em>) to change its text and tags, or move it to another topic.
       Topics and subtopics start folded, so the list stays short; click the ▸ beside a title to open or fold it, and the title itself to edit
       its name and tags. When Experiments was set up, what you had in the four
       old tabs was copied in as notes (mood, ratings and formulations written out as text); the originals are kept, and

@@ -12,7 +12,7 @@
 <script lang="ts">
   // Experiments: what were Tips, Failures, Practice and Diary, in one place, laid out
   // like the Logbook. Umbrella topics with subtopics, notes under either, each note
-  // tagged and in your own order (drag ⠿), ticked off when it is outdated.
+  // tagged and in your own order (drag ⠿), marked ⊘ outdated (notes, topics and subtopics alike).
   import { tick } from "svelte";
   import {
     TAGS, TAG_LABEL, loadExperiments, addTopic, saveTopic, deleteTopic, addNote, saveNote, deleteNote, placesOf, matches,
@@ -53,6 +53,7 @@
   let draft = $state(""); // the title or the note's text
   let draftTags = $state<Tag[]>([]);
   let draftTopic = $state(""); // where an edited note goes
+  let draftOutdated = $state(false); // ⊘ in an edit form (the way on a phone, with no hover)
   let saving = $state(false);
 
   async function load() {
@@ -63,7 +64,8 @@
     } catch (e) {
       const msg = (e as Error).message;
       if (/exp_topic|exp_note/.test(msg) && /exist|schema cache/i.test(msg)) {
-        missing = /exp_topic\.tags|'tags'/.test(msg) ? "0068_exp_topic_tags.sql" : "0066_experiments.sql";
+        const col = msg.match(/exp_topic\.(tags|outdated)\b|'(tags|outdated)' column/);
+        missing = !col ? "0066_experiments.sql" : (col[1] ?? col[2]) === "tags" ? "0068_exp_topic_tags.sql" : "0070_exp_topic_outdated.sql";
       }
       else error = msg;
     } finally {
@@ -154,6 +156,7 @@
     editing = { kind: "rename", id: t.id };
     draft = t.title;
     draftTags = [...t.tags];
+    draftOutdated = t.outdated;
     focusDraft();
   }
   function startNote(t: Topic) {
@@ -174,6 +177,7 @@
     draft = n.body;
     draftTags = [...n.tags];
     draftTopic = n.topic_id;
+    draftOutdated = n.outdated;
     focusDraft();
   }
   function cancel() {
@@ -203,9 +207,11 @@
       const siblings = topics.filter((t) => t.parent_id === e.parent);
       await change(e.parent ? `Added subtopic “${text}”` : `Added topic “${text}”`, () => addTopic(text, e.parent, draftTags, firstOrder(siblings)));
     } else if (e.kind === "rename") {
-      const was = titleOf(e.id);
-      await change(was !== text ? `Renamed “${was}” to “${text}”` : `Changed the tags on “${text}”`, () =>
-        saveTopic(e.id, { title: text, tags: draftTags }));
+      const was = topics.find((x) => x.id === e.id)!;
+      const label = was.title !== text ? `Renamed “${was.title}” to “${text}”`
+        : was.outdated !== draftOutdated ? `Marked “${text}” ${draftOutdated ? "outdated" : "current"}`
+        : `Changed the tags on “${text}”`;
+      await change(label, () => saveTopic(e.id, { title: text, tags: draftTags, outdated: draftOutdated }));
     } else if (e.kind === "note") {
       last.tags = [...draftTags];
       const t = topics.find((x) => x.id === e.topic)!;
@@ -215,8 +221,11 @@
       const n = notes.find((x) => x.id === e.id)!;
       const moved = draftTopic !== n.topic_id;
       const to = topics.find((x) => x.id === draftTopic);
-      await change(moved ? `Moved a note to “${to?.title ?? ""}”` : "Changed a note", () =>
-        saveNote(n.id, { body: text, tags: draftTags, ...(moved && to ? { topic_id: to.id, sort_order: firstOrder(allNotesOf(to)) } : {}) }));
+      const label = moved ? `Moved a note to “${to?.title ?? ""}”`
+        : n.outdated !== draftOutdated ? `Marked a note ${draftOutdated ? "outdated" : "current"}` : "Changed a note";
+      await change(label, () =>
+        saveNote(n.id, { body: text, tags: draftTags, outdated: draftOutdated,
+                         ...(moved && to ? { topic_id: to.id, sort_order: firstOrder(allNotesOf(to)) } : {}) }));
     }
   }
   function keys(ev: KeyboardEvent) {
@@ -240,6 +249,10 @@
   async function setOutdated(n: Note, on: boolean) {
     notes = notes.map((x) => (x.id === n.id ? { ...x, outdated: on } : x));
     await change(on ? "Marked a note outdated" : "Marked a note current", () => saveNote(n.id, { outdated: on }));
+  }
+  async function setTopicOutdated(t: Topic, on: boolean) {
+    topics = topics.map((x) => (x.id === t.id ? { ...x, outdated: on } : x));
+    await change(`Marked “${t.title}” ${on ? "outdated" : "current"}`, () => saveTopic(t.id, { outdated: on }));
   }
 
   // drag to reorder: shown at once, saved behind
@@ -272,10 +285,24 @@
   </div>
 {/snippet}
 
-{#snippet titleForm(label: string)}
+{#snippet outToggle()}
+  <button type="button" class="tag out-toggle" class:on={draftOutdated} aria-pressed={draftOutdated}
+          onclick={() => (draftOutdated = !draftOutdated)}>⊘ Outdated</button>
+{/snippet}
+
+{#snippet outMark(on: boolean, what: string, flip: () => void)}
+  <!-- ⊘ at the far right: always there once outdated; else on hover (and not on a phone, which
+       uses ⊘ Outdated in the edit form instead) -->
+  <button type="button" class="out" class:on disabled={saving || !!editing} aria-pressed={on}
+          title={on ? `Outdated — click to mark ${what} current again` : `Mark ${what} outdated`}
+          aria-label={on ? `Outdated: mark ${what} current` : `Mark ${what} outdated`} onclick={flip}>⊘</button>
+{/snippet}
+
+{#snippet titleForm(label: string, existing = false)}
   <form class="title-form" onsubmit={submit}>
     <input class="draft" bind:value={draft} placeholder={label} aria-label={label} onkeydown={keys} />
     {@render tagPicker()}
+    {#if existing}{@render outToggle()}{/if}
     <button class="primary" disabled={!draft.trim() || saving}>Save</button>
     <button type="button" onclick={cancel}>Cancel</button>
   </form>
@@ -287,6 +314,7 @@
     <div class="form-row">
       {@render tagPicker()}
       {#if n}
+        {@render outToggle()}
         <label class="move">In
           <select bind:value={draftTopic}>
             {#each umbrellas as u (u.id)}
@@ -309,9 +337,6 @@
     {@render noteForm(n)}
   {:else}
     <div class="note" class:outdated={n.outdated}>
-      <input type="checkbox" class="tick" checked={n.outdated} disabled={saving}
-             title={n.outdated ? "Outdated — untick if it holds again" : "Tick off as outdated"}
-             aria-label="Outdated" onchange={(e) => setOutdated(n, e.currentTarget.checked)} />
       <div class="note-main">
         <!-- click the text to edit it (Edit below is the way by keyboard) -->
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
@@ -325,6 +350,7 @@
           <button class="mini link" onclick={() => startEdit(n)} disabled={!!editing}>Edit</button>
         </div>
       </div>
+      {@render outMark(n.outdated, "this note", () => setOutdated(n, !n.outdated))}
     </div>
   {/if}
 {/snippet}
@@ -333,9 +359,9 @@
   {@const sub = !!t.parent_id}
   {@const list = notesOf(t)}
   {@const subs = subsOf(t).filter(topicShows)}
-  <div class="topic" class:sub>
+  <div class="topic" class:sub class:outdated={t.outdated}>
     {#if editing?.kind === "rename" && editing.id === t.id}
-      {@render titleForm(sub ? "Subtopic" : "Topic")}
+      {@render titleForm(sub ? "Subtopic" : "Topic", true)}
     {:else}
       <header>
         <!-- the caret folds; the title opens it for editing (its name and tags) -->
@@ -359,6 +385,7 @@
                 title="Rename, or change its tags">Edit</button>
           <button class="mini danger" onclick={() => removeTopic(t)} disabled={!!editing}>Delete</button>
         </span>
+        {@render outMark(t.outdated, sub ? "this subtopic" : "this topic", () => setTopicOutdated(t, !t.outdated))}
       </header>
     {/if}
     {#if isOpen(t)}
@@ -388,7 +415,7 @@
   <p class="muted intro">
     Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self, Innovation or Modelling (a topic's
     tags count for everything under it). Drag ⠿ to put them in
-    order; tick a note off when it is outdated. Only you see them.
+    order; mark one ⊘ outdated when it no longer holds. Only you see them.
   </p>
   {#if error}<p class="error">{error}</p>{/if}
 
@@ -478,7 +505,22 @@
 
   .note { display: flex; gap: 0.55rem; align-items: flex-start; padding: 0.3rem 0.2rem; border-bottom: 1px solid var(--rule); }
   .note:hover { background: var(--panel); }
-  .tick { width: auto; margin: 0.3rem 0 0; accent-color: var(--accent); cursor: pointer; }
+  /* ⊘ outdated, at the far right: shown on hover (or keyboard focus), always once outdated */
+  .out {
+    flex: none; padding: 0 0.3rem; border: none; background: none; font-size: 1rem; line-height: 1.4;
+    color: var(--ink-soft); cursor: pointer; opacity: 0; transition: opacity 0.12s;
+  }
+  header .out { align-self: center; }
+  .note:hover .out, header:hover .out, .out:focus-visible { opacity: 0.5; }
+  .out:hover:not(:disabled) { opacity: 1; }
+  .out.on { opacity: 1; color: var(--danger); }
+  .out:disabled { cursor: default; }
+  /* no hover on a phone: only the outdated ones show it; ⊘ Outdated in the edit form does the rest */
+  @media (hover: none) { .out:not(.on) { display: none; } }
+  .out-toggle.on { background: var(--danger); border-color: var(--danger); color: var(--paper); }
+  /* an outdated topic: its title in grey, and what is under it faded */
+  .topic.outdated > header .name { color: var(--ink-soft); }
+  .topic.outdated > .inside { opacity: 0.6; }
   .note-main { flex: 1; min-width: 0; }
   .note-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; }
   .note-body.editable { cursor: text; }
