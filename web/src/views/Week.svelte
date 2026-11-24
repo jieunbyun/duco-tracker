@@ -2100,7 +2100,7 @@
                  }}
                  onblur={renameTidy} />
         {:else}
-          <button class="tidy-title" aria-haspopup="menu" title={`${t.title}${t.is_tidy ? " (tidy-up)" : ""} — click or right-click to move, rename, mark as a tidy-up or delete`}
+          <button class="tidy-title" aria-haspopup="menu" title={t.title}
                   onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
           {#if t.link}
             <a class="tidy-link" href={t.link} target="_blank" rel="noopener noreferrer" title={`Open ${t.link}`}
