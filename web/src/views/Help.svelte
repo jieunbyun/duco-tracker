@@ -253,6 +253,18 @@
       (<code>jobshort</code>/<code>joblong</code>) for your CV source.
     </dd>
 
+    <dt>Experiments</dt>
+    <dd>
+      <em>Life is experiments</em>: Tips, Failures, Practice and Diary in one tab, laid out like the Logbook. Umbrella
+      topics, each with subtopics, and notes under either. Every note carries one or more tags — Tip, Hypothesis,
+      Practice, Self — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
+      Drag ⠿ to order topics, subtopics and notes (with no search or tag picked). Tick a note when it is outdated: it
+      stays where it is, in grey. <em>Edit</em> on a note changes its text and tags, or moves it to another topic.
+      Subtopics start folded; click a title to open or fold it. When Experiments was set up, what you had in the four
+      old tabs was copied in as notes (mood, ratings and formulations written out as text); the originals are kept, and
+      reachable from the links at the foot of the tab and from hypotheses on Planning and Members. Private to you.
+    </dd>
+
     <dt>Tips</dt>
     <dd>
       Checklists you keep by topic — submitting a paper, examining a thesis, setting up a lab computer — each with

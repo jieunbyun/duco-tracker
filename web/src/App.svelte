@@ -21,6 +21,7 @@
     time: () => import("./views/Time.svelte"),
     reading: () => import("./views/Reading.svelte"),
     cv: () => import("./views/CV.svelte"),
+    experiments: () => import("./views/Experiments.svelte"),
     tips: () => import("./views/Tips.svelte"),
     failures: () => import("./views/Failures.svelte"),
     practice: () => import("./views/Practice.svelte"),
@@ -35,16 +36,19 @@
   };
   const labels: Record<keyof typeof views, string> = {
     week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Members", time: "Time", reading: "Reading",
-    cv: "CV", tips: "Tips", failures: "Failures", practice: "Practice", diary: "Diary", meetings: "Meetings", budget: "Budget", network: "Network", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
+    cv: "CV", experiments: "Experiments", tips: "Tips", failures: "Failures", practice: "Practice", diary: "Diary", meetings: "Meetings", budget: "Budget", network: "Network", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
   };
   type Route = keyof typeof views;
 
   // Who sees which tabs: the planner is yours alone; a member sees only their
   // logbook, projects and their own reading list. You keep a logbook too, for
   // the projects you lead.
-  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice", "diary", "meetings", "budget", "network"];
-  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "tips", "failures", "practice", "diary", "meetings", "budget", "network", "supervision", "logbook"];
+  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network"];
+  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network", "supervision", "logbook"];
   const MEMBER: Route[] = ["logbook", "projects", "reading"];
+  // Tips, Failures, Practice and Diary are now in Experiments, and off the bar; their
+  // pages stay, for the links to them (a hypothesis on a milestone opens in Failures)
+  const RETIRED: Route[] = ["tips", "failures", "practice", "diary"];
 
   let session = $state<Session | null>(null);
   let ready = $state(false);
@@ -61,7 +65,8 @@
   let hash = $state(fromHash());
   // Help is not a tab; it opens from the ? in the header
   const route = $derived<Route>(
-    tabs.includes(hash as Route) || (hash === "help" && !member && !preview.as) ? (hash as Route) : tabs[0],
+    tabs.includes(hash as Route) || ((hash === "help" || RETIRED.includes(hash as Route)) && !member && !preview.as)
+      ? (hash as Route) : tabs[0],
   );
 
   $effect(() => {
@@ -150,12 +155,14 @@
         <a href={`#/${key}`} class:active={route === key}>{labels[key]}</a>
       {/each}
     </nav>
+    <div class="tools">
     {#if !member && !preview.as}<a class="help" href="#/help" class:active={route === "help"} title="How the tracker works">?</a>{/if}
     <button class="undo" onclick={undoLast} disabled={!lastAction}
             title={lastAction ? `Undo: ${lastAction.label} (Ctrl+Z)` : "Nothing to undo"}>↶ Undo</button>
     <button class="theme" onclick={toggleTheme} aria-label={theme.value === "dark" ? "Switch to light" : "Switch to dark"}
             title={theme.value === "dark" ? "Switch to light" : "Switch to dark"}>{theme.value === "dark" ? "☀" : "☾"}</button>
     <button onclick={() => supabase.auth.signOut()}>Sign out</button>
+    </div>
   </header>
   <main>
     {#if settingsError}
@@ -193,19 +200,24 @@
     top: 0;
     z-index: 10;
     display: flex;
-    align-items: center;
-    gap: 1rem;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 0.5rem 1rem;
     padding: 0.6rem 16px;
     background: var(--paper);
     border-bottom: 1px solid var(--rule);
   }
+  /* the tabs wrap onto more lines rather than scroll under the buttons; when even
+     a short row will not fit beside them, the buttons drop to a line of their own */
   nav {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.25rem;
-    flex: 1;
-    overflow-x: auto;
+    flex: 1 1 24rem;
+    min-width: 0;
     font-family: var(--font-ui);
   }
+  .tools { display: flex; align-items: center; gap: 1rem; margin-left: auto; }
   nav a {
     padding: 0.4rem 0.75rem;
     border-radius: var(--radius);
