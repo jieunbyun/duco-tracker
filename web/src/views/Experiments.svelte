@@ -298,11 +298,12 @@
           aria-label={on ? `Outdated: mark ${what} current` : `Mark ${what} outdated`} onclick={flip}>⊘</button>
 {/snippet}
 
-{#snippet titleForm(label: string, existing = false)}
+{#snippet titleForm(label: string, t: Topic | null = null)}
   <form class="title-form" onsubmit={submit}>
     <input class="draft" bind:value={draft} placeholder={label} aria-label={label} onkeydown={keys} />
     {@render tagPicker()}
-    {#if existing}{@render outToggle()}{/if}
+    {#if t}{@render outToggle()}{/if}
+    {#if t}<button type="button" class="danger" onclick={() => removeTopic(t)}>Delete</button>{/if}
     <button class="primary" disabled={!draft.trim() || saving}>Save</button>
     <button type="button" onclick={cancel}>Cancel</button>
   </form>
@@ -338,16 +339,20 @@
   {:else}
     <div class="note" class:outdated={n.outdated}>
       <div class="note-main" class:multi={n.body.trim().includes("\n")}>
-        <!-- click the text to edit it (Edit below is the way by keyboard) -->
-        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+        <!-- click the text (or Tab to it and press Enter) to edit or delete it -->
         <div class="note-body" class:editable={!editing && !saving} title={editing ? undefined : "Click to edit"}
-             onclick={(ev) => clickNote(ev, n)}><Linked text={n.body} /></div>
+             role="button" tabindex={editing ? -1 : 0} onclick={(ev) => clickNote(ev, n)}
+             onkeydown={(ev) => {
+               if ((ev.key === "Enter" || ev.key === " ") && ev.target === ev.currentTarget && !editing && !saving) {
+                 ev.preventDefault();
+                 startEdit(n);
+               }
+             }}><Linked text={n.body} /></div>
         <div class="meta">
           {#if view === "date"}<span class="where">{pathOf(n.topic_id)}</span>{/if}
           {#each n.tags as t (t)}<span class="chip tag-chip">{TAG_LABEL[t]}</span>{/each}
           <span class="date">{fmtDay(n.noted_on)}</span>
           {#if n.outdated}<span class="date">· outdated</span>{/if}
-          <button class="mini link" onclick={() => startEdit(n)} disabled={!!editing}>Edit</button>
         </div>
       </div>
       {@render outMark(n.outdated, "this note", () => setOutdated(n, !n.outdated))}
@@ -361,10 +366,10 @@
   {@const subs = subsOf(t).filter(topicShows)}
   <div class="topic" class:sub class:outdated={t.outdated}>
     {#if editing?.kind === "rename" && editing.id === t.id}
-      {@render titleForm(sub ? "Subtopic" : "Topic", true)}
+      {@render titleForm(sub ? "Subtopic" : "Topic", t)}
     {:else}
       <header>
-        <!-- the caret folds; the title opens it for editing (its name and tags) -->
+        <!-- the caret folds; the title opens it for editing (its name, tags, outdated, or delete) -->
         <span class="head">
           <button class="fold" aria-expanded={isOpen(t)} aria-label={`${isOpen(t) ? "Fold" : "Open"} “${t.title}”`}
                   onclick={() => fold(t)} disabled={filtering}>
@@ -381,9 +386,6 @@
         <span class="actions">
           <button class="mini" onclick={() => startNote(t)} disabled={!!editing}>+ Note</button>
           {#if !sub}<button class="mini" onclick={() => startTopic(t.id)} disabled={!!editing}>+ Subtopic</button>{/if}
-          <button class="mini" onclick={() => startRename(t)} disabled={!!editing}
-                title="Rename, or change its tags">Edit</button>
-          <button class="mini danger" onclick={() => removeTopic(t)} disabled={!!editing}>Delete</button>
         </span>
         {@render outMark(t.outdated, sub ? "this subtopic" : "this topic", () => setTopicOutdated(t, !t.outdated))}
       </header>
@@ -474,7 +476,6 @@
   .pick button.on { background: var(--ink); border-color: var(--ink); color: var(--paper); }
   .spacer { flex: 1; }
   .mini { font-size: 0.75rem; padding: 0.1rem 0.5rem; white-space: nowrap; }
-  .mini.link { border: none; background: none; padding: 0; color: var(--ink-soft); text-decoration: underline dotted; }
   .danger { color: var(--danger); }
   .count, .empty { font-family: var(--font-ui); font-size: 0.8rem; }
   .empty { margin: 0.3rem 0; }
@@ -527,6 +528,7 @@
   .note-main.multi { display: block; }
   .note-body { flex: 0 1 auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; }
   .note-body.editable { cursor: text; }
+  .note-body:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
   /* outdated: still there to read, in grey */
   .note.outdated .note-body { color: var(--ink-soft); opacity: 0.75; }
   .note.outdated .tag-chip { opacity: 0.7; }

@@ -258,13 +258,15 @@
       <em>Life is experiments</em>: Tips, Failures, Practice and Diary in one tab, laid out like the Logbook. Umbrella
       topics, each with subtopics, and notes under either. Every note carries one or more tags — Tip, Hypothesis,
       Practice, Self, Innovation, Modelling — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
-      A topic or subtopic can carry tags too (set them in its <em>Edit</em>, or when you add it): they count for everything
+      A topic or subtopic can carry tags too (click its title to set them, or set them when you add it): they count for everything
       under it, so showing a tag shows that topic whole, with its subtopics and notes. A new note starts with its
       subtopic's tags (or, with none there, its topic's); change them before you save it if they do not fit.
       <em>By date</em> lists every note newest first, a month at a time, each with its topic; <em>Topics</em> goes back.
       Drag ⠿ to order topics, subtopics and notes (with no search or tag picked). Mark a note, topic or subtopic
       outdated with the ⊘ at the far right of its row, which shows when the pointer is over it (on a phone, open it and
-      use <em>⊘ Outdated</em> in its form): it stays where it is, in grey, with ⊘ in red; click ⊘ again to make it current. Click a note's text (or its <em>Edit</em>) to change its text and tags, or move it to another topic.
+      use <em>⊘ Outdated</em> in its form): it stays where it is, in grey, with ⊘ in red; click ⊘ again to make it current. Click a note's text to change its text and
+      tags, move it to another topic, or delete it; click a topic's or subtopic's title to rename it, change its tags, or
+      delete it.
       Topics and subtopics start folded, so the list stays short; click the ▸ beside a title to open or fold it, and the title itself to edit
       its name and tags. When Experiments was set up, what you had in the four
       old tabs was copied in as notes (mood, ratings and formulations written out as text); the originals are kept, and
