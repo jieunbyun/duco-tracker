@@ -259,7 +259,8 @@
       topics, each with subtopics, and notes under either. Every note carries one or more tags — Tip, Hypothesis,
       Practice, Self, Innovation, Modelling — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
       A topic or subtopic can carry tags too (set them in its <em>Edit</em>, or when you add it): they count for everything
-      under it, so showing a tag shows that topic whole, with its subtopics and notes.
+      under it, so showing a tag shows that topic whole, with its subtopics and notes. A new note starts with its
+      subtopic's tags (or, with none there, its topic's); change them before you save it if they do not fit.
       <em>By date</em> lists every note newest first, a month at a time, each with its topic; <em>Topics</em> goes back.
       Drag ⠿ to order topics, subtopics and notes (with no search or tag picked). Tick a note when it is outdated: it
       stays where it is, in grey. Click a note's text (or its <em>Edit</em>) to change its text and tags, or move it to another topic.

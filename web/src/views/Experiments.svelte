@@ -159,9 +159,13 @@
   function startNote(t: Topic) {
     editing = { kind: "note", topic: t.id };
     draft = "";
-    // tagged as the filter, else as the topic's newest note, else as your last new note
+    // tagged as its (sub)topic, else as the topic above it; with neither tagged, as the topic's
+    // newest note, else as your last new note. Plus the tag shown, so the note stays in view.
+    const parent = topics.find((p) => p.id === t.parent_id);
     const prev = allNotesOf(t).reduce<Note | null>((a, n) => (!a || n.created_at > a.created_at ? n : a), null);
-    draftTags = tag ? [tag] : prev ? [...prev.tags] : (last.tags as Tag[]).filter((x) => TAGS.includes(x));
+    const from: Tag[] = t.tags.length ? t.tags : parent?.tags.length ? parent.tags
+      : prev ? prev.tags : (last.tags as Tag[]);
+    draftTags = TAGS.filter((x) => from.includes(x) || x === tag);
     openUp(t.id);
     focusDraft();
   }
