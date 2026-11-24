@@ -30,7 +30,7 @@
   let notes = $state<Note[]>([]);
   let loading = $state(true);
   let error = $state("");
-  let missing = $state(false); // the SQL has not been run yet
+  let missing = $state(""); // the SQL file not run yet, if one is not
 
   let view = $state(last.view);
   let tag = $state<Tag | null>(last.tag as Tag | null);
@@ -61,10 +61,12 @@
     try {
       ({ topics, notes } = await loadExperiments());
       error = "";
-      missing = false;
+      missing = "";
     } catch (e) {
       const msg = (e as Error).message;
-      if (/exp_topic|exp_note/.test(msg) && /exist|schema cache/i.test(msg)) missing = true;
+      if (/exp_topic|exp_note/.test(msg) && /exist|schema cache/i.test(msg)) {
+        missing = /exp_topic\.tags|'tags'/.test(msg) ? "0068_exp_topic_tags.sql" : "0066_experiments.sql";
+      }
       else error = msg;
     } finally {
       loading = false;
@@ -91,13 +93,16 @@
   const subsOf = (t: Topic) => topics.filter((s) => s.parent_id === t.id);
   const allNotesOf = (t: Topic) => notes.filter((n) => n.topic_id === t.id);
   const titleOf = (id: string | null) => topics.find((t) => t.id === id)?.title ?? "";
+  // a topic's tags count for everything under it: its notes, and a subtopic's under its topic's
+  const inTag = (t: Topic) =>
+    !!tag && (t.tags.includes(tag) || !!topics.find((p) => p.id === t.parent_id)?.tags.includes(tag));
   const shows = (n: Note, t: Topic) =>
-    (!tag || n.tags.includes(tag)) && (!query.trim() || matches(`${n.body}\n${t.title}\n${titleOf(t.parent_id)}`, query));
+    (!tag || n.tags.includes(tag) || inTag(t)) && (!query.trim() || matches(`${n.body}\n${t.title}\n${titleOf(t.parent_id)}`, query));
   const notesOf = (t: Topic) => (filtering ? allNotesOf(t).filter((n) => shows(n, t)) : allNotesOf(t));
-  // filtering, a topic shows when anything under it does (or its own title matches the words)
+  // filtering, a topic shows when anything under it does, or it is itself tagged and titled so
   const topicShows = (t: Topic): boolean =>
     !filtering || notesOf(t).length > 0 || subsOf(t).some(topicShows)
-    || (!tag && matches(`${t.title}\n${titleOf(t.parent_id)}`, query));
+    || ((!tag || inTag(t)) && (!query.trim() || matches(`${t.title}\n${titleOf(t.parent_id)}`, query)));
   const shownUmbrellas = $derived(umbrellas.filter(topicShows));
   const isOpen = (t: Topic) => filtering || (t.parent_id ? opened.has(t.id) : !closed.has(t.id));
   function fold(t: Topic) {
@@ -141,12 +146,14 @@
   function startTopic(parent: string | null) {
     editing = { kind: "topic", parent };
     draft = "";
+    draftTags = tag ? [tag] : []; // so it stays in view under the tag shown
     if (parent) { const c = new Set(closed); c.delete(parent); closed = c; }
     focusDraft();
   }
   function startRename(t: Topic) {
     editing = { kind: "rename", id: t.id };
     draft = t.title;
+    draftTags = [...t.tags];
     focusDraft();
   }
   function startNote(t: Topic) {
@@ -184,9 +191,11 @@
     editing = null;
     if (e.kind === "topic") {
       const siblings = topics.filter((t) => t.parent_id === e.parent);
-      await change(e.parent ? `Added subtopic “${text}”` : `Added topic “${text}”`, () => addTopic(text, e.parent, firstOrder(siblings)));
+      await change(e.parent ? `Added subtopic “${text}”` : `Added topic “${text}”`, () => addTopic(text, e.parent, draftTags, firstOrder(siblings)));
     } else if (e.kind === "rename") {
-      await change(`Renamed “${titleOf(e.id)}” to “${text}”`, () => saveTopic(e.id, { title: text }));
+      const was = titleOf(e.id);
+      await change(was !== text ? `Renamed “${was}” to “${text}”` : `Changed the tags on “${text}”`, () =>
+        saveTopic(e.id, { title: text, tags: draftTags }));
     } else if (e.kind === "note") {
       last.tags = [...draftTags];
       const t = topics.find((x) => x.id === e.topic)!;
@@ -256,6 +265,7 @@
 {#snippet titleForm(label: string)}
   <form class="title-form" onsubmit={submit}>
     <input class="draft" bind:value={draft} placeholder={label} aria-label={label} onkeydown={keys} />
+    {@render tagPicker()}
     <button class="primary" disabled={!draft.trim() || saving}>Save</button>
     <button type="button" onclick={cancel}>Cancel</button>
   </form>
@@ -319,11 +329,13 @@
           <span class="caret" aria-hidden="true">{isOpen(t) ? "▾" : "▸"}</span>
           {#if sub}<h3>{t.title}</h3>{:else}<h2>{t.title}</h2>{/if}
         </button>
+        {#each t.tags as x (x)}<span class="chip tag-chip">{TAG_LABEL[x]}</span>{/each}
         <span class="muted count">{countOf(t)}</span>
         <span class="actions">
           <button class="mini" onclick={() => startNote(t)} disabled={!!editing}>+ Note</button>
           {#if !sub}<button class="mini" onclick={() => startTopic(t.id)} disabled={!!editing}>+ Subtopic</button>{/if}
-          <button class="mini" onclick={() => startRename(t)} disabled={!!editing}>Rename</button>
+          <button class="mini" onclick={() => startRename(t)} disabled={!!editing}
+                title="Rename, or change its tags">Edit</button>
           <button class="mini danger" onclick={() => removeTopic(t)} disabled={!!editing}>Delete</button>
         </span>
       </header>
@@ -353,7 +365,8 @@
   <span class="eyebrow">Experiments</span>
   <h1>Life is experiments</h1>
   <p class="muted intro">
-    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self or Innovation. Drag ⠿ to put them in
+    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self or Innovation (a topic's
+    tags count for everything under it). Drag ⠿ to put them in
     order; tick a note off when it is outdated. Only you see them.
   </p>
   {#if error}<p class="error">{error}</p>{/if}
@@ -361,7 +374,7 @@
   {#if loading}
     <p class="muted">Loading…</p>
   {:else if missing}
-    <p class="muted">Experiments needs its tables first: run <code>web/db/0066_experiments.sql</code> in the Supabase SQL editor, then reload.</p>
+    <p class="muted">Experiments needs a change to the database first: run <code>web/db/{missing}</code> in the Supabase SQL editor, then reload.</p>
   {:else}
     <div class="bar">
       {#if view === "topics"}<button class="primary" onclick={() => startTopic(null)} disabled={!!editing}>+ Topic</button>{/if}
@@ -454,6 +467,7 @@
 
   .title-form, .note-form { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.5rem 0; font-family: var(--font-ui); }
   .title-form input { flex: 1 1 16rem; }
+  .title-form .tags { align-self: center; }
   .note-form { flex-direction: column; }
   .form-row { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; }
   .tags { display: flex; flex-wrap: wrap; gap: 0.25rem; }

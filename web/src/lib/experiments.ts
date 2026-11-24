@@ -10,7 +10,9 @@ export const TAG_LABEL: Record<Tag, string> = {
   tip: "Tip", hypothesis: "Hypothesis", practice: "Practice", self: "Self", innovation: "Innovation",
 };
 
-export type Topic = { id: string; parent_id: string | null; title: string; sort_order: number; created_at: string };
+/** tags (0068): none needed; they count for everything under the topic. */
+export type Topic = { id: string; parent_id: string | null; title: string; tags: Tag[]; sort_order: number; created_at: string };
+const TOPIC_COLS = "id, parent_id, title, tags, sort_order, created_at";
 export type Note = {
   id: string;
   topic_id: string;
@@ -30,19 +32,17 @@ async function check<T>(q: PromiseLike<{ data: T | null; error: { message: strin
 
 export async function loadExperiments(): Promise<{ topics: Topic[]; notes: Note[] }> {
   const [topics, notes] = await Promise.all([
-    check<Topic[]>(supabase.from("exp_topic").select("id, parent_id, title, sort_order, created_at")
-      .order("sort_order").order("created_at")),
+    check<Topic[]>(supabase.from("exp_topic").select(TOPIC_COLS).order("sort_order").order("created_at")),
     check<Note[]>(supabase.from("exp_note").select("id, topic_id, body, tags, outdated, noted_on, sort_order, created_at")
       .order("sort_order").order("created_at")),
   ]);
   return { topics: topics ?? [], notes: notes ?? [] };
 }
 
-export async function addTopic(title: string, parent_id: string | null, sort_order: number): Promise<Topic> {
-  return check<Topic>(supabase.from("exp_topic").insert({ title, parent_id, sort_order })
-    .select("id, parent_id, title, sort_order, created_at").single());
+export async function addTopic(title: string, parent_id: string | null, tags: Tag[], sort_order: number): Promise<Topic> {
+  return check<Topic>(supabase.from("exp_topic").insert({ title, parent_id, tags, sort_order }).select(TOPIC_COLS).single());
 }
-export async function saveTopic(id: string, fields: Partial<Pick<Topic, "title" | "sort_order">>): Promise<void> {
+export async function saveTopic(id: string, fields: Partial<Pick<Topic, "title" | "tags" | "sort_order">>): Promise<void> {
   await check(supabase.from("exp_topic").update(fields).eq("id", id));
 }
 /** Its subtopics and every note under them go with it. */
@@ -80,9 +80,10 @@ export function experimentsMarkdown(topics: Topic[], notes: Note[]): string {
   const note = (n: Note) =>
     `- ${n.outdated ? "~~" : ""}${n.body.replace(/\n/g, "\n  ")}${n.outdated ? "~~ (outdated)" : ""} ` +
     `_[${n.tags.map((t) => TAG_LABEL[t]).join(", ")} · ${n.noted_on}]_`;
+  const tagged = (t: Topic) => (t.tags?.length ? ` _[${t.tags.map((x) => TAG_LABEL[x]).join(", ")}]_` : "");
   for (const t of topics.filter((x) => !x.parent_id)) {
-    lines.push(`## ${t.title}`, "", ...notesOf(t).map(note));
-    for (const s of topics.filter((x) => x.parent_id === t.id)) lines.push("", `### ${s.title}`, "", ...notesOf(s).map(note));
+    lines.push(`## ${t.title}${tagged(t)}`, "", ...notesOf(t).map(note));
+    for (const s of topics.filter((x) => x.parent_id === t.id)) lines.push("", `### ${s.title}${tagged(s)}`, "", ...notesOf(s).map(note));
     lines.push("");
   }
   return lines.join("\n");
