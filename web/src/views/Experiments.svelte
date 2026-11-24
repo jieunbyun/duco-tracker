@@ -337,7 +337,7 @@
     {@render noteForm(n)}
   {:else}
     <div class="note" class:outdated={n.outdated}>
-      <div class="note-main">
+      <div class="note-main" class:multi={n.body.trim().includes("\n")}>
         <!-- click the text to edit it (Edit below is the way by keyboard) -->
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="note-body" class:editable={!editing && !saving} title={editing ? undefined : "Click to edit"}
@@ -521,8 +521,11 @@
   /* an outdated topic: its title in grey, and what is under it faded */
   .topic.outdated > header .name { color: var(--ink-soft); }
   .topic.outdated > .inside { opacity: 0.6; }
-  .note-main { flex: 1; min-width: 0; }
-  .note-body { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; }
+  /* the text, then its tags and date on the same line when they fit (as a topic's title and
+     chips), else on the line below; a note of several lines keeps them below */
+  .note-main { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.1rem 0.6rem; }
+  .note-main.multi { display: block; }
+  .note-body { flex: 0 1 auto; min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 0.95rem; }
   .note-body.editable { cursor: text; }
   /* outdated: still there to read, in grey */
   .note.outdated .note-body { color: var(--ink-soft); opacity: 0.75; }
