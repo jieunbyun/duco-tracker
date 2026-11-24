@@ -148,7 +148,10 @@
   function startTopic(parent: string | null) {
     editing = { kind: "topic", parent };
     draft = "";
-    draftTags = tag ? [tag] : []; // so it stays in view under the tag shown
+    // a subtopic starts with its topic's tags (change them before saving); plus the tag shown,
+    // so it stays in view
+    const from = topics.find((p) => p.id === parent)?.tags ?? [];
+    draftTags = TAGS.filter((x) => from.includes(x) || x === tag);
     if (parent) openUp(parent);
     focusDraft();
   }
@@ -383,6 +386,12 @@
         </span>
         <span class="topic-meta">
           {#each t.tags as x (x)}<span class="chip tag-chip">{TAG_LABEL[x]}</span>{/each}
+          <!-- a subtopic with no tags of its own goes by its topic's: shown lighter -->
+          {#if sub && !t.tags.length}
+            {#each topics.find((p) => p.id === t.parent_id)?.tags ?? [] as x (x)}
+              <span class="chip tag-chip inherited" title="From its topic">{TAG_LABEL[x]}</span>
+            {/each}
+          {/if}
           <span class="muted count">{countOf(t)}</span>
         </span>
         <span class="actions">
@@ -491,6 +500,7 @@
     display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; justify-content: flex-end; margin-left: auto;
   }
   .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+  .tag-chip.inherited { opacity: 0.55; border-style: dashed; }
   header {
     display: flex; flex-wrap: wrap; gap: 0.3rem 0.5rem; align-items: baseline; font-family: var(--font-ui);
     border-bottom: 1px solid var(--rule); padding-bottom: 0.25rem;
