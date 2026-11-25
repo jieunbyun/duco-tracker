@@ -24,10 +24,15 @@
     members?: Member[]; // the group, to name contributors
     contributors?: string[]; // this item's contributors now
     tax?: Taxonomy | null; // Planning's categories, to create the project there too
+    ambitions?: { id: string; title: string }[]; // the big goals an item can serve
+    inferred?: string | null; // the ambition its links lead to (what leaving it empty means)
     onsaved: () => void;
     oncancel: () => void;
   };
-  let { node, draft, nodes, links, projects, readings, groupProjects = [], members = [], contributors = [], tax = null, onsaved, oncancel }: Props = $props();
+  let {
+    node, draft, nodes, links, projects, readings, groupProjects = [], members = [], contributors = [], tax = null,
+    ambitions = [], inferred = null, onsaved, oncancel,
+  }: Props = $props();
 
   // "+ Create it in Planning too": a new Planning project from this item, linked to it
   const NEW_PLANNING = "__new__";
@@ -70,7 +75,9 @@
     show_milestones: n0?.show_milestones ?? false,
     group_project_id: n0?.group_project_id ?? "",
     folder_url: n0?.folder_url ?? "",
+    ambition_id: n0?.ambition_id ?? d0.ambition_id ?? "",
   });
+  const ambitionChoices = $derived(ambitions.filter((a) => a.id !== n0?.id));
   // projects and grants can each be a Planning project (a grant: one under Proposals)
   const plannable = $derived(f.kind === "project" || f.kind === "grant");
   // a linked Planning project lends its current name and dates
@@ -152,6 +159,8 @@
         ...(groupProjects.length || n0?.group_project_id ? { group_project_id: f.kind === "project" ? f.group_project_id || null : null } : {}),
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
+      // sent only when it changes, so the rest saves before 0075 is run
+      if ((f.ambition_id || null) !== (n0?.ambition_id ?? null)) fields.ambition_id = f.ambition_id || null;
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
       // a linked project keeps the Planning project's dates in step
       if (p && (startOn !== p.start_on || endOn !== p.end_on)) {
@@ -161,7 +170,8 @@
       if (members.length) await setContributors(id, contrib, had);
       onsaved();
     } catch (e) {
-      error = (e as Error).message;
+      const msg = (e as Error).message;
+      error = /ambition_id/.test(msg) ? "Choosing an ambition needs web/db/0075_pw_ambition.sql run first, in the Supabase SQL editor." : msg;
     } finally {
       busy = false;
     }
@@ -227,6 +237,19 @@
     <input bind:value={f.title} required readonly={!!linkedProject} />
     {#if linkedProject}<span class="synced">Named in Planning; its dates here and in Planning stay in step.</span>{/if}
   </label>
+  {#if f.kind === "goal" ? ambitionChoices.length : ambitions.length}
+    <label class="wide">{f.kind === "goal" ? "Ambition" : "Serves the ambition"}
+      <select bind:value={f.ambition_id}>
+        {#if f.kind === "goal"}
+          <option value="">— none: it is an ambition itself —</option>
+          {#each ambitionChoices as a (a.id)}<option value={a.id}>A step towards “{a.title}”</option>{/each}
+        {:else}
+          <option value="">{inferred ? `— from its links: “${inferred}” —` : "— none yet (or link it towards one) —"}</option>
+          {#each ambitionChoices as a (a.id)}<option value={a.id}>{a.title}</option>{/each}
+        {/if}
+      </select>
+    </label>
+  {/if}
   <label class="wide">OneDrive folder (link)
     <input type="url" bind:value={f.folder_url} placeholder={linkedProject?.folder_url ? "the Planning project's folder" : "https://…sharepoint.com/…"} />
   </label>

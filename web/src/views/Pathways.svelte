@@ -7,6 +7,7 @@
   import {
     LANES, NODE_KINDS, staged, loadPathways, loadMemberMap, loadContributors, saveYears, saveNode, saveLink,
     monthStart, monthEnd, fmtMonth, addMonths, fraction, monthAt, monthsBetween, shiftMonths,
+    isAmbition, ambitionsIn, ambitionMap,
   } from "../lib/pathways";
   import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
   import { today, fmtDay } from "../lib/dates";
@@ -145,6 +146,38 @@
   }
   const visible = $derived(nodes.map(eff).filter((n) => showAll || n.status === "active"));
 
+  // ---- ambitions: the few big goals; each item serves one (chosen, or where its links lead) ----
+  const ambMap = $derived(ambitionMap(nodes, links));
+  const allAmbs = $derived(ambitionsIn(nodes)); // their colours stay put while one is hidden
+  const shownAmbs = $derived(allAmbs.map(eff).filter((a) => visible.some((v) => v.id === a.id)));
+  const AMB_COLOURS = 4;
+  function ambColour(id: string | null): string | null {
+    const i = id ? allAmbs.findIndex((a) => a.id === id) : -1;
+    return i < 0 ? null : i < AMB_COLOURS ? `var(--amb-${i + 1})` : "var(--ink-soft)";
+  }
+  const ambTitle = (id: string) => eff(nodes.find((x) => x.id === id) ?? ({ title: "" } as PwNode)).title;
+  /** What the links alone would make it serve (for the editor: what leaving the choice empty means). */
+  function inferredTitle(n: PwNode): string | null {
+    if (n.kind === "goal") return null;
+    const a = ambitionMap(nodes.map((x) => (x.id === n.id ? { ...x, ambition_id: null } : x)), links).get(n.id)?.amb;
+    return a ? ambTitle(a) : null;
+  }
+
+  // rows by type of work (the lanes), or by ambition (each ambition's lanes under it); and one
+  // ambition brought forward, the rest faded — both remembered on this computer
+  const ROWS_KEY = "pathways.rows", FOCUS_KEY = "pathways.focus";
+  function stored(k: string): string | null {
+    try { return localStorage.getItem(k); } catch { return null; }
+  }
+  function store(k: string, v: string | null) {
+    try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch {}
+  }
+  let rowsBy = $state<"type" | "ambition">(stored(ROWS_KEY) === "ambition" ? "ambition" : "type");
+  const byAmb = $derived(rowsBy === "ambition");
+  function setRows(r: "type" | "ambition") { rowsBy = r; store(ROWS_KEY, r); }
+  let focus = $state<string | null>(stored(FOCUS_KEY)); // an ambition's id, or "none"
+  function setFocus(f: string) { focus = focus === f ? null : f; store(FOCUS_KEY, focus); }
+
   // A goal without dates sits in the goals column at the horizon; with dates it
   // sits on the timeline like anything else (an open-ended one runs to the horizon).
   const inColumn = (n: PwNode) => n.kind === "goal" && !n.start_on && !n.end_on;
@@ -153,7 +186,9 @@
   // ---- dragging (move / stretch / link) -------------------------------------------
   type Drag =
     | { mode: "move" | "resize"; id: string; px: number; py: number; moved: boolean;
-        dated: boolean; start: string; end: string | null; lane: Lane; row: number }
+        dated: boolean; start: string; end: string | null; lane: Lane; row: number;
+        amb?: string | null } // rows by ambition: the ambition it is over
+
     | { mode: "link"; id: string; x: number; y: number };
   let drag = $state<Drag | null>(null);
   let mapEl = $state<HTMLDivElement | null>(null);
@@ -167,26 +202,76 @@
   }
   const drawn = $derived(visible.map(shown));
 
-  const laneRows = $derived(
-    Object.fromEntries(LANES.map((l) => [l.key, Math.max(0, ...drawn.filter((n) => n.lane === l.key).map((n) => n.lane_row)) + 2])),
-  );
-  const laneTop = $derived.by(() => {
-    const out: Record<string, number> = {};
-    let y = AXIS_H;
-    for (const l of LANES) { out[l.key] = y; y += laneRows[l.key] * ROW_H + 2 * PAD; }
-    return out;
-  });
-  const mapH = $derived(LANES.reduce((y, l) => y + laneRows[l.key] * ROW_H + 2 * PAD, AXIS_H) + 8);
+  /** The ambition an item is drawn under: its own, while that ambition is on the map; else none. */
+  function groupOf(n: PwNode): string | null {
+    if (drag && drag.mode !== "link" && drag.id === n.id && drag.moved && drag.amb !== undefined) return drag.amb;
+    const a = ambMap.get(n.id)?.amb ?? null;
+    return a && shownAmbs.some((x) => x.id === a) ? a : null;
+  }
+  const focusOn = $derived(focus === "none" || shownAmbs.some((a) => a.id === focus) ? focus : null);
+  const fadedIds = $derived(new Set(focusOn === null ? [] : drawn.filter((n) => (groupOf(n) ?? "none") !== focusOn).map((n) => n.id)));
 
-  type Box = { x: number; y: number; w: number; open: boolean };
-  function box(n: PwNode): Box {
-    const y = laneTop[n.lane] + PAD + n.lane_row * ROW_H;
-    if (inColumn(n)) return { x: x1 + GAP, y, w: GOAL_W - GOAL_R, open: false };
+  // ---- rows: a band per lane (by type), or per ambition and lane (by ambition) -------------
+  type Span = { x: number; w: number; open: boolean };
+  function span(n: PwNode): Span {
+    if (inColumn(n)) return { x: x1 + GAP, w: GOAL_W - GOAL_R, open: false };
     const s = n.start_on ?? today();
     const e = endOf(n, s);
     const left = xOf(s < from ? from : s);
     const right = xOf(e > to ? to : e);
-    return { x: left, y, w: Math.max(MIN_W, right - left), open: !n.end_on };
+    return { x: left, w: Math.max(MIN_W, right - left), open: !n.end_on };
+  }
+  type Band = { key: string; lane: Lane; amb: string | null; top: number; rows: number };
+  const GROUP_H = 26;
+  const bandKey = (lane: Lane, amb: string | null) => (byAmb ? `${amb ?? "none"}|${lane}` : lane);
+  const layout = $derived.by(() => {
+    const bands: Band[] = [];
+    const heads: { id: string | null; top: number }[] = [];
+    const row = new Map<string, number>();
+    let y = AXIS_H;
+    if (!byAmb) {
+      // your own rows in each lane, with an empty one below to drag into
+      for (const l of LANES) {
+        const rows = Math.max(0, ...drawn.filter((n) => n.lane === l.key).map((n) => n.lane_row)) + 2;
+        bands.push({ key: l.key, lane: l.key, amb: null, top: y, rows });
+        y += rows * ROW_H + 2 * PAD;
+      }
+      for (const n of drawn) row.set(n.id, n.lane_row);
+    } else {
+      // each ambition, then its lanes that hold something, packed by time in the order of your
+      // rows by type (the item being dragged last, so the others stay put)
+      for (const g of [...shownAmbs.map((a) => a.id), null]) {
+        const mine = drawn.filter((n) => groupOf(n) === g);
+        if (!mine.length) continue;
+        heads.push({ id: g, top: y });
+        y += GROUP_H;
+        for (const l of LANES) {
+          const here = mine.filter((n) => n.lane === l.key).sort((a, b) =>
+            Number(drag?.id === a.id) - Number(drag?.id === b.id) || a.lane_row - b.lane_row
+            || (a.start_on ?? "").localeCompare(b.start_on ?? ""));
+          if (!here.length) continue;
+          const taken: Span[][] = [];
+          for (const n of here) {
+            const s = span(n);
+            let r = 0;
+            while ((taken[r] ?? []).some((o) => s.x < o.x + o.w + 24 && o.x < s.x + s.w + 24)) r++; // room for the ○
+            (taken[r] ??= []).push(s);
+            row.set(n.id, r);
+          }
+          bands.push({ key: bandKey(l.key, g), lane: l.key, amb: g, top: y, rows: taken.length });
+          y += taken.length * ROW_H + 2 * PAD;
+        }
+      }
+    }
+    return { bands, heads, row, height: y + 8 };
+  });
+  const bandByKey = $derived(new Map(layout.bands.map((b) => [b.key, b])));
+  const mapH = $derived(layout.height);
+
+  type Box = { x: number; y: number; w: number; open: boolean };
+  function box(n: PwNode): Box {
+    const b = bandByKey.get(bandKey(n.lane, groupOf(n)));
+    return { ...span(n), y: (b?.top ?? AXIS_H) + PAD + (layout.row.get(n.id) ?? 0) * ROW_H };
   }
   const boxes = $derived(new Map(drawn.map((n) => [n.id, box(n)])));
 
@@ -194,10 +279,12 @@
     const r = mapEl!.getBoundingClientRect();
     return { x: ev.clientX - r.left, y: ev.clientY - r.top };
   }
-  function laneAt(y: number): { lane: Lane; row: number } {
-    let lane: Lane = LANES[LANES.length - 1].key;
-    for (const l of LANES) if (y >= laneTop[l.key]) lane = l.key;
-    return { lane, row: Math.max(0, Math.min(laneRows[lane] - 1, Math.floor((y - laneTop[lane] - PAD) / ROW_H))) };
+  /** The band under a point: its lane, its ambition (rows by ambition) and the row in it. */
+  function bandAt(y: number): { lane: Lane; amb: string | null; row: number } {
+    let b = layout.bands[0];
+    for (const x of layout.bands) if (y >= x.top) b = x;
+    if (!b) return { lane: "goals", amb: null, row: 0 };
+    return { lane: b.lane, amb: b.amb, row: Math.max(0, Math.min(b.rows - 1, Math.floor((y - b.top - PAD) / ROW_H))) };
   }
 
   function begin(ev: PointerEvent, n: PwNode, mode: "move" | "resize" | "link") {
@@ -210,7 +297,8 @@
     } else {
       const s = n.start_on ?? today();
       drag = { mode, id: n.id, px: p.x, py: p.y, moved: false, dated: !inColumn(n),
-               start: s, end: n.kind === "goal" ? n.end_on : endOf(n, s), lane: n.lane, row: n.lane_row };
+               start: s, end: n.kind === "goal" ? n.end_on : endOf(n, s), lane: n.lane, row: n.lane_row,
+               amb: byAmb ? groupOf(n) : undefined };
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -274,7 +362,9 @@
       if (end <= s0) end = snapEnd(n, shiftMonths(s0, 1));
       drag = { ...drag, moved: true, end };
     } else {
-      const where = laneAt(p.y);
+      const where = bandAt(p.y);
+      // rows by ambition: over another ambition's band, it goes to that ambition (an ambition stays its own)
+      if (byAmb && !isAmbition(n)) drag = { ...drag, amb: where.amb };
       if (n.kind === "goal" && p.x > x1) {
         // dropped in the goals column: no dates
         drag = { ...drag, moved: true, dated: false, lane: where.lane, row: where.row };
@@ -315,6 +405,14 @@
       if (!d.moved) return openEdit(raw!); // a click
       const fields: Partial<PwNodeFields> = { lane: d.lane, lane_row: d.row };
       Object.assign(fields, d.dated ? { start_on: d.start, end_on: d.end } : { start_on: null, end_on: null });
+      if (d.amb !== undefined) {
+        // rows by ambition place items by time; their row by type stays, unless it is taken there now
+        const kind = !d.dated ? "goal" : n.kind === "goal" ? "project" : n.kind;
+        const e = d.dated ? endOf({ ...n, end_on: d.end }, d.start) : d.start;
+        fields.lane_row = d.lane === n.lane && rowFree(d.lane, kind, d.start, e, n.lane_row, n.id)
+          ? n.lane_row : freeRow(d.lane, kind, d.start, e, [], n.id);
+        if (d.amb !== groupOf(n)) fields.ambition_id = d.amb;
+      }
       // show it where it was dropped straight away; the reload confirms
       nodes = nodes.map((x) => (x.id === n.id ? { ...x, ...fields } as PwNode : x));
       if (n.project_id && n.kind !== "goal") {
@@ -324,8 +422,9 @@
       await saveNode(n.id, fields);
       await load();
     } catch (e) {
-      error = (e as Error).message;
-      await load();
+      const msg = (e as Error).message;
+      await load(); // back as it was (this clears the message, so it is set after)
+      error = /ambition_id/.test(msg) ? "Moving items between ambitions needs web/db/0075_pw_ambition.sql run first, in the Supabase SQL editor." : msg;
     }
   }
 
@@ -429,14 +528,14 @@
   function openEdit(n: PwNode) { panel = { node: n }; }
 
   const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6, grant: 3, award: 3 };
+  /** Whether a row in a lane is free over a span (goals: in the goals column), but for `except`. */
+  function rowFree(lane: Lane, kind: NodeKind, s: string, e: string, row: number, except?: string, also: PwNode[] = []): boolean {
+    return ![...visible, ...also].some((n) => n.id !== except && n.lane === lane && (kind === "goal") === inColumn(n)
+      && n.lane_row === row && (kind === "goal" || ((n.start_on ?? today()) <= e && endOf(n, n.start_on ?? today()) >= s)));
+  }
   /** The first row in a lane free over a span (goals: the first free row in the goals column). */
-  function freeRow(lane: Lane, kind: NodeKind, s: string, e: string, also: PwNode[] = []): number {
-    const inLane = [...visible, ...also].filter((n) => n.lane === lane && (kind === "goal") === inColumn(n));
-    for (let row = 0; ; row++) {
-      const clash = inLane.some((n) => n.lane_row === row && (kind === "goal" ||
-        ((n.start_on ?? today()) <= e && endOf(n, n.start_on ?? today()) >= s)));
-      if (!clash) return row;
-    }
+  function freeRow(lane: Lane, kind: NodeKind, s: string, e: string, also: PwNode[] = [], except?: string): number {
+    for (let row = 0; ; row++) if (rowFree(lane, kind, s, e, row, except, also)) return row;
   }
   function openNew(kind: NodeKind) {
     const lane = (NODE_KINDS.find((k) => k.key === kind)?.lane ?? "goals") as Lane;
@@ -448,6 +547,8 @@
         kind, lane, potential: kind === "project", grant_stage: staged(kind) ? "drafting" : null,
         start_on: kind === "goal" ? null : s, end_on: kind === "goal" ? null : e,
         lane_row: freeRow(lane, kind, s, e),
+        // with an ambition brought forward, a new item serves it
+        ...(focusOn && focusOn !== "none" && kind !== "goal" ? { ambition_id: focusOn } : {}),
       },
     };
   }
@@ -591,6 +692,25 @@
     {/if}
     <label class="toggle"><input type="checkbox" bind:checked={showAll} /> Show done and retired</label>
   </div>
+  {#if view === "map" && shownAmbs.length}
+    <div class="ambs" role="group" aria-label="Ambitions">
+      <span class="muted">Ambitions</span>
+      {#each shownAmbs as a (a.id)}
+        <button class="amb-chip" class:on={focusOn === a.id} aria-pressed={focusOn === a.id} style:--amb={ambColour(a.id)}
+                title={focusOn === a.id ? "Show them all again" : `Bring “${a.title}” forward`} onclick={() => setFocus(a.id)}>{a.title}</button>
+      {/each}
+      {#if drawn.some((n) => groupOf(n) === null)}
+        <button class="amb-chip" class:on={focusOn === "none"} aria-pressed={focusOn === "none"}
+                title="What serves no ambition yet" onclick={() => setFocus("none")}>No ambition yet</button>
+      {/if}
+      <span class="spacer"></span>
+      <div class="years" role="group" aria-label="Rows">
+        <span class="muted">Rows</span>
+        <button class:on={!byAmb} aria-pressed={!byAmb} onclick={() => setRows("type")}>by type</button>
+        <button class:on={byAmb} aria-pressed={byAmb} onclick={() => setRows("ambition")}>by ambition</button>
+      </div>
+    </div>
+  {/if}
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="muted">Loading…</p>{/if}
 
@@ -601,22 +721,28 @@
     {#if member}
       <span class="hint">Your items, and the goals and objectives they lead to.</span>
     {:else}
-      <span class="hint">Drag an item to move it in time or across lanes (hold Shift to keep its dates) · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit</span>
+      <span class="hint">Drag an item to move it in time or across lanes (hold Shift to keep its dates) · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit{byAmb ? " · drag it under another ambition to move it there" : ""}</span>
     {/if}
   </div>
 
   <div class="scroller" bind:clientWidth={width}>
     <div class="map" bind:this={mapEl} style:width={`${mapW}px`} style:height={`${mapH}px`} class:dragging={!!drag}>
-      <!-- lanes -->
-      {#each LANES as l, i (l.key)}
-        <div class="lane lane-{l.key}" class:alt={i % 2 === 1} style:top={`${laneTop[l.key]}px`}
-             style:height={`${laneRows[l.key] * ROW_H + 2 * PAD}px`}>
-          <span class="lane-label">{l.label}</span>
+      <!-- lanes (by ambition: each ambition's lanes, under its heading) -->
+      {#each layout.bands as b, i (b.key)}
+        <div class="lane lane-{b.lane}" class:alt={i % 2 === 1} class:sub={byAmb} style:top={`${b.top}px`}
+             style:height={`${b.rows * ROW_H + 2 * PAD}px`}>
+          <span class="lane-label">{LANES.find((l) => l.key === b.lane)?.label}</span>
         </div>
       {/each}
       <!-- axis -->
       {#each ticks as t (t.x)}
         <div class="tick" class:major={t.major} style:left={`${t.x}px`} style:height={`${mapH - 6}px`}><span>{t.label}</span></div>
+      {/each}
+      {#each layout.heads as h (h.id ?? "none")}
+        <div class="amb-head" class:faded={focusOn !== null && (h.id ?? "none") !== focusOn} style:top={`${h.top}px`}
+             style:height={`${GROUP_H}px`} style:--amb={ambColour(h.id) ?? "var(--ink-soft)"}>
+          <span>{h.id ? ambTitle(h.id) : "No ambition yet"}</span>
+        </div>
       {/each}
       <div class="now" style:left={`${todayX}px`} style:height={`${mapH - 6}px`}><span>now</span></div>
       <div class="goals-head" style:left={`${x1 + GAP}px`} style:width={`${GOAL_W - GOAL_R}px`}>Goals · by {fmtDay(to).replace(/^1 /, "")}</div>
@@ -629,7 +755,7 @@
           </marker>
         </defs>
         {#each drawnLinks as dl (dl.l.id)}
-          <path d={dl.d} class="lk-path" marker-end="url(#arrow)">
+          <path d={dl.d} class="lk-path" class:faded={fadedIds.has(dl.l.from_id) || fadedIds.has(dl.l.to_id)} marker-end="url(#arrow)">
             <title>{nodeTitle(dl.l.from_id)} → {nodeTitle(dl.l.to_id)}</title>
           </path>
         {/each}
@@ -644,6 +770,8 @@
         {@const b = boxes.get(n.id)!}
         <div class="node kind-{n.kind} lane-{n.lane} {staged(n.kind) ? `gs-${n.grant_stage ?? "drafting"}` : ""}" class:potential={n.potential} class:hands-on={n.kind === "project" && n.hands_on} class:open-end={b.open}
              class:inactive={n.status !== "active"} class:moving={drag?.id === n.id}
+             class:faded={fadedIds.has(n.id)} class:ambition={isAmbition(n)} class:has-amb={!!ambColour(groupOf(n))}
+             style:--amb={ambColour(groupOf(n))}
              data-node={n.id} role="button" tabindex="0" title={`${n.title}${n.detail ? `\n${n.detail}` : ""}`}
              style:left={`${b.x}px`} style:top={`${b.y}px`} style:width={`${b.w}px`} style:height={`${NODE_H}px`}
              onpointerdown={(ev) => begin(ev, n, "move")}
@@ -719,6 +847,8 @@
     <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
     {#key panel}
       <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} {tax} members={groupMembers}
+        ambitions={allAmbs.map(eff).filter((a) => a.status === "active" || (panel && "node" in panel && a.id === panel.node?.ambition_id)).map((a) => ({ id: a.id, title: a.title }))}
+        inferred={panel.node ? inferredTitle(panel.node) : null}
         contributors={panel.node ? contributors.get(panel.node.id) ?? [] : []} onsaved={saved} oncancel={() => (panel = null)} />
     {/key}
   {/if}
@@ -733,11 +863,19 @@
     --lane-outreach: var(--series-4);
     --lane-grants: var(--series-3);
     --lk: var(--ink-soft);
+    /* the ambitions, apart from the lanes' colours */
+    --amb-1: #0f766e; --amb-2: #b91c1c; --amb-3: #8a5a00; --amb-4: #475569;
   }
   @media (prefers-color-scheme: dark) {
-    :global(:root:not([data-theme="light"])) .pathways { --lane-publications: #9085e9; --lane-awards: #e06aae; }
+    :global(:root:not([data-theme="light"])) .pathways {
+      --lane-publications: #9085e9; --lane-awards: #e06aae;
+      --amb-1: #2dd4bf; --amb-2: #f87171; --amb-3: #d9a441; --amb-4: #94a3b8;
+    }
   }
-  :global(:root[data-theme="dark"]) .pathways { --lane-publications: #9085e9; --lane-awards: #e06aae; }
+  :global(:root[data-theme="dark"]) .pathways {
+    --lane-publications: #9085e9; --lane-awards: #e06aae;
+    --amb-1: #2dd4bf; --amb-2: #f87171; --amb-3: #d9a441; --amb-4: #94a3b8;
+  }
 
   .views { display: flex; gap: 0.25rem; margin-top: 0.6rem; font-family: var(--font-ui); }
   .views button { font-size: 0.88rem; padding: 0.35rem 0.85rem; }
@@ -766,6 +904,22 @@
   .lane-outreach .lane-label { color: var(--lane-outreach); }
   .lane-publications .lane-label { color: var(--lane-publications); }
   .lane-grants .lane-label { color: var(--lane-grants); }
+  .lane.sub .lane-label { font-size: 0.75rem; font-weight: 500; padding-left: 0.5rem; }
+  /* rows by ambition: each ambition's heading, across the map */
+  .amb-head {
+    position: absolute; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; padding-left: 10px;
+    border-top: 2px solid var(--amb); background: color-mix(in srgb, var(--amb) 12%, var(--paper));
+    font-size: 0.85rem; font-weight: 700; color: var(--amb); white-space: nowrap; overflow: hidden;
+  }
+  .amb-head.faded { opacity: 0.35; }
+  .ambs { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin: 0 0 0.5rem; font-family: var(--font-ui); font-size: 0.82rem; }
+  .ambs .years { align-items: center; }
+  .ambs .years .muted { margin-right: 0.2rem; }
+  .amb-chip {
+    font-size: 0.8rem; padding: 0.2rem 0.6rem; border-radius: 0; border-left: 4px solid var(--amb, var(--ink-soft));
+    max-width: 18rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .amb-chip.on { background: color-mix(in srgb, var(--amb, var(--ink-soft)) 18%, var(--paper)); border-color: var(--amb, var(--ink-soft)); font-weight: 600; }
   .tick { position: absolute; top: 4px; border-left: 1px dotted var(--rule); pointer-events: none; }
   .tick.major { border-left-style: solid; }
   .tick span { position: absolute; left: 4px; top: 0; font-size: 0.72rem; color: var(--ink-soft); white-space: nowrap; }
@@ -778,12 +932,13 @@
   .lk-path { stroke: var(--lk); }
   /* funding is dotted while the grant is undecided, solid once awarded, faint if declined */
   .lk-path.drawing { stroke: var(--accent); stroke-dasharray: 3 3; }
+  .lk-path.faded { opacity: 0.15; }
   .ah { fill: var(--lk); }
 
   .node {
     position: absolute; box-sizing: border-box; display: grid; align-content: center; gap: 1px;
     padding: 0.2rem 1.1rem 0.2rem 0.55rem; background: var(--paper); border: 1px solid var(--rule);
-    border-left: 4px solid var(--lane-goals); border-radius: 6px; cursor: grab; overflow: visible;
+    border-left: 4px solid var(--lane-goals); border-radius: 0; cursor: grab; overflow: visible;
     box-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
   }
   .member .node { cursor: default; }
@@ -803,12 +958,17 @@
   .node.gs-awarded { border-width: 2px; border-left-width: 6px; background: color-mix(in srgb, var(--lane-grants) 10%, var(--paper)); }
   .node.gs-declined { opacity: 0.5; }
   .node.gs-declined .n-title { text-decoration: line-through; }
-  .node.kind-goal { border-radius: 22px; border-width: 2px; border-left-width: 6px; font-weight: 600; }
+  .node.kind-goal { border-width: 2px; border-left-width: 6px; font-weight: 600; }
+  /* the ambition it serves: a bar along the top; an ambition itself takes its colour */
+  .node.has-amb::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--amb); pointer-events: none; }
+  .node.ambition.has-amb { border-left-color: var(--amb); background: color-mix(in srgb, var(--amb) 12%, var(--paper)); }
   .node.kind-objective { background: color-mix(in srgb, var(--panel) 70%, var(--paper)); border-width: 2px; border-left-width: 6px; }
   .node.potential { border-style: dashed; border-left-style: dashed; background: transparent; }
   .node.kind-gap { border-style: dotted; border-left-style: solid; }
   .node.open-end { border-right-style: dashed; }
   .node.inactive { opacity: 0.5; }
+  .node.faded { opacity: 0.18; }
+  .node.faded:hover { opacity: 0.6; }
   .n-title { font-size: 0.8rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .ms-mark { position: absolute; bottom: -8px; font-size: 0.8rem; line-height: 1; color: var(--accent); pointer-events: auto; text-shadow: 0 0 2px var(--paper), 0 0 2px var(--paper); cursor: help; }
   .ms-mark.ms-done { color: var(--ink-soft); opacity: 0.6; }

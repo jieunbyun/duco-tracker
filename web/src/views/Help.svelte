@@ -177,6 +177,13 @@
       kept apart under <em>No longer valid</em> — struck through, with when and why — to bring back with
       <em>Valid again</em>. A new project (or grant) can also be created in Planning from here: choose “+ Create it in Planning too” and a category. Linking an item to a Planning project takes its name and dates, and can show its milestones (◆ at their due dates, read from Planning). An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
+      <em>Ambitions</em>: a goal that serves no other goal is an ambition — keep these to your few big ones. Every
+      other item serves one: choose it in the item's editor (<em>Serves the ambition</em>), or leave it empty and it
+      serves the ambition its links lead to. A goal given an ambition is a step towards it. Each ambition has its
+      colour, shown as a bar along the top of what serves it; click its name above the map to bring it forward and
+      fade the rest (click again for all), and a new item added meanwhile serves it. <em>Rows: by ambition</em> puts
+      each ambition's lanes under its heading (what serves none goes last), laid out by time; there, drag an item
+      under another ambition to move it there. Needs <code>0075_pw_ambition.sql</code>.
       Mark a project <em>hands-on</em> (✋, in its editor or on its row in the List) when your own research time
       goes into it substantially; it stands out on the map, bolder and shaded.
       Dates on Pathways are months: an item runs from the start of its first month to the end of its last

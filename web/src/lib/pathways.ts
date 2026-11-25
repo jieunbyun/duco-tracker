@@ -51,6 +51,7 @@ export type PwNode = {
   group_project_id: string | null; // a member's shared project it stands for
   folder_url: string | null; // its folder on OneDrive
   show_milestones: boolean; // a linked Planning project's milestones, drawn on its bar
+  ambition_id?: string | null; // the ambition (a goal) it serves; empty: where its links lead (0075)
 };
 export type PwNodeFields = Omit<PwNode, "id">;
 // A link is one kind of arrow, from one item to another; its direction says it all.
@@ -62,8 +63,12 @@ const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {
+  const nodesQ = async () => {
+    const r = await supabase.from("pw_node").select(`${NODE_COLS},ambition_id`).order("created_at");
+    return r.error && /ambition_id/.test(r.error.message) ? supabase.from("pw_node").select(NODE_COLS).order("created_at") : r;
+  };
   const [n, l, s] = await Promise.all([
-    supabase.from("pw_node").select(NODE_COLS).order("created_at"),
+    nodesQ(),
     supabase.from("pw_link").select("id,from_id,to_id"),
     supabase.from("user_setting").select("pathway_years").maybeSingle(),
   ]);
@@ -73,6 +78,54 @@ export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]
     links: (l.data ?? []) as PwLink[],
     years: Number(s.data?.pathway_years ?? 5),
   };
+}
+
+// ---- ambitions: the few big goals everything else serves --------------------------------
+/** A goal that serves no other goal is an ambition. */
+export const isAmbition = (n: PwNode) => n.kind === "goal" && !n.ambition_id;
+
+/** The ambitions, in the order they sit in the goals column. */
+export function ambitionsIn(nodes: PwNode[]): PwNode[] {
+  return nodes.filter(isAmbition).sort((a, b) => a.lane_row - b.lane_row);
+}
+
+/**
+ * The ambition each item serves: its own choice (a goal: itself, or the ambition of the goal it
+ * steps towards), else the one ambition its links lead to, following the arrows forward
+ * (inferred). Links that lead to two ambitions, or to none, leave it with none.
+ */
+export function ambitionMap(nodes: PwNode[], links: PwLink[]): Map<string, { amb: string | null; inferred: boolean }> {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const top = (id: string): string | null => {
+    let n = byId.get(id);
+    for (let i = 0; n && i < 20; i++) {
+      if (isAmbition(n)) return n.id;
+      n = n.ambition_id ? byId.get(n.ambition_id) : undefined;
+    }
+    return null;
+  };
+  const chosen = (n: PwNode) => (isAmbition(n) ? n.id : n.ambition_id ? top(n.ambition_id) : null);
+  const next = new Map<string, string[]>();
+  for (const l of links) next.set(l.from_id, [...(next.get(l.from_id) ?? []), l.to_id]);
+  const out = new Map<string, { amb: string | null; inferred: boolean }>();
+  for (const n of nodes) {
+    const c = chosen(n);
+    if (c) { out.set(n.id, { amb: c, inferred: false }); continue; }
+    const found = new Set<string>(), seen = new Set([n.id]);
+    const queue = [...(next.get(n.id) ?? [])];
+    while (queue.length && found.size < 2) {
+      const id = queue.shift()!;
+      if (seen.has(id)) continue;
+      seen.add(id);
+      const m = byId.get(id);
+      if (!m) continue;
+      const a = chosen(m);
+      if (a) found.add(a);
+      else queue.push(...(next.get(id) ?? []));
+    }
+    out.set(n.id, { amb: found.size === 1 ? [...found][0] : null, inferred: found.size === 1 });
+  }
+  return out;
 }
 
 // ---- contributors, and what a member sees ------------------------------------------
