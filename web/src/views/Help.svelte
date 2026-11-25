@@ -50,7 +50,7 @@
       <em>Meetings</em> have a day and clock times (add them by hand, repeat weekly, or import
       invites from an <code>.ics</code> file). <em>To-dos</em> belong to the week and can be planned onto one or
       more days; mark them must-do or flexible. A web address in a to-do's note shows as a short
-      “link”; click the note (or its <em>Edit</em>) to change it. An existing to-do or meeting also takes dated <em>comments</em>, as a Logbook action does: type one in its window and press Enter (it is saved at once, without Save); click one to change or delete it. The list shows 💬 and how many. Once a to-do is on a day it shows on the calendar only, and the list
+      “link”; click the note (or its <em>Edit</em>) to change it. An existing to-do or meeting also takes dated <em>comments</em>, as a Logbook action does: type one in its window and press Enter (it is saved at once, without Save); click one to change or delete it, and drag its ⠿ handle (or press ↑ ↓ on it) to put them in your own order (new ones go on top; needs <code>0073_note_order.sql</code>). The list shows 💬 and how many. Once a to-do is on a day it shows on the calendar only, and the list
       below keeps the ones not yet placed. Once its days are logged it is back on the list (its days marked ✓)
       until you tick it done. <em>✓ Log</em> on a card opens the log form already filled in and
       ties the logged time back to the plan. Unfinished to-dos do not move to the next week by themselves:

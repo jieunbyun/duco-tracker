@@ -1,11 +1,12 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { saveTodo, deleteTodo, saveSlot, loadTodoNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote } from "./data";
+  import { saveTodo, deleteTodo, saveSlot, loadTodoNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote, saveNoteOrder } from "./data";
   import type { Taxonomy, Project, Todo, Slot, TodoFields, IdeaNote } from "./data";
   import { addDays, fmtDay } from "./dates";
   import { undoable } from "./undo.svelte";
   import { LIVE_STATUSES } from "./horizon";
   import Linked from "./Linked.svelte";
+  import Sortable from "./Sortable.svelte";
 
   type Props = {
     todo: Todo | null; // null = new
@@ -191,6 +192,15 @@
     if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); run(); }
     if (ev.key === "Escape" && commentEdit) { ev.preventDefault(); ev.stopPropagation(); commentEdit = null; }
   }
+  async function reorderComments(ids: string[]) {
+    if (!t0) return;
+    const was = new Map(comments.map((c) => [c.id, c.sort_order]));
+    comments = ids.map((id) => comments.find((c) => c.id === id)!); // at once; the reload confirms it
+    const ok = await commentAct(`Reordered the comments on “${t0.title}”`, () => saveNoteOrder(ids, was));
+    if (ok) return;
+    await loadComments(); // back as they were
+    if (/sort_order/.test(error)) error = "Reordering comments needs web/db/0073_note_order.sql run first, in the Supabase SQL editor.";
+  }
   function startCommentEdit(ev: Event, c: IdeaNote) {
     if ((ev.target as HTMLElement).closest("a") || getSelection()?.toString()) return;
     commentEdit = { id: c.id, body: c.body };
@@ -298,9 +308,10 @@
                 placeholder="Add a comment — Enter adds it (saved at once); a web address shows as a short “link”"
                 onkeydown={(ev) => commentKeys(ev, addComment)}></textarea>
       {#if comments.length}
-        <ul>
-          {#each comments as c (c.id)}
-            <li>
+        <div class="comment-list">
+          <Sortable items={comments} onreorder={reorderComments} disabled={commentBusy || !!commentEdit}>
+          {#snippet row(c)}
+            <div class="comment">
               <span class="when">{fmtDay(c.created_at.slice(0, 10))}</span>
               {#if commentEdit?.id === c.id}
                 <span class="comment-edit">
@@ -317,9 +328,10 @@
                       onclick={(ev) => startCommentEdit(ev, c)}
                       onkeydown={(ev) => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); startCommentEdit(ev, c); } }}><Linked text={c.body} /></span>
               {/if}
-            </li>
-          {/each}
-        </ul>
+            </div>
+          {/snippet}
+          </Sortable>
+        </div>
       {/if}
     </div>
   {/if}
@@ -354,8 +366,8 @@
   .mini { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
   .comments { display: grid; gap: 0.35rem; font-size: 0.82rem; color: var(--ink-soft); }
   .comments .count { font-size: 0.75rem; }
-  .comments ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; max-height: 14rem; overflow-y: auto; }
-  .comments li { display: flex; gap: 0.6rem; align-items: baseline; }
+  .comment-list { max-height: 14rem; overflow-y: auto; }
+  .comment { display: flex; gap: 0.6rem; align-items: baseline; padding: 0.1rem 0; }
   .comments .when { flex: none; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
   .comment-edit { flex: 1; display: grid; gap: 0.3rem; }
   .comment-actions { display: flex; gap: 0.35rem; }

@@ -382,18 +382,29 @@ export async function loadIdeas(): Promise<Todo[]> {
 }
 
 /** A note on an idea: an idea gathers several, dated, as the thought develops (0044). */
-export type IdeaNote = { id: string; todo_id: string; body: string; created_at: string };
+export type IdeaNote = { id: string; todo_id: string; body: string; created_at: string; sort_order?: number | null };
 /** All your ideas' notes, oldest first — none until 0044 is run. */
 export async function loadIdeaNotes(): Promise<IdeaNote[]> {
   const { data, error } = await supabase.from("idea_note").select("id,todo_id,body,created_at").order("created_at");
   return error ? [] : (data as IdeaNote[]);
 }
-/** A to-do's comments (kept as its notes, as an idea's), newest first. */
+/**
+ * A to-do's comments (kept as its notes, as an idea's): in the order you dragged them into
+ * (0073_note_order.sql), a new one on top; newest first until then.
+ */
 export async function loadTodoNotes(todo_id: string): Promise<IdeaNote[]> {
-  const { data, error } = await supabase.from("idea_note").select("id,todo_id,body,created_at")
-    .eq("todo_id", todo_id).order("created_at", { ascending: false });
-  if (error) throw new Error(error.message);
-  return data as IdeaNote[];
+  const q = (cols: string) => supabase.from("idea_note").select(cols).eq("todo_id", todo_id);
+  let r = await q("id,todo_id,body,created_at,sort_order")
+    .order("sort_order", { ascending: true, nullsFirst: true }).order("created_at", { ascending: false });
+  if (r.error && /sort_order/.test(r.error.message)) r = await q("id,todo_id,body,created_at").order("created_at", { ascending: false });
+  if (r.error) throw new Error(r.error.message);
+  return r.data as unknown as IdeaNote[];
+}
+/** Store comments' order as 10, 20, 30…, changing only those that moved. */
+export async function saveNoteOrder(ids: string[], was: Map<string, number | null | undefined>): Promise<void> {
+  for (const [i, id] of ids.entries()) {
+    if (was.get(id) !== (i + 1) * 10) await check(supabase.from("idea_note").update({ sort_order: (i + 1) * 10 }).eq("id", id));
+  }
 }
 export async function addIdeaNote(todo_id: string, body: string): Promise<void> {
   await check(supabase.from("idea_note").insert({ todo_id, body }));
