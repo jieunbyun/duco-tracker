@@ -7,6 +7,10 @@ export type Tidy = {
   id: string; day: string; title: string; is_done: boolean; sort_order: number | null; created_at: string;
   link?: string | null; // absent until 0063 is run
   is_tidy?: boolean; // a tidy-up; absent until 0066 is run
+  // one date of a repeating series (0071_tidy_repeat.sql, lib/repeat.ts); absent until 0071 is run
+  repeat_id?: string | null;
+  repeat_on?: string | null; // the date it is for, kept when it is moved
+  skipped?: boolean; // deleted from its series: hidden, and not made again
 };
 
 
@@ -24,7 +28,7 @@ export async function loadTidies(from: string, to: string): Promise<Tidy[] | nul
 export async function addTidy(day: string, title: string, sort_order: number): Promise<void> {
   await check(supabase.from("tidy").insert({ day, title, sort_order }));
 }
-export async function saveTidy(id: string, fields: Partial<Pick<Tidy, "day" | "title" | "is_done" | "sort_order" | "link" | "is_tidy">>): Promise<void> {
+export async function saveTidy(id: string, fields: Partial<Pick<Tidy, "day" | "title" | "is_done" | "sort_order" | "link" | "is_tidy" | "repeat_id" | "repeat_on" | "skipped">>): Promise<void> {
   await check(supabase.from("tidy").update(fields).eq("id", id));
 }
 export async function deleteTidy(id: string): Promise<void> {

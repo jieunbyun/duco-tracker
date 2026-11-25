@@ -71,6 +71,14 @@
       task as a tidy-up, shown in green (tick it again to undo). Drag a task's ⠿ handle (or press ↑ ↓ on it) to
       reorder a day's tasks. A long one wraps to two lines (hover for all
       of it). They are never counted as planned or logged time.
+      <em>↻ Repeat…</em> in a task's menu makes it repeat from its day: every month on that date, every year on it, or
+      every year on its date in the (Korean) lunar calendar — the dialog shows the next few. Each date then appears as an
+      ordinary small task, marked ↻, when you first look at its week or month; tick, move, rename or delete it on its
+      own (deleting one leaves the series going). A day a month lacks goes on its last: the 31st on the 30th, 29 February
+      on the 28th, a lunar 30th on the 29th; a lunar date keeps to the regular month, not a leap month.
+      <em>Stop repeating after this one</em>, in the menu of any task of a series, ends it there; <em>Stop</em> in
+      <em>↻ Repeating</em>, beside the Week / Month switch, ends it today. Either way the tasks before stay, and later
+      ones not yet ticked are taken off.
       <em>Month · small tasks</em>, above the days, swaps the week for a month of them alone — ‹ › for other months,
       each day's list scrolling in its box, and all of them working as in the week; on a phone the month is a list of
       its days, opened at today. <em>Week</em> brings the days back; the choice is remembered in this browser.

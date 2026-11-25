@@ -27,6 +27,8 @@
   import BackLink from "../lib/BackLink.svelte";
   import { tick } from "svelte";
   import type { Tidy } from "../lib/tidy";
+  import { loadRepeats, startRepeat, stopRepeat, fillRepeats, nextDates, describe as describeRepeat, waysFrom, fmtShort } from "../lib/repeat";
+  import type { Repeat, Every } from "../lib/repeat";
 
   const SHOW_LOGGED = "week.showLogged";
   const MS_PICKS = "week.msPicks"; // + From milestones as you last left it (this browser)
@@ -130,14 +132,24 @@
     const [from, to] = [start, end];
     loading = true;
     try {
-      const [plan, logged, p, review, thoughts, thoughtNotes, tidyUps] = await Promise.all([
+      const [tFrom, tTo] = monthView ? [gridFrom, gridTo] : [from, to];
+      const [plan, logged, p, review, thoughts, thoughtNotes, tidyUps, series] = await Promise.all([
         loadWeekPlan(from, to), loadEntriesBetween(from, to), loadProjects(), loadUnreviewed(), loadIdeas(), loadIdeaNotes(),
         // small tasks must never keep the week from opening; the month view takes the month's
-        loadTidies(monthView ? gridFrom : from, monthView ? gridTo : to).catch(() => null),
+        loadTidies(tFrom, tTo).catch(() => null),
+        loadRepeats().catch(() => null),
       ]);
       if (id !== request) return;
-      tidyMissing = tidyUps === null;
-      tidies = tidyUps ?? [];
+      // the repeating ones due on these days and not made yet: made now, quietly (not an undo of yours)
+      let small = tidyUps;
+      if (small && series?.length) {
+        const made = await quietly(() => fillRepeats(series, tFrom, tTo, small!)).catch(() => 0);
+        if (made) small = await loadTidies(tFrom, tTo).catch(() => small);
+        if (id !== request) return;
+      }
+      repeats = series;
+      tidyMissing = small === null;
+      tidies = (small ?? []).filter((t) => !t.skipped); // one deleted from its series stays hidden
       projects = p;
       inbox = review;
       ideas = thoughts;
@@ -610,6 +622,8 @@
   // any date), renamed or deleted from its menu. Never counted as planned or logged time.
   let tidies = $state<Tidy[]>([]);
   let tidyMissing = $state(false); // until 0058 is run
+  let repeats = $state<Repeat[] | null>(null); // repeating small tasks; null until 0071 is run
+  const repeatOf = (t: Tidy) => (t.repeat_id ? repeats?.find((r) => r.id === t.repeat_id) : undefined);
   let tidyDraft = $state<Record<string, string>>({});
   let tidyEdit = $state<{ id: string; title: string } | null>(null);
   let tidyMenu = $state<{ t: Tidy; x: number; y: number } | null>(null);
@@ -733,7 +747,20 @@
     await change(`Renamed small task ${q(t)}`, () => saveTidy(t.id, { title }));
   }
   function removeTidy(t: Tidy) {
+    // one of a series: hidden, so it is not made again; the series goes on
+    if (t.repeat_id) return change(`Deleted ${q(t)} on ${fmtDay(t.day)} (the series goes on)`, () => saveTidy(t.id, { skipped: true }));
     return change(`Deleted small task ${q(t)}`, () => deleteTidy(t.id)); // Undo brings it back
+  }
+
+  // ---- repeating small tasks (lib/repeat.ts) ----------------------------------------
+  let repeatWay = $state<Every>("year");
+  async function makeRepeat(t: Tidy, way: { every: Every; month: number | null; day: number }) {
+    const ok = await change(`${q(t)} repeats ${describeRepeat(way)}`, () => startRepeat(t, way));
+    if (!ok && /repeat/i.test(error)) error = "Repeating small tasks need web/db/0071_tidy_repeat.sql run first, in the Supabase SQL editor.";
+  }
+  /** Stop a series after a day: its tasks up to then stay; later ones not ticked go. */
+  function endRepeat(r: Repeat, after: string) {
+    return change(`Stopped repeating ${q(r)} after ${fmtDay(after)}`, () => stopRepeat(r.id, after));
   }
   // a link on a small task: any web address (an email in Outlook on the web, a document, a form…)
   let linkDraft = $state("");
@@ -749,6 +776,17 @@
     tidyMenu = { t, ...menuAt(ev) };
   }
   function tidyItems(t: Tidy): Item[] {
+    const r = repeatOf(t);
+    const repeating: Item[] = r
+      ? [
+          { label: `↻ Repeats ${describeRepeat(r)}`, run: () => (panel = { kind: "repeats" }) },
+          ...(!r.until || r.until > (t.repeat_on ?? t.day)
+            ? [{ label: "Stop repeating after this one", run: () => endRepeat(r, t.repeat_on ?? t.day) }]
+            : []),
+        ]
+      : repeats
+        ? [{ label: "↻ Repeat…", run: () => { repeatWay = "year"; panel = { kind: "repeat", tidy: t }; } }]
+        : [];
     return [
       { label: "‹ Move to the day before", run: () => moveTidy(t, addDays(t.day, -1)) },
       { label: "Move to the day after ›", run: () => moveTidy(t, addDays(t.day, 1)) },
@@ -757,7 +795,8 @@
       { label: "Rename", run: () => (tidyEdit = { id: t.id, title: t.title }) },
       { label: t.link ? "Change link…" : "Add link…", run: () => { linkDraft = t.link ?? ""; panel = { kind: "tidyLink", tidy: t }; } },
       ...(t.link ? [{ label: "Remove link", run: () => setTidyLink(t, null) }] : []),
-      { label: "Delete", run: () => removeTidy(t), danger: true },
+      ...repeating,
+      { label: r ? "Delete this one" : "Delete", run: () => removeTidy(t), danger: true },
     ];
   }
   function focusSelect(node: HTMLInputElement) {
@@ -774,7 +813,7 @@
   type Item = { label: string; run?: () => unknown; danger?: boolean; go?: Sub | "main" };
   let menu = $state<Menu | null>(null);
   const MENU_W = 220;
-  const MENU_H = 290;
+  const MENU_H = 340; // a small task's menu, with its repeat items, is the tallest
 
   /** Where a menu opens: at the pointer for a right-click, under the thing clicked otherwise. */
   function menuAt(ev: MouseEvent): { x: number; y: number } {
@@ -921,6 +960,8 @@
     | { kind: "moveTo"; todo: Todo; slot: Slot }
     | { kind: "tidyMove"; tidy: Tidy }
     | { kind: "tidyLink"; tidy: Tidy }
+    | { kind: "repeat"; tidy: Tidy }
+    | { kind: "repeats" }
     | { kind: "email" }
     | { kind: "forward" }
     | { kind: "outlook" }
@@ -1755,6 +1796,10 @@
       <button class:on={!monthView} aria-pressed={!monthView} onclick={() => setMonthView(false)}>Week</button>
       <button class:on={monthView} aria-pressed={monthView} onclick={() => setMonthView(true)}>Month · small tasks</button>
     </div>
+    {#if repeats}
+      <button class="repeat-open" title="Small tasks that repeat: every month, every year, or by the lunar calendar"
+              onclick={() => (panel = { kind: "repeats" })}>↻ Repeating{repeats.length ? ` (${repeats.filter((r) => !r.until || r.until >= today()).length})` : ""}</button>
+    {/if}
   {/if}
   {#if monthView && !tidyMissing}
     {@render monthGrid()}
@@ -2102,6 +2147,10 @@
         {:else}
           <button class="tidy-title" aria-haspopup="menu" title={t.title}
                   onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
+          {#if t.repeat_id}
+            {@const r = repeatOf(t)}
+            <span class="tidy-repeat" title={r ? `Repeats ${describeRepeat(r)}` : "Repeats"} aria-label="Repeats">↻</span>
+          {/if}
           {#if t.link}
             <a class="tidy-link" href={t.link} target="_blank" rel="noopener noreferrer" title={`Open ${t.link}`}
                aria-label={`Open the link for “${t.title}”`}>🔗</a>
@@ -2307,6 +2356,61 @@
           <button type="button" onclick={() => (panel = null)}>Cancel</button>
         </div>
       </form>
+    {:else if panel.kind === "repeat"}
+      {@const rt = panel.tidy}
+      {@const ways = waysFrom(rt.day)}
+      {@const way = ways.find((w) => w.every === repeatWay) ?? ways[0]}
+      <h2>Repeat “{rt.title}”</h2>
+      <form class="move-to" onsubmit={(ev) => { ev.preventDefault(); const t = rt, w = way; panel = null; makeRepeat(t, w); }}>
+        <fieldset class="repeat-ways">
+          <legend class="muted small">From {fmtDay(rt.day)}, a small task like this one</legend>
+          {#each ways as w (w.every)}
+            <label><input type="radio" name="repeat-way" value={w.every} bind:group={repeatWay} /> {describeRepeat(w)}</label>
+          {/each}
+        </fieldset>
+        <p class="muted small">
+          {#if way.note}{way.note} {/if}Next: {nextDates(way, rt.day, 3).map(fmtShort).join(" · ")}.
+          Each is made as an ordinary small task — tick, move, rename or delete it on its own; deleting one leaves the series
+          going. To stop the series, use the task's menu or <em>↻ Repeating</em>; what has come before stays.
+        </p>
+        <div class="pick-actions">
+          <button class="primary" type="submit">Repeat</button>
+          <button type="button" onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </form>
+    {:else if panel.kind === "repeats"}
+      {@const all = repeats ?? []}
+      {@const going = all.filter((r) => !r.until || r.until >= today())}
+      {@const stopped = all.filter((r) => r.until && r.until < today())}
+      <h2>Repeating small tasks</h2>
+      {#if !all.length}
+        <p class="muted small">None yet. To make one, click a small task and choose <em>↻ Repeat…</em>.</p>
+      {/if}
+      {#if going.length}
+        <ul class="repeat-list">
+          {#each going as r (r.id)}
+            {@const next = nextDates(r, addDays(today(), -1), 1)[0]}
+            <li>
+              <span class="r-main"><strong>{r.title}</strong>
+                <span class="muted small">{describeRepeat(r)} · {next ? `next ${fmtShort(next)}` : "no more to come"}{r.until ? ` · stops after ${fmtShort(r.until)}` : ""}</span></span>
+              {#if !r.until}
+                <button type="button" class="danger" title="Its small tasks up to today stay; later ones not ticked go"
+                        onclick={() => endRepeat(r, today())}>Stop</button>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
+      {#if stopped.length}
+        <h3 class="muted small">Stopped</h3>
+        <ul class="repeat-list stopped">
+          {#each stopped as r (r.id)}
+            <li><span class="r-main">{r.title} <span class="muted small">{describeRepeat(r)} · last {fmtShort(r.until!)}</span></span></li>
+          {/each}
+        </ul>
+      {/if}
+      <p class="muted small">Stopping keeps the small tasks up to today; later ones not yet ticked are taken off.</p>
+      <div class="pick-actions"><button type="button" onclick={() => (panel = null)}>Close</button></div>
     {:else if panel.kind === "outlook"}
       <h2>Outlook calendar</h2>
       <OutlookSettings oncancel={() => (panel = null)}
@@ -2696,6 +2800,17 @@
   .cal-switch { display: inline-flex; margin: 0 0 0.6rem; border: 1px solid var(--rule); border-radius: var(--radius); overflow: hidden; font-family: var(--font-ui); }
   .cal-switch button { border: none; border-radius: 0; background: none; padding: 0.3rem 0.8rem; font-size: 0.82rem; color: var(--ink-soft); }
   .cal-switch button.on { background: var(--accent); color: var(--accent-ink); }
+  /* repeating small tasks: the list's button, the ↻ on a task of a series, the dialogs */
+  .repeat-open { margin: 0 0 0.6rem 0.5rem; padding: 0.3rem 0.7rem; font-family: var(--font-ui); font-size: 0.82rem; vertical-align: top; }
+  .tidy-repeat { flex-shrink: 0; font-size: 0.72rem; line-height: 1.5; color: var(--ink-soft); }
+  .repeat-ways { display: grid; gap: 0.35rem; margin: 0; padding: 0; border: none; }
+  .repeat-ways label { display: flex; gap: 0.45rem; align-items: center; font-weight: normal; }
+  .repeat-ways input { width: auto; margin: 0; }
+  .repeat-list { list-style: none; margin: 0.4rem 0 0.8rem; padding: 0; display: grid; gap: 0.4rem; }
+  .repeat-list li { display: flex; gap: 0.6rem; align-items: center; justify-content: space-between;
+    padding-bottom: 0.4rem; border-bottom: 1px solid var(--rule); }
+  .repeat-list .r-main { display: grid; gap: 0.1rem; min-width: 0; }
+  .repeat-list.stopped li { color: var(--ink-soft); }
   .month-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.5rem; }
   .month .month-nav h2 { margin: 0; font-size: 1.1rem; min-width: 9.5rem; text-align: center; }
   .month-nav button:not(.link) { padding: 0.25rem 0.7rem; }
