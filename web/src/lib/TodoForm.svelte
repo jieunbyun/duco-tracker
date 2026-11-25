@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { saveTodo, deleteTodo, saveSlot, saveMilestone, loadTodoNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote, saveNoteOrder } from "./data";
+  import { saveTodo, deleteTodo, saveSlot, saveProject, saveMilestone, loadTodoNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote, saveNoteOrder } from "./data";
   import type { Taxonomy, Project, Todo, Slot, TodoFields, IdeaNote } from "./data";
   import { addDays, fmtDay } from "./dates";
   import { undoable } from "./undo.svelte";
@@ -34,10 +34,15 @@
   let project_id = $state(t0?.project_id ?? "");
   let projectSearch = $state("");
   let milestone_id = $state(t0?.milestone_id ?? "");
-  // "+ New milestone…" in the menu: named here, made on the project when the to-do is saved
+  // "+ New project…" / "+ New milestone…" in the menus: named here, made when the to-do is saved
+  // (a to-do on no project stays on Week alone; one on a project is reached from the Logbook)
+  const NEW_PROJECT = "__new_project__";
   const NEW_MILESTONE = "__new__";
+  let newProject = $state("");
   let newMilestone = $state({ title: "", due_on: "" });
-  let madeMilestone: { project: string; title: string; id: string } | null = null; // a retry after a failed save reuses it
+  // a retry after a failed save reuses what was already made
+  let madeProject: { title: string; category: string; id: string } | null = null;
+  let madeMilestone: { project: string; title: string; id: string } | null = null;
   let est = $state<number | null>(t0?.est_hours ?? null);
   let must = $state(t0?.must_this_week ?? false);
   let core = $state(t0?.is_core ?? false);
@@ -89,13 +94,18 @@
 
   function onCategory() {
     projectSearch = "";
-    if (project_id && !projectOptions.some((p) => p.id === project_id)) project_id = "";
+    if (project_id && project_id !== NEW_PROJECT && !projectOptions.some((p) => p.id === project_id)) project_id = "";
     milestone_id = "";
   }
   function onProject() {
     // a project carries its own category
     if (project) category_id = project.category_id;
     milestone_id = "";
+  }
+  // picking a milestone works as + From milestones does: an empty title becomes the milestone's
+  function onMilestone() {
+    const m = milestoneOptions.find((x) => x.id === milestone_id);
+    if (m && !title.trim()) title = m.title;
   }
 
   const hours = (a: string, b: string) => {
@@ -108,21 +118,36 @@
     event.preventDefault();
     if (!title.trim()) return (error = "Give it a title.");
     if (kind === "meeting" && !(start && end && end > start)) return (error = "The meeting must end after it starts.");
+    if (project_id === NEW_PROJECT && !newProject.trim()) return (error = "Name the new project.");
+    if (project_id === NEW_PROJECT && !category_id) return (error = "Choose a category for the new project.");
     if (milestone_id === NEW_MILESTONE && !newMilestone.title.trim()) return (error = "Name the new milestone.");
     busy = true;
     error = "";
     const created: string[] = [];
     try {
-      let milestone = milestone_id || null;
-      if (milestone_id === NEW_MILESTONE && project) {
-        const name = newMilestone.title.trim();
-        if (madeMilestone?.project !== project.id || madeMilestone.title !== name) {
-          const id = await saveMilestone(null, {
-            project_id: project.id, title: name, status: "active", start_on: null,
-            due_on: newMilestone.due_on || null, planned_hours: null, hard_deadline: false,
-            sort_order: (Math.max(0, ...project.milestone.map((m) => m.sort_order)) + 10), notes: null,
+      let proj = project_id || null;
+      if (project_id === NEW_PROJECT) {
+        const name = newProject.trim();
+        if (madeProject?.title !== name || madeProject.category !== category_id) {
+          const id = await saveProject(null, {
+            name, category_id, status: "active", start_on: null, end_on: null, planned_hours: null,
+            is_important: false, notes: null, folder_url: null,
           });
-          madeMilestone = { project: project.id, title: name, id };
+          madeProject = { title: name, category: category_id, id };
+          madeMilestone = null;
+        }
+        proj = madeProject!.id;
+      }
+      let milestone = milestone_id || null;
+      if (milestone_id === NEW_MILESTONE && proj) {
+        const name = newMilestone.title.trim();
+        if (madeMilestone?.project !== proj || madeMilestone.title !== name) {
+          const id = await saveMilestone(null, {
+            project_id: proj, title: name, status: "active", start_on: null,
+            due_on: newMilestone.due_on || null, planned_hours: null, hard_deadline: false,
+            sort_order: (Math.max(0, ...(project?.milestone ?? []).map((m) => m.sort_order)) + 10), notes: null,
+          });
+          madeMilestone = { project: proj, title: name, id };
         }
         milestone = madeMilestone!.id;
       }
@@ -130,7 +155,7 @@
         kind,
         title: title.trim(),
         category_id: category_id || null,
-        project_id: project_id || null,
+        project_id: proj,
         milestone_id: milestone,
         is_core: core,
         note: note.trim() || null,
@@ -276,23 +301,27 @@
   <label>
     Project
     <select bind:value={project_id} onchange={onProject}>
-      <option value="">— none —</option>
+      <option value="">— none (on Week only) —</option>
       {#each projectOptions as p (p.id)}<option value={p.id}>{p.name}</option>{/each}
+      <option value={NEW_PROJECT}>+ New project…</option>
     </select>
     {#if projectSearch.trim() && !projectMatches.length}<span class="project-empty">No matching projects</span>{/if}
   </label>
+  {#if project_id === NEW_PROJECT}
+    <label>New project <input bind:value={newProject} placeholder="its name, in Planning" /></label>
+  {/if}
   {#if categoryNote}<p class="hint">{categoryNote}</p>{/if}
   {#if project_id}
     <label>
       Milestone
-      <select bind:value={milestone_id}>
+      <select bind:value={milestone_id} onchange={onMilestone}>
         <option value="">— none —</option>
         {#each milestoneOptions as m (m.id)}<option value={m.id}>{m.title}</option>{/each}
         <option value={NEW_MILESTONE}>+ New milestone…</option>
       </select>
     </label>
     {#if milestone_id === NEW_MILESTONE}
-      <label>New milestone <input bind:value={newMilestone.title} placeholder="its name, on {project?.name}" /></label>
+      <label>New milestone <input bind:value={newMilestone.title} placeholder="its name, on {project?.name ?? (newProject.trim() || 'the new project')}" /></label>
       <label>Milestone due <input type="date" bind:value={newMilestone.due_on} /></label>
     {/if}
   {/if}
