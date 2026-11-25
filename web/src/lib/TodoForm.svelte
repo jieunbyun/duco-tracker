@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { saveTodo, deleteTodo, saveSlot, loadTodoNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote, saveNoteOrder } from "./data";
+  import { saveTodo, deleteTodo, saveSlot, saveMilestone, loadTodoNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote, saveNoteOrder } from "./data";
   import type { Taxonomy, Project, Todo, Slot, TodoFields, IdeaNote } from "./data";
   import { addDays, fmtDay } from "./dates";
   import { undoable } from "./undo.svelte";
@@ -34,6 +34,10 @@
   let project_id = $state(t0?.project_id ?? "");
   let projectSearch = $state("");
   let milestone_id = $state(t0?.milestone_id ?? "");
+  // "+ New milestone…" in the menu: named here, made on the project when the to-do is saved
+  const NEW_MILESTONE = "__new__";
+  let newMilestone = $state({ title: "", due_on: "" });
+  let madeMilestone: { project: string; title: string; id: string } | null = null; // a retry after a failed save reuses it
   let est = $state<number | null>(t0?.est_hours ?? null);
   let must = $state(t0?.must_this_week ?? false);
   let core = $state(t0?.is_core ?? false);
@@ -104,16 +108,30 @@
     event.preventDefault();
     if (!title.trim()) return (error = "Give it a title.");
     if (kind === "meeting" && !(start && end && end > start)) return (error = "The meeting must end after it starts.");
+    if (milestone_id === NEW_MILESTONE && !newMilestone.title.trim()) return (error = "Name the new milestone.");
     busy = true;
     error = "";
     const created: string[] = [];
     try {
+      let milestone = milestone_id || null;
+      if (milestone_id === NEW_MILESTONE && project) {
+        const name = newMilestone.title.trim();
+        if (madeMilestone?.project !== project.id || madeMilestone.title !== name) {
+          const id = await saveMilestone(null, {
+            project_id: project.id, title: name, status: "active", start_on: null,
+            due_on: newMilestone.due_on || null, planned_hours: null, hard_deadline: false,
+            sort_order: (Math.max(0, ...project.milestone.map((m) => m.sort_order)) + 10), notes: null,
+          });
+          madeMilestone = { project: project.id, title: name, id };
+        }
+        milestone = madeMilestone!.id;
+      }
       const base: Partial<TodoFields> = {
         kind,
         title: title.trim(),
         category_id: category_id || null,
         project_id: project_id || null,
-        milestone_id: milestone_id || null,
+        milestone_id: milestone,
         is_core: core,
         note: note.trim() || null,
       };
@@ -270,8 +288,13 @@
       <select bind:value={milestone_id}>
         <option value="">— none —</option>
         {#each milestoneOptions as m (m.id)}<option value={m.id}>{m.title}</option>{/each}
+        <option value={NEW_MILESTONE}>+ New milestone…</option>
       </select>
     </label>
+    {#if milestone_id === NEW_MILESTONE}
+      <label>New milestone <input bind:value={newMilestone.title} placeholder="its name, on {project?.name}" /></label>
+      <label>Milestone due <input type="date" bind:value={newMilestone.due_on} /></label>
+    {/if}
   {/if}
 
   {#if kind === "task"}
