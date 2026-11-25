@@ -185,7 +185,8 @@
       each ambition's lanes under its heading (what serves none goes last), laid out by time; there, drag an item
       under another ambition to move it there, and drag an ambition's heading by its ⠿ (or press ↑ ↓ on it) to put
       the ambitions in your order (<code>0078_pw_ambition_order.sql</code>; each keeps its colour). Needs <code>0075_pw_ambition.sql</code>.
-      Clicking an item opens it at the side, the map still in sight, with up to three tabs: <em>On the map</em> (the
+      Clicking an item opens it at the side, the map still in sight (<em>Logbook ›</em> at its top, for one with a
+      project, shows that project's actions in the Logbook), with up to three tabs: <em>On the map</em> (the
       item itself), <em>In Planning</em> for one linked to a Planning project (the project's details and its milestones,
       as in Planning — saving there updates the map) and <em>Experiments</em>: the topics and subtopics from Experiments
       on it. Link one already there with <em>+ Existing…</em> (find it by its title or notes), or start one with

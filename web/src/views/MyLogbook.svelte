@@ -87,15 +87,21 @@
   }
   load().then(arrive);
 
-  // #/logbook?p=<Planning project>&m=<milestone>&w=<week> (Open in Logbook, on a Week card):
-  // that project, its milestone brought into view and lit up for a moment
+  // #/logbook?p=<Planning project>&m=<milestone>&w=<week> (Open in Logbook, on a Week card, or an
+  // item on Pathways): that project, its milestone brought into view and lit up for a moment;
+  // ?g=<shared project> (a member's project on Pathways): that one
   let target = $state<string | null>(null);
   let backToWeek = $state<string | null>(null);
   async function arrive() {
     const params = new URLSearchParams(location.hash.split("?")[1] ?? "");
     const p = params.get("p");
-    if (!p) return;
+    const g = params.get("g");
+    if (!p && !g) return;
     history.replaceState(null, "", "#/logbook");
+    if (!p) {
+      if (!preview.as) show = g!;
+      return;
+    }
     const w = params.get("w");
     if (w) backToWeek = `#/week?w=${w}`;
     if (preview.as) return;

@@ -1162,6 +1162,11 @@
   {:else if panel && "node" in panel}
     <div class="sheet-head">
       <h2>{cur ? cur.title : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
+      {#if cur && (cur.project_id || cur.group_project_id)}
+        <!-- its project's actions (at the milestone, for a milestone's item) -->
+        <a class="sheet-link" title="Its project's actions in the Logbook"
+           href={cur.project_id ? `#/logbook?p=${cur.project_id}${cur.milestone_id ? `&m=${cur.milestone_id}` : ""}` : `#/logbook?g=${cur.group_project_id}`}>Logbook ›</a>
+      {/if}
       <button type="button" class="x" aria-label="Close" onclick={() => (panel = null)}>✕</button>
     </div>
     {#if cur && (curProject || expLinks)}
@@ -1343,6 +1348,7 @@
   dialog.sheet::backdrop { background: rgb(0 0 0 / 0.12); }
   .sheet-head { display: flex; align-items: flex-start; gap: 0.6rem; }
   .sheet-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sheet-link { font-family: var(--font-ui); font-size: 0.82rem; white-space: nowrap; padding-top: 0.3rem; }
   .sheet-head .x { background: none; border: none; font-size: 1rem; padding: 0.1rem 0.4rem; color: var(--ink-soft); }
   .sheet-tabs { display: flex; gap: 0.25rem; margin: -0.3rem 0 0.9rem; font-family: var(--font-ui); border-bottom: 1px solid var(--rule); }
   .sheet-tabs button {
