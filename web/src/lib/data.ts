@@ -218,6 +218,10 @@ export async function saveMilestoneOrder(ids: string[], before: Map<string, numb
     if (before.get(id) !== order) await check(supabase.from("milestone").update({ sort_order: order }).eq("id", id));
   }
 }
+/** A milestone's own dates (either or both), as moved on Pathways. */
+export async function setMilestoneDates(id: string, dates: { start_on?: string | null; due_on?: string | null }): Promise<void> {
+  await check(supabase.from("milestone").update(dates).eq("id", id));
+}
 export async function setMilestoneStatus(id: string, status: string): Promise<void> {
   await check(supabase.from("milestone").update({ status }).eq("id", id));
 }

@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { loadProjects, loadTaxonomy, setProjectDates, loadAllHours } from "../lib/data";
-  import type { Project, Taxonomy, HourRow } from "../lib/data";
+  import { loadProjects, loadTaxonomy, setProjectDates, setMilestoneDates, loadAllHours } from "../lib/data";
+  import type { Project, Milestone, Taxonomy, HourRow } from "../lib/data";
   import ProjectEditor from "../lib/ProjectEditor.svelte";
   import Milestones from "../lib/Milestones.svelte";
   import PwExperiments from "../lib/PwExperiments.svelte";
@@ -162,6 +162,17 @@
   function eff(n: PwNode): PwNode {
     const p = n.project_id ? projById.get(n.project_id) : undefined;
     if (!p) return n;
+    if (n.milestone_id) {
+      // one of its milestones (0077): the milestone's name and dates, as Planning works them out
+      const m = p.milestone.find((x) => x.id === n.milestone_id);
+      if (!m) return n;
+      const d = milestoneDates(p, m);
+      return {
+        ...n, title: m.title, folder_url: n.folder_url ?? p.folder_url,
+        start_on: d.start ?? n.start_on, end_on: d.due ?? n.end_on,
+        status: m.status !== "active" || p.status === "done" || p.status === "dropped" ? "done" : n.status,
+      };
+    }
     return {
       ...n,
       title: p.name,
@@ -175,11 +186,12 @@
 
   // ---- ambitions: the few big goals; each item serves one (chosen, or where its links lead) ----
   const ambMap = $derived(ambitionMap(nodes, links));
-  const allAmbs = $derived(ambitionsIn(nodes)); // their colours stay put while one is hidden
+  const allAmbs = $derived(ambitionsIn(nodes)); // in your order
+  const ambsByAge = $derived(nodes.filter(isAmbition)); // colours: by when each was made, so they stay put
   const shownAmbs = $derived(allAmbs.map(eff).filter((a) => visible.some((v) => v.id === a.id)));
   const AMB_COLOURS = 4;
   function ambColour(id: string | null): string | null {
-    const i = id ? allAmbs.findIndex((a) => a.id === id) : -1;
+    const i = id ? ambsByAge.findIndex((a) => a.id === id) : -1;
     return i < 0 ? null : i < AMB_COLOURS ? `var(--amb-${i + 1})` : "var(--ink-soft)";
   }
   const ambTitle = (id: string) => eff(nodes.find((x) => x.id === id) ?? ({ title: "" } as PwNode)).title;
@@ -442,7 +454,13 @@
       }
       // show it where it was dropped straight away; the reload confirms
       nodes = nodes.map((x) => (x.id === n.id ? { ...x, ...fields } as PwNode : x));
-      if (n.project_id && n.kind !== "goal") {
+      if (n.milestone_id && n.project_id) {
+        // stretching moves only its due date, so a start it takes from elsewhere stays so
+        const md = d.mode === "resize" ? { due_on: d.end } : { start_on: d.start, due_on: d.end ?? n.end_on };
+        projects = projects.map((p) => (p.id === n.project_id
+          ? { ...p, milestone: p.milestone.map((m) => (m.id === n.milestone_id ? { ...m, ...md } : m)) } : p));
+        await setMilestoneDates(n.milestone_id, md);
+      } else if (n.project_id && n.kind !== "goal") {
         projects = projects.map((p) => (p.id === n.project_id ? { ...p, start_on: d.start, end_on: d.end } : p));
         await setProjectDates(n.project_id, d.start, d.end ?? n.end_on);
       }
@@ -451,8 +469,15 @@
     } catch (e) {
       const msg = (e as Error).message;
       await load(); // back as it was (this clears the message, so it is set after)
-      error = /ambition_id/.test(msg) ? "Moving items between ambitions needs web/db/0075_pw_ambition.sql run first, in the Supabase SQL editor." : msg;
+      error = sqlHint(msg);
     }
+  }
+  /** What to run when a newer column is missing; otherwise the message as it is. */
+  function sqlHint(msg: string): string {
+    const need = /milestone_id/.test(msg) ? ["Milestones on the map need", "0077_pw_milestone.sql"]
+      : /ambition_order/.test(msg) ? ["Ordering the ambitions needs", "0078_pw_ambition_order.sql"]
+      : /ambition_id/.test(msg) ? ["Ambitions need", "0075_pw_ambition.sql"] : null;
+    return need ? `${need[0]} web/db/${need[1]} run first, in the Supabase SQL editor.` : msg;
   }
 
   // ---- links drawn as curves --------------------------------------------------------
@@ -600,6 +625,8 @@
   let importRows = $state<ImportRow[]>([]);
   let importing = $state(false);
   let importMilestones = $state(true); // show the imported projects' milestones on their bars
+  let importFind = $state(""); // a project's (or milestone's) name: its milestones can be ticked too
+  let importMs = $state<Record<string, boolean>>({}); // milestones ticked
 
   function laneFor(p: Project): { lane: Lane; kind: "project" | "grant"; group: string } {
     const c = tax?.allCategories.find((x) => x.id === p.category_id);
@@ -611,34 +638,44 @@
     return { lane: "publications", kind: "project", group };
   }
   function openImport() {
-    const onMap = new Set(nodes.map((n) => n.project_id).filter(Boolean));
+    importFind = "";
+    importMs = {};
     importRows = projects
       .filter((p) => LIVE_STATUSES.has(p.status))
       .map((p) => ({ p, ...laneFor(p), already: onMap.has(p.id), pick: false }))
       .sort((a, b) => a.group.localeCompare(b.group) || a.p.name.localeCompare(b.p.name));
     panel = { importing: true };
   }
+  /** The projects whose name (or a milestone's) matches, each with its open milestones while searching. */
+  const importShown = $derived.by(() => {
+    const q = importFind.trim().toLocaleLowerCase();
+    return importRows.map((r) => {
+      const hit = !q || r.p.name.toLocaleLowerCase().includes(q);
+      const ms = q ? r.p.milestone.filter((m) => m.status === "active" && (hit || m.title.toLocaleLowerCase().includes(q))) : [];
+      return { r, ms, show: hit || ms.length > 0 };
+    }).filter((x) => x.show);
+  });
   const importGroups = $derived(
-    [...new Set(importRows.map((r) => r.group))].map((g) => ({ group: g, rows: importRows.filter((r) => r.group === g) })),
+    [...new Set(importShown.map((x) => x.r.group))].map((g) => ({ group: g, rows: importShown.filter((x) => x.r.group === g) })),
   );
+  const importCount = $derived(importRows.filter((r) => r.pick && !r.already).length
+    + Object.entries(importMs).filter(([id, on]) => on && !msOnMap.has(id)).length);
   async function addImported() {
     importing = true;
     const placed: PwNode[] = [];
     try {
-      for (const r of importRows.filter((x) => x.pick && !x.already)) {
-        const s = r.p.start_on ?? monthStart(today()); // the project's own dates
-        const e = r.p.end_on ?? null;
-        const row = freeRow(r.lane, r.kind, s, e ?? addMonths(s, 3), placed);
-        const fields: Partial<PwNodeFields> = {
-          kind: r.kind, lane: r.lane, title: r.p.name, project_id: r.p.id, potential: false,
-          grant_stage: r.kind === "grant" ? "drafting" : null,
-          start_on: s, end_on: e, lane_row: row, show_milestones: importMilestones && r.p.milestone.length > 0,
-        };
+      const picks: { p: Project; m: Milestone | null }[] = [
+        ...importRows.filter((x) => x.pick && !x.already).map((x) => ({ p: x.p, m: null })),
+        ...projects.flatMap((p) => p.milestone.filter((m) => importMs[m.id] && !msOnMap.has(m.id)).map((m) => ({ p, m }))),
+      ];
+      for (const { p, m } of picks) {
+        const fields = fieldsFor(p, m, undefined, placed);
+        if (!m) fields.show_milestones = importMilestones && p.milestone.length > 0;
         const id = await saveNode(null, fields);
         placed.push({ ...(fields as PwNode), id });
       }
     } catch (e) {
-      error = (e as Error).message;
+      error = sqlHint((e as Error).message);
     } finally {
       importing = false;
     }
@@ -685,14 +722,28 @@
     .filter((t) => expTopics.some((x) => x.id === t));
 
   // ---- the tray: what is not on the map yet, to drag onto it ---------------------------------
-  const onMap = $derived(new Set(nodes.map((n) => n.project_id).filter(Boolean)));
-  const trayProjects = $derived(projects.filter((p) => LIVE_STATUSES.has(p.status) && !onMap.has(p.id)));
+  // a project is on the map as a whole; its milestones each on their own
+  const onMap = $derived(new Set(nodes.filter((n) => !n.milestone_id).map((n) => n.project_id).filter(Boolean)));
+  const msOnMap = $derived(new Set(nodes.map((n) => n.milestone_id).filter(Boolean)));
+  const liveProjects = $derived(projects.filter((p) => LIVE_STATUSES.has(p.status)));
+  const trayProjects = $derived(liveProjects.filter((p) => !onMap.has(p.id)));
+  let trayFind = $state("");
+  /** Searching: the projects whose name matches, with their open milestones off the map (or the milestones that match). */
+  const trayFound = $derived.by(() => {
+    const q = trayFind.trim().toLocaleLowerCase();
+    if (!q) return null;
+    return liveProjects.map((p) => {
+      const hit = p.name.toLocaleLowerCase().includes(q);
+      const ms = p.milestone.filter((m) => m.status === "active" && !msOnMap.has(m.id) && (hit || m.title.toLocaleLowerCase().includes(q)));
+      return { p, ms, hit };
+    }).filter((x) => x.hit || x.ms.length);
+  });
   const TRAY_KEY = "pathways.tray";
   let trayOpen = $state(stored(TRAY_KEY) !== "closed");
   $effect(() => store(TRAY_KEY, trayOpen ? null : "closed"));
   const short = (s: string, k = 48) => (s.length > k ? `${s.slice(0, k)}…` : s);
 
-  type TrayDrag = { kind: "project"; id: string; label: string; x: number; y: number; moved: boolean };
+  type TrayDrag = { kind: "project" | "milestone"; id: string; label: string; x: number; y: number; moved: boolean };
   let trayDrag = $state<TrayDrag | null>(null);
   function trayStart(ev: PointerEvent, kind: TrayDrag["kind"], id: string, label: string) {
     if (ev.button !== 0) return;
@@ -714,28 +765,107 @@
     if (!d?.moved || !mapEl || ev.type === "pointercancel") return;
     const r = mapEl.getBoundingClientRect();
     if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
+    const where = bandAt(ev.clientY - r.top);
+    if (d.kind === "milestone") {
+      const p = projects.find((x) => x.milestone.some((m) => m.id === d.id));
+      const m = p?.milestone.find((x) => x.id === d.id);
+      if (p && m) await placeProject(p, where, m);
+      return;
+    }
     const p = projects.find((x) => x.id === d.id);
-    if (p) await placeProject(p, bandAt(ev.clientY - r.top));
+    if (p) await placeProject(p, where);
   }
-  /** A Planning project onto the map: in the lane (and, by ambition, under the ambition) it is dropped in. */
-  async function placeProject(p: Project, where?: { lane: Lane; amb: string | null }) {
-    const def = laneFor(p);
-    const lane = !where || where.lane === "goals" ? def.lane : where.lane;
+  /**
+   * A Planning project, or one of its milestones (m), as a new item: in the lane (and, by ambition,
+   * under the ambition) it is dropped in, else its area's lane; with its dates, linked to it.
+   */
+  function fieldsFor(p: Project, m: Milestone | null, where?: { lane: Lane; amb: string | null }, also: PwNode[] = []): Partial<PwNodeFields> {
+    const lane = !where || where.lane === "goals" ? laneFor(p).lane : where.lane;
     const kind = lane === "grants" ? "grant" : "project";
-    const s = p.start_on ?? monthStart(today());
+    const d = m ? milestoneDates(p, m) : { start: p.start_on, due: p.end_on };
+    const s = d.start ?? monthStart(today());
+    const e = d.due && d.due >= s ? d.due : null;
     const amb = where && byAmb ? where.amb : focusOn && focusOn !== "none" ? focusOn : null;
-    const fields: Partial<PwNodeFields> = {
-      kind, lane, title: p.name, project_id: p.id, potential: false, grant_stage: kind === "grant" ? "drafting" : null,
-      start_on: s, end_on: p.end_on ?? null, lane_row: freeRow(lane, kind, s, p.end_on ?? addMonths(s, 3)),
-      show_milestones: p.milestone.length > 0, ...(amb ? { ambition_id: amb } : {}),
+    return {
+      kind, lane, title: m ? m.title : p.name, project_id: p.id, ...(m ? { milestone_id: m.id } : {}),
+      potential: false, grant_stage: kind === "grant" ? "drafting" : null,
+      start_on: s, end_on: e, lane_row: freeRow(lane, kind, s, e ?? addMonths(s, 3), also),
+      show_milestones: !m && p.milestone.length > 0, ...(amb ? { ambition_id: amb } : {}),
     };
+  }
+  async function placeProject(p: Project, where?: { lane: Lane; amb: string | null }, m: Milestone | null = null) {
+    const fields = fieldsFor(p, m, where);
     try {
-      await undoable(`Put “${p.name}” on the map`, () => saveNode(null, fields));
+      await undoable(m ? `Put “${m.title}” (${p.name}) on the map` : `Put “${p.name}” on the map`, () => saveNode(null, fields));
       await load();
     } catch (e) {
       const msg = (e as Error).message;
       await load();
-      error = /ambition_id/.test(msg) ? "Putting it under an ambition needs web/db/0075_pw_ambition.sql run first, in the Supabase SQL editor." : msg;
+      error = sqlHint(msg);
+    }
+  }
+
+  // ---- your order of the ambitions: drag one's heading (rows by ambition) ---------------------
+  let ambDrag = $state<{ id: string; y: number } | null>(null);
+  /** Where the ambition being dragged would go: its place among the others, and the line's height. */
+  const ambDrop = $derived.by(() => {
+    if (!ambDrag) return null;
+    const d = ambDrag;
+    const others = layout.heads.filter((h) => h.id && h.id !== d.id);
+    const k = others.filter((h) => h.top + GROUP_H / 2 < d.y).length;
+    const top = k < others.length ? others[k].top : (layout.heads.find((h) => h.id === null)?.top ?? layout.height - 8);
+    return { k, top };
+  });
+  function ambStart(ev: PointerEvent, id: string) {
+    if (ev.button !== 0 || member) return;
+    ev.preventDefault();
+    ev.stopPropagation();
+    ambDrag = { id, y: local(ev).y };
+    window.addEventListener("pointermove", ambMove);
+    window.addEventListener("pointerup", ambUp);
+    window.addEventListener("pointercancel", ambUp);
+  }
+  function ambMove(ev: PointerEvent) {
+    if (ambDrag && mapEl) ambDrag = { ...ambDrag, y: local(ev).y };
+  }
+  async function ambUp(ev: PointerEvent) {
+    window.removeEventListener("pointermove", ambMove);
+    window.removeEventListener("pointerup", ambUp);
+    window.removeEventListener("pointercancel", ambUp);
+    const d = ambDrag, at = ambDrop;
+    ambDrag = null;
+    if (!d || !at || ev.type === "pointercancel") return;
+    const ids = shownAmbs.map((a) => a.id).filter((id) => id !== d.id);
+    ids.splice(at.k, 0, d.id);
+    await reorderAmbitions(ids);
+  }
+  async function ambKey(ev: KeyboardEvent, id: string) {
+    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
+    ev.preventDefault();
+    const ids = shownAmbs.map((a) => a.id);
+    const i = ids.indexOf(id), j = i + (ev.key === "ArrowUp" ? -1 : 1);
+    if (j < 0 || j >= ids.length) return;
+    [ids[i], ids[j]] = [ids[j], ids[i]];
+    await reorderAmbitions(ids);
+    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-amb-grip="${id}"]`)?.focus());
+  }
+  /** The ambitions shown, in a new order; hidden ones (done, retired) keep their places. */
+  async function reorderAmbitions(shownIds: string[]) {
+    if (shownIds.join() === shownAmbs.map((a) => a.id).join()) return;
+    const moved = new Set(shownIds);
+    let k = 0;
+    const all = allAmbs.map((a) => (moved.has(a.id) ? shownIds[k++] : a.id));
+    const was = new Map(nodes.map((n) => [n.id, n.ambition_order]));
+    nodes = nodes.map((n) => (all.includes(n.id) ? { ...n, ambition_order: (all.indexOf(n.id) + 1) * 10 } : n)); // at once
+    try {
+      await undoable("Reordered the ambitions", async () => {
+        for (const [i, id] of all.entries()) if (was.get(id) !== (i + 1) * 10) await saveNode(id, { ambition_order: (i + 1) * 10 });
+      });
+      await load();
+    } catch (e) {
+      const msg = (e as Error).message;
+      await load();
+      error = sqlHint(msg);
     }
   }
 
@@ -750,6 +880,7 @@
   }
   function sub(n: PwNode): string {
     const bits: string[] = [n.potential ? "potential project" : staged(n.kind) ? `${n.kind} · ${n.grant_stage ?? "drafting"}` : kindLabel(n.kind).toLowerCase()];
+    if (n.milestone_id && n.project_id) bits[0] = `milestone of ${projById.get(n.project_id)?.name ?? "a project"}`;
     if (n.kind === "project" && n.hands_on) bits.unshift("hands-on");
     if (staged(n.kind) && n.end_on) bits.push(`deadline ${fmtMonth(n.end_on)}`);
     else if (n.start_on) bits.push(`${fmtMonth(n.start_on)} → ${n.end_on ? fmtMonth(n.end_on) : "…"}`);
@@ -828,22 +959,51 @@
       </div>
     </div>
   {/if}
-  {#if view === "map" && !member && trayProjects.length}
+  {#snippet projChip(p: Project)}
+    <span class="tray-chip" role="button" tabindex="0" title={`Drag onto the map, into a lane — or press Enter to put it in its area's lane`}
+          onpointerdown={(ev) => trayStart(ev, "project", p.id, p.name)}
+          onkeydown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); placeProject(p); } }}>
+      <span class="grip" aria-hidden="true">⠿</span>{p.name}
+    </span>
+  {/snippet}
+  {#snippet msChip(p: Project, m: Milestone)}
+    <span class="tray-chip ms" role="button" tabindex="0" title={`${m.title} — a milestone of ${p.name}. Drag onto the map, or press Enter`}
+          onpointerdown={(ev) => trayStart(ev, "milestone", m.id, `◆ ${m.title}`)}
+          onkeydown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); placeProject(p, undefined, m); } }}>
+      <span class="grip" aria-hidden="true">⠿</span>◆ {m.title}
+    </span>
+  {/snippet}
+  {#if view === "map" && !member && liveProjects.length}
     <details class="tray" bind:open={trayOpen}>
       <summary>
         Not on the map yet:
-        {trayProjects.length} Planning {trayProjects.length === 1 ? "project" : "projects"}
+        {trayProjects.length} Planning {trayProjects.length === 1 ? "project" : "projects"} · find one for its milestones
       </summary>
-      <div class="tray-items">
-        {#each trayProjects as p (p.id)}
-          <span class="tray-chip" role="button" tabindex="0" title={`Drag onto the map, into a lane — or press Enter to put it in its area's lane`}
-                onpointerdown={(ev) => trayStart(ev, "project", p.id, p.name)}
-                onkeydown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); placeProject(p); } }}>
-            <span class="grip" aria-hidden="true">⠿</span>{p.name}
-          </span>
-        {/each}
-      </div>
-      <p class="hint muted">Drop a project in a lane{byAmb ? ", under the ambition it serves" : ""}, or focus it and press Enter for its area's lane.</p>
+      <input class="tray-find" type="search" bind:value={trayFind} placeholder="Find a project or milestone by name…"
+             aria-label="Find a Planning project or milestone" />
+      {#if trayFound}
+        <div class="tray-found">
+          {#each trayFound as x (x.p.id)}
+            <div class="tray-proj">
+              {#if onMap.has(x.p.id)}
+                <span class="tray-on">{x.p.name} <span class="muted">· on the map</span></span>
+              {:else}
+                {@render projChip(x.p)}
+              {/if}
+              {#each x.ms as m (m.id)}{@render msChip(x.p, m)}{/each}
+              {#if !x.ms.length}<span class="muted small">no open milestones off the map</span>{/if}
+            </div>
+          {:else}
+            <p class="muted small">Nothing matches.</p>
+          {/each}
+        </div>
+      {:else}
+        <div class="tray-items">
+          {#each trayProjects as p (p.id)}{@render projChip(p)}{/each}
+          {#if !trayProjects.length}<span class="muted small">Every live project is on the map; find one for its milestones.</span>{/if}
+        </div>
+      {/if}
+      <p class="hint muted">Drop a project or milestone in a lane{byAmb ? ", under the ambition it serves" : ""}, or focus it and press Enter for its area's lane.</p>
     </details>
   {/if}
   {#if trayDrag?.moved}
@@ -877,11 +1037,17 @@
         <div class="tick" class:major={t.major} style:left={`${t.x}px`} style:height={`${mapH - 6}px`}><span>{t.label}</span></div>
       {/each}
       {#each layout.heads as h (h.id ?? "none")}
-        <div class="amb-head" class:faded={focusOn !== null && (h.id ?? "none") !== focusOn} style:top={`${h.top}px`}
+        <div class="amb-head" class:faded={focusOn !== null && (h.id ?? "none") !== focusOn} class:lifting={ambDrag?.id === h.id} style:top={`${h.top}px`}
              style:height={`${GROUP_H}px`} style:--amb={ambColour(h.id) ?? "var(--ink-soft)"}>
+          {#if h.id && !member && shownAmbs.length > 1}
+            <span class="amb-grip" role="button" tabindex="0" data-amb-grip={h.id} aria-label="Drag to reorder the ambitions (or use the arrow keys)"
+                  title="Drag to put the ambitions in your order" onpointerdown={(ev) => ambStart(ev, h.id!)}
+                  onkeydown={(ev) => ambKey(ev, h.id!)}>⠿</span>
+          {/if}
           <span>{h.id ? ambTitle(h.id) : "No ambition yet"}</span>
         </div>
       {/each}
+      {#if ambDrop}<div class="amb-drop" style:top={`${ambDrop.top - 2}px`}></div>{/if}
       <div class="now" style:left={`${todayX}px`} style:height={`${mapH - 6}px`}><span>now</span></div>
       <div class="goals-head" style:left={`${x1 + GAP}px`} style:width={`${GOAL_W - GOAL_R}px`}>Goals · by {fmtDay(to).replace(/^1 /, "")}</div>
 
@@ -914,7 +1080,7 @@
              style:left={`${b.x}px`} style:top={`${b.y}px`} style:width={`${b.w}px`} style:height={`${NODE_H}px`}
              onpointerdown={(ev) => begin(ev, n, "move")}
              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEdit(n); } }}>
-          <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}<FolderLink url={n.folder_url} /></span>
+          <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : n.milestone_id ? "◆ " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}<FolderLink url={n.folder_url} /></span>
           <span class="n-sub">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
           {#if n.show_milestones && n.project_id}
             <!-- the Planning project's milestones, at their due dates (read from Planning, never copied) -->
@@ -950,34 +1116,46 @@
 <dialog bind:this={dialog} onclose={() => (panel = null)} class:sheet={!!panel && "node" in panel}>
   {#if panel && "importing" in panel}
     <h2>Projects from Planning</h2>
-    <p class="muted small">Tick the projects to put on the map. Each lands in its area's lane with its dates, linked to the Planning project.</p>
-    <label class="small imp-ms"><input type="checkbox" bind:checked={importMilestones} /> Show their milestones on the map</label>
+    <p class="muted small">Tick the projects to put on the map. Each lands in its area's lane with its dates, linked to the Planning project.
+      Find one by name to tick its milestones too, each on the map on its own.</p>
+    <input class="imp-find" type="search" bind:value={importFind} placeholder="Find a project or milestone by name…" aria-label="Find a project or milestone" />
+    <label class="small imp-ms"><input type="checkbox" bind:checked={importMilestones} /> Show the projects' milestones on their bars</label>
     {#if !importRows.length}
       <p class="muted">No live projects in Planning.</p>
+    {:else if !importShown.length}
+      <p class="muted">Nothing matches.</p>
     {/if}
     <div class="imp">
       {#each importGroups as g (g.group)}
-        <details class="imp-group" open={g.rows.some((r) => !r.already)}>
+        <details class="imp-group" open={!!importFind.trim() || g.rows.some((x) => !x.r.already)}>
           <summary><strong>{g.group}</strong> <span class="muted">{g.rows.length}</span></summary>
-          {#each g.rows as r (r.p.id)}
+          {#each g.rows as { r, ms } (r.p.id)}
             <label class="imp-row" class:off={r.already}>
-              <input type="checkbox" bind:checked={r.pick} disabled={r.already} />
+              <input type="checkbox" checked={r.pick} disabled={r.already} onchange={(e) => (r.pick = e.currentTarget.checked)} />
               <span class="imp-name">{r.p.name}</span>
               <span class="muted">
                 {r.p.start_on || r.p.end_on ? `${r.p.start_on ? fmtMonth(r.p.start_on) : "…"} → ${r.p.end_on ? fmtMonth(r.p.end_on) : "…"}` : "no dates"}{r.p.milestone.length ? ` · ${r.p.milestone.length} milestones` : ""}
                 · {LANES.find((l) => l.key === r.lane)?.label} lane{r.already ? " · already on the map" : ""}
               </span>
             </label>
+            {#each ms as m (m.id)}
+              {@const on = msOnMap.has(m.id)}
+              {@const md = milestoneDates(r.p, m)}
+              <label class="imp-row imp-msrow" class:off={on}>
+                <input type="checkbox" bind:checked={importMs[m.id]} disabled={on} />
+                <span>◆ {m.title}</span>
+                <span class="muted">{md.start || md.due ? `${md.start ? fmtMonth(md.start) : "…"} → ${md.due ? fmtMonth(md.due) : "…"}` : "no dates"}{on ? " · already on the map" : ""}</span>
+              </label>
+            {/each}
           {/each}
         </details>
       {/each}
     </div>
     <div class="imp-actions">
-      {#if importRows.some((r) => r.pick && !r.already)}
-        {@const n = importRows.filter((r) => r.pick && !r.already).length}
-        <button class="primary" disabled={importing} onclick={addImported}>{importing ? "Adding…" : `Add ${n} to the map`}</button>
+      {#if importCount}
+        <button class="primary" disabled={importing} onclick={addImported}>{importing ? "Adding…" : `Add ${importCount} to the map`}</button>
       {:else}
-        <button class="primary" disabled>Tick projects to add</button>
+        <button class="primary" disabled>Tick projects or milestones to add</button>
       {/if}
       <button onclick={() => (panel = null)}>Cancel</button>
     </div>
@@ -1187,6 +1365,19 @@
   .tray-chip:focus-visible { outline: 2px solid var(--accent); }
   .tray-chip .grip { color: var(--ink-soft); }
   .tray .hint { margin: 0; font-size: 0.76rem; }
+  .tray-chip.ms { border-left-color: var(--accent); }
+  .tray-find { width: min(22rem, 100%); margin: 0.5rem 0 0; font-size: 0.82rem; padding: 0.25rem 0.5rem; }
+  .tray-found { display: grid; gap: 0.4rem; margin: 0.5rem 0 0.3rem; max-height: 14rem; overflow-y: auto; }
+  .tray-proj { display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+  .tray-on { font-size: 0.8rem; font-weight: 600; padding: 0.2rem 0.3rem; }
+  .tray .small { font-size: 0.76rem; }
+  .imp-find { width: 100%; margin: 0.3rem 0; }
+  .imp-msrow { padding-left: 1.6rem; font-size: 0.82rem; }
+  /* the ambitions in your order: drag a heading's ⠿ */
+  .amb-grip { cursor: grab; margin-right: 0.45rem; padding: 0 0.15rem; user-select: none; touch-action: none; font-weight: 400; }
+  .amb-grip:focus-visible { outline: 2px solid var(--accent); }
+  .amb-head.lifting { opacity: 0.5; }
+  .amb-drop { position: absolute; left: 0; right: 0; height: 3px; background: var(--accent); z-index: 6; pointer-events: none; }
   .tray-ghost {
     position: fixed; z-index: 80; pointer-events: none; padding: 0.25rem 0.6rem; background: var(--paper);
     border: 1px solid var(--ink-soft); box-shadow: 0 6px 16px rgb(0 0 0 / 0.2); font-family: var(--font-ui); font-size: 0.8rem;

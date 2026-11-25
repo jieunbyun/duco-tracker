@@ -5,7 +5,7 @@
   } from "./pathways";
   import type { PwNode, PwNodeFields, PwLink, PwRevision, NodeKind, Lane, GrantStage } from "./pathways";
   import type { Project } from "./data";
-  import { setProjectDates, saveProject } from "./data";
+  import { setProjectDates, saveProject, setMilestoneDates } from "./data";
   import type { Taxonomy } from "./data";
   import type { Reading } from "./reading";
   import type { GroupProject, Member } from "./group";
@@ -80,18 +80,22 @@
   const ambitionChoices = $derived(ambitions.filter((a) => a.id !== n0?.id));
   // projects and grants can each be a Planning project (a grant: one under Proposals)
   const plannable = $derived(f.kind === "project" || f.kind === "grant");
+  // an item for one milestone of a Planning project (0077): named and dated by the milestone (as given)
+  const ms0 = n0?.milestone_id
+    ? untrack(() => projects).find((x) => x.id === n0.project_id)?.milestone.find((m) => m.id === n0.milestone_id)
+    : undefined;
   // a linked Planning project lends its current name and dates
   {
     const p = n0?.project_id ? untrack(() => projects).find((x) => x.id === n0.project_id) : undefined;
-    if (p) {
+    if (p && !ms0) {
       f.title = p.name;
       f.start_on = p.start_on?.slice(0, 7) ?? f.start_on;
       f.end_on = p.end_on?.slice(0, 7) ?? f.end_on;
     }
   }
   // the exact dates behind the months shown, kept when a month is left as it is
-  const wasStart = untrack(() => projects).find((x) => x.id === n0?.project_id)?.start_on ?? n0?.start_on ?? null;
-  const wasEnd = untrack(() => projects).find((x) => x.id === n0?.project_id)?.end_on ?? n0?.end_on ?? null;
+  const wasStart = ms0 ? (n0?.start_on ?? null) : untrack(() => projects).find((x) => x.id === n0?.project_id)?.start_on ?? n0?.start_on ?? null;
+  const wasEnd = ms0 ? (n0?.end_on ?? null) : untrack(() => projects).find((x) => x.id === n0?.project_id)?.end_on ?? n0?.end_on ?? null;
   const linkedProject = $derived(plannable && f.project_id ? projects.find((x) => x.id === f.project_id) ?? null : null);
   let reason = $state("");
   let busy = $state(false);
@@ -130,8 +134,8 @@
     busy = true;
     error = "";
     const p = linkedProject;
-    const startOn = fromMonth(f.start_on, false, p ? p.start_on : wasStart);
-    const endOn = fromMonth(f.end_on, true, p ? p.end_on : wasEnd);
+    const startOn = fromMonth(f.start_on, false, p && !ms0 ? p.start_on : wasStart);
+    const endOn = fromMonth(f.end_on, true, p && !ms0 ? p.end_on : wasEnd);
     try {
       // create the Planning project first, so the item can link to it
       if (f.project_id === NEW_PLANNING) {
@@ -163,9 +167,11 @@
       if ((f.ambition_id || null) !== (n0?.ambition_id ?? null)) fields.ambition_id = f.ambition_id || null;
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
       // a linked project keeps the Planning project's dates in step
-      if (p && (startOn !== p.start_on || endOn !== p.end_on)) {
+      if (p && !ms0 && (startOn !== p.start_on || endOn !== p.end_on)) {
         await setProjectDates(p.id, startOn, endOn);
       }
+      // and a milestone's item, the milestone's
+      if (ms0 && (startOn !== wasStart || endOn !== wasEnd)) await setMilestoneDates(ms0.id, { start_on: startOn, due_on: endOn });
       const id = await saveNode(n0?.id ?? null, fields);
       if (members.length) await setContributors(id, contrib, had);
       onsaved();
@@ -267,7 +273,10 @@
     </label>
   {/if}
 
-  {#if f.kind === "project"}
+  {#if ms0}
+    <p class="synced wide">◆ A milestone of “{linkedProject?.name}” in Planning: its name and dates come from there, and moving it here moves it there.</p>
+  {/if}
+  {#if f.kind === "project" && !ms0}
     <label class="wide">Planning project (if it exists)
       <select bind:value={f.project_id} onchange={onProject}>
         <option value="">— none: a potential project —</option>
@@ -276,8 +285,10 @@
       </select>
     </label>
     {#if f.project_id === NEW_PLANNING}{@render newInPlanning()}{/if}
+  {/if}
+  {#if f.kind === "project"}
     <label class="check wide"><input type="checkbox" bind:checked={f.hands_on} /> Hands-on — my own research time goes into it substantially</label>
-    {#if f.project_id && f.project_id !== NEW_PLANNING}
+    {#if f.project_id && f.project_id !== NEW_PLANNING && !ms0}
       <label class="check wide"><input type="checkbox" bind:checked={f.show_milestones} />
         Show its milestones on the map ({linkedProject?.milestone.length ?? 0}, from Planning)</label>
     {/if}
@@ -295,7 +306,7 @@
     <label>Effort (person-months) <input type="number" min="0" step="0.5" bind:value={f.effort_pm} /></label>
     <label>Cost <input type="number" min="0" step="100" bind:value={f.cost} /></label>
   {/if}
-  {#if f.kind === "grant"}
+  {#if f.kind === "grant" && !ms0}
     <label class="wide">Planning project (if you track the writing there)
       <select bind:value={f.project_id} onchange={onProject}>
         <option value="">— none —</option>

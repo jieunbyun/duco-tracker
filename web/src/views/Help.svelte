@@ -183,7 +183,8 @@
       colour, shown as a bar along the top of what serves it; click its name above the map to bring it forward and
       fade the rest (click again for all), and a new item added meanwhile serves it. <em>Rows: by ambition</em> puts
       each ambition's lanes under its heading (what serves none goes last), laid out by time; there, drag an item
-      under another ambition to move it there. Needs <code>0075_pw_ambition.sql</code>.
+      under another ambition to move it there, and drag an ambition's heading by its ⠿ (or press ↑ ↓ on it) to put
+      the ambitions in your order (<code>0078_pw_ambition_order.sql</code>; each keeps its colour). Needs <code>0075_pw_ambition.sql</code>.
       Clicking an item opens it at the side, the map still in sight, with up to three tabs: <em>On the map</em> (the
       item itself), <em>In Planning</em> for one linked to a Planning project (the project's details and its milestones,
       as in Planning — saving there updates the map) and <em>Experiments</em>: the topics and subtopics from Experiments
@@ -192,7 +193,11 @@
       <em>Experiments ›</em> to change it there, ✕ to unlink it (it stays in Experiments). A topic can be on several
       items. A card counts its experiments. Needs <code>0076_pw_experiments.sql</code>. Above the map, <em>Not on the
       map yet</em> holds your live Planning projects not on it: drag one into a lane (under an ambition, with rows by
-      ambition), or focus it and press Enter for its area's lane.
+      ambition), or focus it and press Enter for its area's lane. Type in its box to find a project by name: it shows
+      with its open milestones, each of which can go on the map on its own (◆, named and dated by the milestone —
+      moving it moves the milestone in Planning; needs <code>0077_pw_milestone.sql</code>). <em>+ From Planning</em> finds
+      them the same way. <em>Take off the map</em>, in an item's editor, takes off just the item: the project or
+      milestone stays in Planning.
       Mark a project <em>hands-on</em> (✋, in its editor or on its row in the List) when your own research time
       goes into it substantially; it stands out on the map, bolder and shaded.
       Dates on Pathways are months: an item runs from the start of its first month to the end of its last

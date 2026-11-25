@@ -52,6 +52,8 @@ export type PwNode = {
   folder_url: string | null; // its folder on OneDrive
   show_milestones: boolean; // a linked Planning project's milestones, drawn on its bar
   ambition_id?: string | null; // the ambition (a goal) it serves; empty: where its links lead (0075)
+  milestone_id?: string | null; // one milestone of its Planning project, rather than the whole project (0077)
+  ambition_order?: number | null; // an ambition's place among them, once dragged (0078)
 };
 export type PwNodeFields = Omit<PwNode, "id">;
 // A link is one kind of arrow, from one item to another; its direction says it all.
@@ -63,9 +65,15 @@ const NODE_COLS = "id,kind,lane,title,detail,status,potential,project_id,reading
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {
+  // the newer columns, each simply absent until its SQL is run
   const nodesQ = async () => {
-    const r = await supabase.from("pw_node").select(`${NODE_COLS},ambition_id`).order("created_at");
-    return r.error && /ambition_id/.test(r.error.message) ? supabase.from("pw_node").select(NODE_COLS).order("created_at") : r;
+    let extra = ["ambition_id", "milestone_id", "ambition_order"];
+    for (;;) {
+      const r = await supabase.from("pw_node").select([NODE_COLS, ...extra].join(",")).order("created_at");
+      const gone = r.error ? extra.find((c) => r.error!.message.includes(c)) : undefined;
+      if (!gone) return r;
+      extra = extra.filter((c) => c !== gone);
+    }
   };
   const [n, l, s] = await Promise.all([
     nodesQ(),
@@ -74,7 +82,7 @@ export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]
   ]);
   for (const r of [n, l, s]) if (r.error) throw new Error(r.error.message);
   return {
-    nodes: ((n.data ?? []) as PwNode[]).map((x) => ({ ...x, effort_pm: num(x.effort_pm), cost: num(x.cost), fte: num(x.fte) })),
+    nodes: ((n.data ?? []) as unknown as PwNode[]).map((x) => ({ ...x, effort_pm: num(x.effort_pm), cost: num(x.cost), fte: num(x.fte) })),
     links: (l.data ?? []) as PwLink[],
     years: Number(s.data?.pathway_years ?? 5),
   };
@@ -84,9 +92,10 @@ export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]
 /** A goal that serves no other goal is an ambition. */
 export const isAmbition = (n: PwNode) => n.kind === "goal" && !n.ambition_id;
 
-/** The ambitions, in the order they sit in the goals column. */
+/** The ambitions in your order (dragged, 0078); those not placed yet after, as they sit in the goals column. */
 export function ambitionsIn(nodes: PwNode[]): PwNode[] {
-  return nodes.filter(isAmbition).sort((a, b) => a.lane_row - b.lane_row);
+  const o = (n: PwNode) => n.ambition_order ?? Number.MAX_SAFE_INTEGER;
+  return nodes.filter(isAmbition).sort((a, b) => o(a) - o(b) || a.lane_row - b.lane_row);
 }
 
 /**
