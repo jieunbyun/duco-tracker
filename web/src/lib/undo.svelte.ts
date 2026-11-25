@@ -29,7 +29,7 @@ const NOUN: Record<string, string> = {
   pw_node: "Pathways item", pw_link: "link", pw_revision: "goal wording", pw_asset: "asset",
   action_plan: "projected hours", action_time: "logged time", tip: "tip topic",
   failure_theme: "theme", failure: "hypothesis", failure_note: "note", tidy: "small task", tidy_repeat: "repeating small task", diary_day: "diary entry", diary_month: "reflection", pw_thought: "thought", meeting_series: "meeting series", meeting: "meeting", budget: "budget", budget_line: "budget line", budget_expense: "expense", contact: "person", contact_interaction: "note", opportunity: "opportunity", organisation: "organisation",
-  practice: "practice", practice_session: "practice session", exp_topic: "topic", exp_note: "note",
+  practice: "practice", practice_session: "practice session", exp_topic: "topic", exp_note: "note", pw_experiment: "experiment on an item",
 };
 function describe(method: string, table: string, prefer: string): string {
   const noun = NOUN[table] ?? table.replace(/_/g, " ");

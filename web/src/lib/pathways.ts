@@ -128,6 +128,24 @@ export function ambitionMap(nodes: PwNode[], links: PwLink[]): Map<string, { amb
   return out;
 }
 
+// ---- Experiments on items (0076) ---------------------------------------------------------
+export type PwExperiment = { node_id: string; topic_id: string };
+/** Which Experiments topics are on which items; null before 0076 is run. */
+export async function loadExpLinks(): Promise<PwExperiment[] | null> {
+  const { data, error } = await supabase.from("pw_experiment").select("node_id,topic_id").order("created_at");
+  if (error) {
+    if (error.code === "PGRST205" || error.code === "42P01" || /pw_experiment/.test(error.message)) return null;
+    throw new Error(error.message);
+  }
+  return data as PwExperiment[];
+}
+export async function linkExperiment(node_id: string, topic_id: string): Promise<void> {
+  await check(supabase.from("pw_experiment").upsert({ node_id, topic_id }, { onConflict: "node_id,topic_id", ignoreDuplicates: true }));
+}
+export async function unlinkExperiment(node_id: string, topic_id: string): Promise<void> {
+  await check(supabase.from("pw_experiment").delete().eq("node_id", node_id).eq("topic_id", topic_id));
+}
+
 // ---- contributors, and what a member sees ------------------------------------------
 /** Who contributes to each item (none before 0017, or without a group). */
 export async function loadContributors(): Promise<Map<string, string[]>> {

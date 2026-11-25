@@ -76,9 +76,22 @@
   }
   load();
 
-  // from the Day tab (#/experiments?n=<note>): the note open to change, in its topic
+  // from the Day tab (#/experiments?n=<note>): the note open to change, in its topic;
+  // from Pathways (?t=<topic>): that topic or subtopic opened, and brought into view
   const arrived = arrivedAt("experiments");
   function arrive() {
+    const tid = arrived.get("t");
+    arrived.delete("t");
+    const at = topics.find((x) => x.id === tid);
+    if (at) {
+      tag = null;
+      query = "";
+      view = "topics";
+      if (at.parent_id) openUp(at.parent_id);
+      openUp(at.id);
+      tick().then(() => document.querySelector(`[data-topic="${at.id}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" }));
+      return;
+    }
     const id = arrived.get("n");
     arrived.delete("n");
     const n = notes.find((x) => x.id === id);
@@ -388,7 +401,7 @@
   {@const sub = !!t.parent_id}
   {@const list = notesOf(t)}
   {@const subs = subsOf(t).filter(topicShows)}
-  <div class="topic" class:sub class:outdated={t.outdated}>
+  <div class="topic" class:sub class:outdated={t.outdated} data-topic={t.id}>
     {#if editing?.kind === "rename" && editing.id === t.id}
       {@render titleForm(sub ? "Subtopic" : "Topic", t)}
     {:else}

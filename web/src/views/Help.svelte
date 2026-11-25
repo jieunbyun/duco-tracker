@@ -184,13 +184,15 @@
       fade the rest (click again for all), and a new item added meanwhile serves it. <em>Rows: by ambition</em> puts
       each ambition's lanes under its heading (what serves none goes last), laid out by time; there, drag an item
       under another ambition to move it there. Needs <code>0075_pw_ambition.sql</code>.
-      Clicking an item opens it at the side, the map still in sight. One linked to a Planning project has
-      three tabs: <em>On the map</em> (the item itself), <em>In Planning</em> (the project's details and its milestones,
-      as in Planning — saving there updates the map) and <em>Failures</em> (its hypotheses: add one, or bring in one already in Failures with <em>+ Existing…</em> —
-      moved from the project it was on — click one to edit it, tick it complete; <em>Failures ›</em> for its observations). A card counts the ongoing hypotheses on its project
-      (⚠ overdue). Above the map, <em>Not on the map yet</em> holds your live Planning projects not on it, and
-      hypotheses on no project: drag a project into a lane (under an ambition, with rows by ambition; or focus it and
-      press Enter for its area's lane), and a hypothesis onto a project's card to put it on that project.
+      Clicking an item opens it at the side, the map still in sight, with up to three tabs: <em>On the map</em> (the
+      item itself), <em>In Planning</em> for one linked to a Planning project (the project's details and its milestones,
+      as in Planning — saving there updates the map) and <em>Experiments</em>: the topics and subtopics from Experiments
+      on it. Link one already there with <em>+ Existing…</em> (find it by its title or notes), or start one with
+      <em>+ New</em> (a subtopic under a topic, or a topic of its own); open one to read its notes and add one (Enter),
+      <em>Experiments ›</em> to change it there, ✕ to unlink it (it stays in Experiments). A topic can be on several
+      items. A card counts its experiments. Needs <code>0076_pw_experiments.sql</code>. Above the map, <em>Not on the
+      map yet</em> holds your live Planning projects not on it: drag one into a lane (under an ambition, with rows by
+      ambition), or focus it and press Enter for its area's lane.
       Mark a project <em>hands-on</em> (✋, in its editor or on its row in the List) when your own research time
       goes into it substantially; it stands out on the map, bolder and shaded.
       Dates on Pathways are months: an item runs from the start of its first month to the end of its last
