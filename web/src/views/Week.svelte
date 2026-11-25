@@ -397,9 +397,13 @@
   const live = $derived(tasks.filter((t) => !t.is_cancelled));
   // A to-do on a day this week shows on the calendar only; the list holds the
   // ones not placed yet. Cancelling its last day puts it back on the list.
-  const onCalendar = $derived(new Set(weekSlots.filter((s) => !s.is_cancelled).map((s) => s.todo_id)));
+  // A logged day is behind it: a to-do whose days this week are all logged stays on the list
+  // (with its days ✓) until it is ticked done.
+  const onCalendar = $derived(new Set(weekSlots.filter((s) => !s.is_cancelled && !s.entry_id).map((s) => s.todo_id)));
+  const loggedThisWeek = $derived(new Set(weekSlots.filter((s) => !s.is_cancelled && s.entry_id).map((s) => s.todo_id)));
   // Cancelled to-dos stay in their group, struck through, until restored or deleted.
-  const unplaced = $derived(tasks.filter((t) => !onCalendar.has(t.id) && !pending(t)));
+  const unplaced = $derived(tasks.filter((t) =>
+    !onCalendar.has(t.id) && !pending(t) && !(t.is_done && !t.is_cancelled && loggedThisWeek.has(t.id))));
   const groups = $derived([
     { key: "must", title: "Must do", rows: unplaced.filter((t) => (!t.is_done || t.is_cancelled) && t.must_this_week) },
     { key: "flex", title: "Flexible", rows: unplaced.filter((t) => (!t.is_done || t.is_cancelled) && !t.must_this_week) },
