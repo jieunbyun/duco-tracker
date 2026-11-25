@@ -16,9 +16,7 @@
   import { shareEmail } from "../lib/email";
   import { loadGroupProjects, loadMilestones as loadSharedMilestones } from "../lib/group";
   import type { GroupProject } from "../lib/group";
-  import { loadBoardBeside, onProject, onMilestone, planningHash, failuresHash, NOWHERE } from "../lib/failures";
-  import type { Board } from "../lib/failures";
-  import FailureList from "../lib/FailureList.svelte";
+  import { failuresHash } from "../lib/failures";
   import BackLink from "../lib/BackLink.svelte";
 
   let tax = $state<Taxonomy | null>(null);
@@ -26,17 +24,15 @@
   let hours = $state<HourRow[]>([]);
   let groupProjects = $state<GroupProject[]>([]); // shared projects a Planning project can stand for
   let privateShared = $state(new Map<string, boolean>()); // their milestones: private (only you) or public
-  let board = $state<Board | null>(null); // Failures, shown on their projects and milestones
   let loading = $state(true);
   let error = $state("");
 
   async function load() {
     try {
-      const [t, p, h, g, gm, b] = await Promise.all([
+      const [t, p, h, g, gm] = await Promise.all([
         loadTaxonomy(), loadProjects(), loadAllHours(), loadGroupProjects(true).catch(() => [] as GroupProject[]),
-        loadSharedMilestones().catch(() => []), loadBoardBeside(),
+        loadSharedMilestones().catch(() => []),
       ]);
-      board = b;
       privateShared = new Map(gm.map((m) => [m.id, m.is_private]));
       tax = t;
       projects = p;
@@ -417,13 +413,8 @@
                 <div class="p-body" data-unsaved-scope>
                   <ProjectEditor project={p} categories={editorCategories} categoryId={p.category_id} shared={sharedChoices}
                                  onsaved={changed} oncancel={() => (expanded = null)} hideDelete={!!msOpen[p.id]} />
-                  <Milestones project={p} {actualByMilestone} {privateShared} {target} {board} onchange={load}
+                  <Milestones project={p} {actualByMilestone} {privateShared} {target} onchange={load}
                               onediting={(on) => (msOpen[p.id] = on)} />
-                  {#if board}
-                    <FailureList {board} items={board.items.filter((f) => onProject(f, p, p.group_project_id))}
-                                 here={planningHash(p.id)} attach={{ ...NOWHERE, project_id: p.id }}
-                                 milestoneOf={(f) => p.milestone.find((m) => onMilestone(f, m, m.group_milestone_id))?.title} />
-                  {/if}
                 </div>
               {/if}
             </div>
