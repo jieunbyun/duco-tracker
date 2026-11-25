@@ -47,8 +47,8 @@
   // Who sees which tabs: the planner is yours alone; a member sees only their
   // logbook, projects and their own reading list. You keep a logbook too, for
   // the projects you lead.
-  const OWNER: Route[] = ["week", "day", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network"];
-  const SUPERVISOR: Route[] = ["week", "day", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network", "supervision", "logbook"];
+  const OWNER: Route[] = ["week", "time", "planning", "experiments", "meetings", "pathways", "budget", "network", "cv", "day", "reading"];
+  const SUPERVISOR: Route[] = ["week", "time", "planning", "experiments", "meetings", "pathways", "supervision", "logbook", "budget", "network", "cv", "day", "reading"];
   const MEMBER: Route[] = ["logbook", "projects", "reading"];
   // Tips, Failures, Practice and Diary are now in Experiments, and off the bar; their
   // pages stay, for the links to them (a hypothesis on a milestone opens in Failures)
