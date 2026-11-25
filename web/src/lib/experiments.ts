@@ -1,14 +1,14 @@
 // Experiments ("Life is experiments", 0066_experiments.sql): umbrella topics, each
 // with subtopics, and notes under either, each note tagged Tip, Hypothesis,
-// Practice, Self, Innovation (0067) and/or Modelling (0069), and marked outdated (⊘) when it no longer holds;
+// Practice, Self, Innovation (0067), Modelling (0069) and/or Teaching (0079), and marked outdated (⊘) when it no longer holds;
 // a topic or subtopic can be marked outdated too (0070).
 // Both topics and notes are in your own order (sort_order 10, 20, 30…).
 import { supabase } from "./supabase";
 
-export const TAGS = ["tip", "hypothesis", "practice", "self", "innovation", "modelling"] as const;
+export const TAGS = ["tip", "hypothesis", "practice", "self", "innovation", "modelling", "teaching"] as const;
 export type Tag = (typeof TAGS)[number];
 export const TAG_LABEL: Record<Tag, string> = {
-  tip: "Tip", hypothesis: "Hypothesis", practice: "Practice", self: "Self", innovation: "Innovation", modelling: "Modelling",
+  tip: "Tip", hypothesis: "Hypothesis", practice: "Practice", self: "Self", innovation: "Innovation", modelling: "Modelling", teaching: "Teaching",
 };
 
 /** tags (0068): none needed; they count for everything under the topic. outdated: 0070. */

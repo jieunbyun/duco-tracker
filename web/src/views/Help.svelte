@@ -303,7 +303,7 @@
     <dd>
       <em>Life is experiments</em>: Tips, Failures, Practice and Diary in one tab, laid out like the Logbook. Umbrella
       topics, each with subtopics, and notes under either. Every note carries one or more tags — Tip, Hypothesis,
-      Practice, Self, Innovation, Modelling — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
+      Practice, Self, Innovation, Modelling, Teaching (<code>0079_exp_teaching.sql</code>) — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
       A topic or subtopic can carry tags too (click its title to set them, or set them when you add it): they count for everything
       under it, so showing a tag shows that topic whole, with its subtopics and notes. A new subtopic starts with its
       topic's tags; one with none of its own shows its topic's, lighter. A new note starts with its

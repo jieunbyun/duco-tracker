@@ -108,14 +108,17 @@
 
   async function change(label: string, run: () => Promise<unknown>) {
     saving = true;
+    let failed = "";
     try {
       await undoable(label, run);
-      error = "";
     } catch (e) {
-      error = (e as Error).message;
+      failed = (e as Error).message;
+      // a tag the database does not take yet: the newest one needs its SQL run
+      if (/tags_check/.test(failed)) failed = "The Teaching tag needs web/db/0079_exp_teaching.sql run first, in the Supabase SQL editor.";
     } finally {
       saving = false;
-      await load();
+      await load(); // (clears the message on success, so it is set after)
+      if (failed) error = failed;
     }
   }
 
@@ -463,7 +466,7 @@
   <span class="eyebrow">Experiments</span>
   <h1>Life is experiments</h1>
   <p class="muted intro">
-    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self, Innovation or Modelling (a topic's
+    Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self, Innovation, Modelling or Teaching (a topic's
     tags count for everything under it). Drag ⠿ to put them in
     order; mark one ⊘ outdated when it no longer holds. Only you see them.
   </p>
