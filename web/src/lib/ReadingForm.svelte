@@ -43,7 +43,7 @@
   let note = $state("");
 
   const projectOptions = $derived(
-    projects.filter((p) => LIVE_STATUSES.has(p.status) || p.id === r0?.project_id).sort((a, b) => a.name.localeCompare(b.name)),
+    projects.filter((p) => LIVE_STATUSES.has(p.status) || p.id === r0?.project_id), // in Planning's order
   );
   // the chosen project's milestones (dropped ones only if already chosen)
   const milestoneOptions = $derived(

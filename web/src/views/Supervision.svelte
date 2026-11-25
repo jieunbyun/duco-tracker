@@ -160,7 +160,7 @@
   let newName = $state("");
   const linked = $derived(new Set(members.map((m) => m.planning_project_id).filter(Boolean)));
   const choices = $derived(
-    supervision.filter((p) => !linked.has(p.id) && LIVE_STATUSES.has(p.status)).sort((a, b) => a.name.localeCompare(b.name)),
+    supervision.filter((p) => !linked.has(p.id) && LIVE_STATUSES.has(p.status)), // in Planning's order
   );
   function openAdd() {
     adding = true;

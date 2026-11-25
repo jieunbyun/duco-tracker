@@ -41,8 +41,7 @@
 
   const groups = $derived(tax.areas.map((a) => ({ area: a, cats: tax.categories.filter((c) => c.area_id === a.id) })));
   const projectsFor = (categoryId: string) =>
-    projects.filter((p) => (!categoryId || p.category_id === categoryId) && LIVE_STATUSES.has(p.status))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    projects.filter((p) => (!categoryId || p.category_id === categoryId) && LIVE_STATUSES.has(p.status)); // in Planning's order
 
   const day = (d: string) => parse(d).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
   const repeats = (t: Todo) => !!t.source_key?.includes("|");

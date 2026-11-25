@@ -70,8 +70,7 @@
   // entry already points at (so editing never hides the current value).
   const projectOptions = $derived(
     projects
-      .filter((p) => p.category_id === category_id && (LIVE_STATUSES.has(p.status) || p.id === e0?.project_id))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+      .filter((p) => p.category_id === category_id && (LIVE_STATUSES.has(p.status) || p.id === e0?.project_id)), // in Planning's order
   );
   const project = $derived(projects.find((p) => p.id === projectPick) ?? null);
   const categoryNote = $derived(tax.categories.find((c) => c.id === category_id)?.description ?? "");

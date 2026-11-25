@@ -80,8 +80,7 @@
           ? p.name.toLocaleLowerCase().includes(query) || p.id === project_id
           : !category_id || p.category_id === category_id) &&
         (LIVE_STATUSES.has(p.status) || p.id === t0?.project_id),
-      )
-      .sort((a, b) => a.name.localeCompare(b.name));
+      ); // in Planning's order, as loaded
   });
   const projectMatches = $derived(
     projectOptions.filter((p) => p.name.toLocaleLowerCase().includes(projectSearch.trim().toLocaleLowerCase())),

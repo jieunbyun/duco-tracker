@@ -2,7 +2,7 @@
   import {
     loadTaxonomy, loadProjects, loadWeekPlan, loadUnfinishedBefore, loadEntriesBetween, loggedHoursOf, saveSlot, deleteSlot, saveTodo, deleteTodo, fmtHours,
     saveEntry, deleteEntry, loadAllHours, targetOn, loadIdeas, openSlotOn, loadIdeaNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote,
-    setMilestoneStatus,
+    setMilestoneStatus, byPlanningOrder,
   } from "../lib/data";
   import type { Taxonomy, Project, Milestone, Todo, Slot, TimeEntry, TimeEntryFields, IdeaNote } from "../lib/data";
   import { milestoneWeek } from "../lib/plan";
@@ -1473,7 +1473,7 @@
           key: c.id,
           label: `${a.label} › ${c.label}`,
           urgent: rows.some((r) => !r.existing && (r.info.overdue || r.info.dueThisWeek)),
-          projects: [...byProject.values()].sort((x, y) => x.p.name.localeCompare(y.p.name)),
+          projects: [...byProject.values()].sort((x, y) => byPlanningOrder(x.p, y.p)),
         });
       }
     }

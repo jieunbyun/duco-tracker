@@ -135,11 +135,32 @@ export type Project = {
 
 const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 
+/**
+ * Planning's order within a category: as you dragged them (0074_project_order.sql), the ones not
+ * yet placed (all of them until then, and a new one) on top, ★ first, then by end date, then name.
+ */
+export function byPlanningOrder(a: Project, b: Project): number {
+  const sa = a.sort_order ?? null, sb = b.sort_order ?? null;
+  if ((sa === null) !== (sb === null)) return sa === null ? -1 : 1;
+  if (sa !== null && sb !== null && sa !== sb) return sa - sb;
+  return Number(b.is_important) - Number(a.is_important) || (a.end_on ?? "9").localeCompare(b.end_on ?? "9")
+    || a.name.localeCompare(b.name);
+}
+
+/** Your projects in Planning's order: area by area, category by category, then as you placed them. */
 export async function loadProjects(): Promise<Project[]> {
   // all their columns, so a newer one (folder_url, after_ids, group links) is simply absent until its SQL is run
-  const { data, error } = await supabase.from("project").select("*,milestone(*)").order("name");
+  const [{ data, error }, tax] = await Promise.all([
+    supabase.from("project").select("*,milestone(*)").order("name"),
+    loadTaxonomy().catch(() => null), // only for the order: without it, by name within each category
+  ]);
   if (error) throw new Error(error.message);
-  return ((data ?? []) as unknown as Project[]).map((p) => ({
+  const rank = new Map<string, number>();
+  for (const a of tax?.areas ?? []) for (const c of tax!.categories) if (c.area_id === a.id) rank.set(c.id, rank.size);
+  const place = (p: Project) => rank.get(p.category_id) ?? rank.size;
+  return ((data ?? []) as unknown as Project[]).sort((a, b) =>
+    place(a) - place(b) || (place(a) === rank.size ? a.category_id.localeCompare(b.category_id) : 0) || byPlanningOrder(a, b),
+  ).map((p) => ({
     ...p,
     folder_url: p.folder_url ?? null,
     planned_hours: num(p.planned_hours),

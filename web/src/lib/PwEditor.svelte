@@ -95,7 +95,7 @@
   const dated = true; // goals too: without dates a goal sits in the goals column
   const reworded = $derived(!!n0 && n0.kind === "goal" && (f.title.trim() !== n0.title || (f.detail.trim() || null) !== n0.detail));
   const projectOptions = $derived(
-    projects.filter((p) => LIVE_STATUSES.has(p.status) || p.id === n0?.project_id).sort((a, b) => a.name.localeCompare(b.name)),
+    projects.filter((p) => LIVE_STATUSES.has(p.status) || p.id === n0?.project_id), // in Planning's order
   );
   const title = (id: string) => nodes.find((x) => x.id === id)?.title ?? "?";
   const mine = $derived(n0 ? links.filter((l) => l.from_id === n0.id || l.to_id === n0.id) : []);

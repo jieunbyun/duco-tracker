@@ -3,7 +3,7 @@
   import ExportData from "../lib/ExportData.svelte";
   import { tick } from "svelte";
   import { undoable, undoLast } from "../lib/undo.svelte";
-  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus, saveProjectOrder } from "../lib/data";
+  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus, saveProjectOrder, byPlanningOrder } from "../lib/data";
   import Sortable from "../lib/Sortable.svelte";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
   import { horizonRange, projectLoad, areaHorizons, plannedOf, PLANNABLE_KINDS, PACE_DAYS } from "../lib/horizon";
@@ -193,16 +193,8 @@
     })),
   );
 
-  // within a category: your own order, once dragged (0074_project_order.sql); the ones not yet
-  // placed (all of them until then, and a new one) on top, ★ first, then by end date
-  function byOrder(a: Project, b: Project): number {
-    const sa = a.sort_order ?? null, sb = b.sort_order ?? null;
-    if ((sa === null) !== (sb === null)) return sa === null ? -1 : 1;
-    if (sa !== null && sb !== null && sa !== sb) return sa - sb;
-    return Number(b.is_important) - Number(a.is_important) || (a.end_on ?? "9").localeCompare(b.end_on ?? "9");
-  }
   function projectsIn(c: Category): Project[] {
-    return visible.filter((p) => p.category_id === c.id).sort(byOrder);
+    return visible.filter((p) => p.category_id === c.id).sort(byPlanningOrder);
   }
 
   // drag a project's ⠿ (or ↑ ↓ on it); the done and dropped ones, when hidden, keep their places
@@ -210,7 +202,7 @@
   async function reorderProjects(c: Category, ids: string[]) {
     const moved = new Set(ids);
     let k = 0;
-    const all = projects.filter((p) => p.category_id === c.id).sort(byOrder)
+    const all = projects.filter((p) => p.category_id === c.id).sort(byPlanningOrder)
       .map((p) => (moved.has(p.id) ? ids[k++] : p.id));
     const was = new Map(projects.map((p) => [p.id, p.sort_order]));
     projects = projects.map((p) => (all.includes(p.id) ? { ...p, sort_order: (all.indexOf(p.id) + 1) * 10 } : p)); // at once
