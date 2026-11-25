@@ -5,16 +5,20 @@
   import { myRole } from "./lib/group";
   import type { Role } from "./lib/group";
   import type { Component } from "svelte";
+  import { untrack } from "svelte";
   import Login from "./lib/Login.svelte";
   import SetPassword from "./lib/SetPassword.svelte";
   import { undo, undoLast } from "./lib/undo.svelte";
   import { preview } from "./lib/preview.svelte";
   import { theme, toggleTheme } from "./lib/theme.svelte";
+  import { dayBack } from "./lib/dayBack.svelte";
+  import BackLink from "./lib/BackLink.svelte";
 
   // Each tab's code is fetched when the tab is first opened, so the app starts
   // with only what the opening tab needs.
   const views = {
     week: () => import("./views/Week.svelte"),
+    day: () => import("./views/Day.svelte"),
     planning: () => import("./views/Planning.svelte"),
     pathways: () => import("./views/Pathways.svelte"),
     supervision: () => import("./views/Supervision.svelte"),
@@ -35,7 +39,7 @@
     chart: () => import("./views/MemberPathways.svelte"),
   };
   const labels: Record<keyof typeof views, string> = {
-    week: "Week", planning: "Planning", pathways: "Pathways", supervision: "Members", time: "Time", reading: "Reading",
+    week: "Week", day: "Day", planning: "Planning", pathways: "Pathways", supervision: "Members", time: "Time", reading: "Reading",
     cv: "CV", experiments: "Experiments", tips: "Tips", failures: "Failures", practice: "Practice", diary: "Diary", meetings: "Meetings", budget: "Budget", network: "Network", help: "Help", logbook: "Logbook", projects: "Projects", chart: "Pathways",
   };
   type Route = keyof typeof views;
@@ -43,8 +47,8 @@
   // Who sees which tabs: the planner is yours alone; a member sees only their
   // logbook, projects and their own reading list. You keep a logbook too, for
   // the projects you lead.
-  const OWNER: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network"];
-  const SUPERVISOR: Route[] = ["week", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network", "supervision", "logbook"];
+  const OWNER: Route[] = ["week", "day", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network"];
+  const SUPERVISOR: Route[] = ["week", "day", "planning", "time", "reading", "pathways", "cv", "experiments", "meetings", "budget", "network", "supervision", "logbook"];
   const MEMBER: Route[] = ["logbook", "projects", "reading"];
   // Tips, Failures, Practice and Diary are now in Experiments, and off the bar; their
   // pages stay, for the links to them (a hypothesis on a milestone opens in Failures)
@@ -114,6 +118,14 @@
       .catch((e) => (viewError = `Could not load this tab: ${(e as Error).message}`));
   });
 
+  // gone from the Day tab to change an entry: "Back to Day" while you are in its tab
+  $effect(() => {
+    const r = route;
+    untrack(() => {
+      if (dayBack.tab && r !== dayBack.tab) dayBack.tab = "";
+    });
+  });
+
   // Ctrl/Cmd+Z undoes the latest change, in any tab — unless you are typing
   // or a dialog is open.
   const lastAction = $derived(undo.actions[undo.actions.length - 1] ?? null);
@@ -178,6 +190,7 @@
           It works as yours does: their own list of readings, notes and PDFs.</p>
       {:else if View}
         {#key undo.version}<View />{/key}
+        {#if dayBack.tab && route === dayBack.tab}<BackLink href={`#/day?d=${dayBack.day}`} text="Back to Day" />{/if}
       {:else}
         <p class="muted">Loading…</p>
       {/if}

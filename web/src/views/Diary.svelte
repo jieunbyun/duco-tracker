@@ -13,6 +13,7 @@
   import type { Taxonomy, TimeEntry } from "../lib/data";
   import { undoable } from "../lib/undo.svelte";
   import { addDays, today, parse, fmtDay } from "../lib/dates";
+  import { arrivedAt } from "../lib/dayBack.svelte";
 
   // ---- dates ----------------------------------------------------------------------
   const monthOf = (d: string) => `${d.slice(0, 7)}-01`;
@@ -26,7 +27,9 @@
   const short = (d: string) => parse(d).toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
 
   // ---- state ----------------------------------------------------------------------
-  let day = $state(last.day || today());
+  // from the Day tab (#/diary?d=<day>): that day
+  const arrivedDay = arrivedAt("diary").get("d");
+  let day = $state(arrivedDay && /^\d{4}-\d\d-\d\d$/.test(arrivedDay) ? arrivedDay : last.day || today());
   const month = $derived(monthOf(day));
   let days = $state<DiaryDay[]>([]); // this month and the one before (for the comparison)
   let entries = $state<TimeEntry[]>([]);

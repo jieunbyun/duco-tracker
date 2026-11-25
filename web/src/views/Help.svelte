@@ -108,6 +108,17 @@
       after a change offers to undo it.
     </dd>
 
+    <dt>Day</dt>
+    <dd>
+      One day read back like a diary: everything you wrote down on it, from every tab. It shows the diary
+      (mood and moments), time logged, the calendar, to-dos (planned that day or ticked off on it) and small
+      tasks, meetings, notes in Experiments, Reading, Network, Pathways, Practice and Failures, ideas jotted down,
+      the Logbook (actions added or done, comments, time on them), expenses and CV entries. A part with nothing
+      in it is left out. Move with ‹ ›, the date, or the ← → keys. Click anything to change it in its own tab,
+      where it opens ready to edit (a small task lights up); <em>← Back to Day</em> at the bottom left brings you
+      back to the same day.
+    </dd>
+
     <dt>Undo</dt>
     <dd>
       <em>↶ Undo</em> at the top right, or Ctrl+Z, takes back your latest change in any tab — an edit, an addition

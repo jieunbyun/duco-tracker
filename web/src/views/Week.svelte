@@ -69,6 +69,15 @@
   let showTodo = arrivedWith.get("show");
   const agendaBack = /^[\w-]+$/.test(arrivedWith.get("agenda") ?? "") ? `#/meetings?m=${arrivedWith.get("agenda")}` : null;
   let lit = $state<string | null>(null);
+  // from the Day tab (#/week?w=<week>&d=<day>&entry=…, todo=…, tidy=… or idea=…&note=…): that
+  // day, and the entry open to change (a small task lit up)
+  const ID = /^[\w-]+$/;
+  let fromDay = arrivedWith.get("d") && /^\d{4}-\d\d-\d\d$/.test(arrivedWith.get("d")!)
+    ? { day: arrivedWith.get("d")!, ...Object.fromEntries(["entry", "todo", "tidy", "idea", "note"]
+        .map((k) => [k, ID.test(arrivedWith.get(k) ?? "") ? arrivedWith.get(k)! : null])) } as
+        { day: string; entry: string | null; todo: string | null; tidy: string | null; idea: string | null; note: string | null }
+    : null;
+  if (fromDay) pickedDay = fromDay.day;
   if (arrivedWith.get("w")) {
     history.replaceState(null, "", "#/week");
     offset = Math.round((daysIn({ from: weekStart(today()), to: weekStart(arrivedWith.get("w")!) }) - 1) / 7);
@@ -172,6 +181,7 @@
         reopenMs = false;
         openMilestones();
       }
+      if (fromDay) arriveFromDay(fromDay);
     } catch (e) {
       if (id === request) error = (e as Error).message;
     } finally {
@@ -696,7 +706,7 @@
 
   // the month view: only the small tasks / deadlines, a month at a time (remembered in this browser)
   const MONTH_VIEW = "week.monthView";
-  let monthView = $state((() => { try { return localStorage.getItem(MONTH_VIEW) === "1"; } catch { return false; } })());
+  let monthView = $state(!fromDay && (() => { try { return localStorage.getItem(MONTH_VIEW) === "1"; } catch { return false; } })());
   let monthAt = $state(""); // the first day of the month shown ("" until one is picked)
   const shiftMonth = (m: string, n: number) => {
     const d = parse(m);
@@ -980,6 +990,29 @@
   function openEntry(entry: TimeEntry | null, day: string) {
     cvOpen = false;
     panel = { kind: "entry", entry, day };
+  }
+
+  function arriveFromDay(f: NonNullable<typeof fromDay>) {
+    fromDay = null;
+    const t = todos.find((x) => x.id === f.todo);
+    const idea = ideas.find((x) => x.id === f.idea);
+    const e = entries.find((x) => x.id === f.entry);
+    let at: string | null = null; // what to bring into view
+    if (e) openEntry(e, f.day);
+    else if (t) panel = { kind: "todo", todo: t };
+    else if (idea) {
+      if (phone) showView("todos");
+      const n = ideaNotes.find((x) => x.id === f.note);
+      if (n) startNote(idea, n);
+      else editIdea(idea);
+      at = `li.idea[data-id="${idea.id}"]`;
+    } else if (f.tidy && tidies.some((x) => x.id === f.tidy)) {
+      if (phone) showView("calendar");
+      lit = f.tidy;
+      at = `.tidy-row[data-id="${f.tidy}"]`;
+      setTimeout(() => (lit = null), 2500);
+    }
+    if (at) tick().then(() => document.querySelector(at!)?.scrollIntoView({ block: "center", behavior: "smooth" }));
   }
 
   function openLog(t: Todo, slot: Slot | null, day: string) {
@@ -2129,7 +2162,7 @@
   {@const list = tidiesOn(d)}
   <div class="tidy" role="group" aria-label={`Small tasks / deadlines on ${dayName(d)} ${dayNum(d)}`}>
     {#each list as t (t.id)}
-      <div class="tidy-row" class:done={t.is_done} class:tidyup={t.is_tidy} class:dragging={tidyDrag?.id === t.id}
+      <div class="tidy-row" class:done={t.is_done} class:tidyup={t.is_tidy} class:dragging={tidyDrag?.id === t.id} class:lit={lit === t.id}
            data-id={t.id} data-day={d}>
         {#if list.length > 1}
           <button type="button" class="tgrip" title="Drag to reorder (or use ↑ ↓)" aria-label={`Move “${t.title}”: drag, or press up or down`}
@@ -2738,7 +2771,7 @@
   .card .grip { font-size: 0.8rem; padding: 0; line-height: 1.4; opacity: 0.45; }
   .card .grip:hover, .card .grip:focus-visible { opacity: 1; }
   .card.dragging { box-shadow: 0 2px 10px rgb(0 0 0 / 0.15); }
-  .card.lit { animation: lit 2.5s ease-out; }
+  .card.lit, .tidy-row.lit { animation: lit 2.5s ease-out; }
   @keyframes lit { 0%, 40% { box-shadow: 0 0 0 3px var(--accent); } 100% { box-shadow: 0 0 0 3px transparent; } }
   .has-agenda { font-size: 0.8em; }
   .card.logged { opacity: 0.7; }

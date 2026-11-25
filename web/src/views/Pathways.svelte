@@ -21,6 +21,7 @@
   import { loadGroupProjects, loadMembers, myId } from "../lib/group";
   import type { GroupProject, Member } from "../lib/group";
   import { loadProjectActivity } from "../lib/actions";
+  import { arrivedAt } from "../lib/dayBack.svelte";
 
   // A member sees a read-only chart: the items they contribute to, and the goals they lead to.
   let { member = false }: { member?: boolean } = $props();
@@ -96,6 +97,10 @@
       years = pw.years;
       projects = p;
       readings = r;
+      const goal = arrived?.get("g");
+      if (goal && arrived) arrived.delete("g");
+      const n = nodes.find((x) => x.id === goal);
+      if (n) openEdit(n);
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -103,6 +108,8 @@
       loading = false;
     }
   }
+  // from the Day tab (#/pathways?g=<goal>): that goal open, with its thoughts
+  const arrived = location.hash.startsWith("#/pathways") ? arrivedAt("pathways") : null; // (not a member's chart)
   load();
 
   async function setYears(y: number) {

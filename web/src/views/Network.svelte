@@ -13,6 +13,7 @@
   import { readXlsx } from "../lib/xlsx";
   import { undoable } from "../lib/undo.svelte";
   import { fmtDay, today, addDays } from "../lib/dates";
+  import { arrivedAt } from "../lib/dayBack.svelte";
 
   let net = $state<Network>({ contacts: [], interactions: [], opportunities: [], organisations: [] });
   let missing = $state(false);
@@ -35,6 +36,7 @@
       missing = n === null;
       if (n) net = n;
       if (!selected || !net.contacts.some((c) => c.id === selected)) selected = null;
+      arrive();
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -43,6 +45,23 @@
     }
   }
   load();
+
+  // from the Day tab (#/network?c=<person>&i=<note>): that person, the note open to change
+  const arrived = arrivedAt("network");
+  function arrive() {
+    const c = arrived.get("c");
+    arrived.delete("c");
+    if (!c || !net.contacts.some((x) => x.id === c)) return;
+    const i = net.interactions.find((x) => x.id === arrived.get("i"));
+    Object.assign(last, { view: "people", tag: null, query: "" });
+    view = "people";
+    tag = null;
+    query = "";
+    selected = c;
+    opened = true;
+    draft = null;
+    editingMeet = i ? { id: i.id, met_on: i.met_on ?? "", body: i.body } : null;
+  }
 
   async function act(label: string, run: () => Promise<unknown>): Promise<boolean> {
     try {

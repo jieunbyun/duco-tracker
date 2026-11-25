@@ -13,6 +13,8 @@
   import type { Project } from "../lib/data";
   import { undoable } from "../lib/undo.svelte";
   import { fmtDay, today } from "../lib/dates";
+  import { arrivedAt } from "../lib/dayBack.svelte";
+  import { tick } from "svelte";
 
   let budgets = $state<Budget[]>([]);
   let lines = $state<Line[]>([]);
@@ -38,6 +40,7 @@
       expenses = all?.expenses ?? [];
       projects = p;
       if (!selected || !budgets.some((b) => b.id === selected)) selected = budgets[0]?.id ?? null;
+      arrive();
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -46,6 +49,22 @@
     }
   }
   load();
+
+  // from the Day tab (#/budget?e=<expense>): its budget, the expense open to change
+  const arrived = arrivedAt("budget");
+  async function arrive() {
+    const id = arrived.get("e");
+    arrived.delete("e");
+    const e = expenses.find((x) => x.id === id);
+    if (!e) return;
+    selected = e.budget_id;
+    lineFilter = null;
+    opened = true;
+    lDraft = null;
+    editExpense(e);
+    await tick();
+    document.querySelector(".expenses tr.editing")?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 
   async function act(label: string, run: () => Promise<unknown>): Promise<boolean> {
     try {

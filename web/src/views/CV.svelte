@@ -3,6 +3,8 @@
   import type { CvEntry } from "../lib/data";
   import { CV_STATUSES, SUPERVISION, entriesLatex, supervisionTitle, supervisionBody, supervisionDates } from "../lib/cv";
   import { fmtDay } from "../lib/dates";
+  import { arrivedAt } from "../lib/dayBack.svelte";
+  import { tick } from "svelte";
   import CvForm from "../lib/CvForm.svelte";
 
   let entries = $state<CvEntry[]>([]);
@@ -18,6 +20,7 @@
   async function load() {
     try {
       entries = await loadCv();
+      arrive();
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -26,6 +29,19 @@
     }
   }
   load();
+
+  // from the Day tab (#/cv?e=<entry>): that entry open to change
+  const arrived = arrivedAt("cv");
+  async function arrive() {
+    const id = arrived.get("e");
+    arrived.delete("e");
+    if (!id || !entries.some((x) => x.id === id)) return;
+    year = section = status = "all";
+    adding = false;
+    editing = id;
+    await tick();
+    document.querySelector(".card")?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 
   async function saved() {
     adding = false;

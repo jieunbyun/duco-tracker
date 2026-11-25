@@ -21,6 +21,7 @@
   import type { Tag, Topic, Note } from "../lib/experiments";
   import { undoable } from "../lib/undo.svelte";
   import { fmtDay, parse } from "../lib/dates";
+  import { arrivedAt } from "../lib/dayBack.svelte";
   import { download } from "../lib/group";
   import Sortable from "../lib/Sortable.svelte";
   import Linked from "../lib/Linked.svelte";
@@ -59,6 +60,7 @@
   async function load() {
     try {
       ({ topics, notes } = await loadExperiments());
+      arrive();
       error = "";
       missing = "";
     } catch (e) {
@@ -73,6 +75,23 @@
     }
   }
   load();
+
+  // from the Day tab (#/experiments?n=<note>): the note open to change, in its topic
+  const arrived = arrivedAt("experiments");
+  function arrive() {
+    const id = arrived.get("n");
+    arrived.delete("n");
+    const n = notes.find((x) => x.id === id);
+    if (!n) return;
+    tag = null;
+    query = "";
+    view = "topics";
+    const t = topics.find((x) => x.id === n.topic_id);
+    if (t?.parent_id) openUp(t.parent_id);
+    if (t) openUp(t.id);
+    startEdit(n);
+    tick().then(() => document.querySelector(".draft")?.scrollIntoView({ block: "center", behavior: "smooth" }));
+  }
 
   async function change(label: string, run: () => Promise<unknown>) {
     saving = true;

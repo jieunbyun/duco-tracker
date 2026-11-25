@@ -12,6 +12,8 @@
   import type { Book, Practice, Session, Skill, Formulation } from "../lib/practice";
   import { undoable } from "../lib/undo.svelte";
   import { fmtDay, today } from "../lib/dates";
+  import { arrivedAt } from "../lib/dayBack.svelte";
+  import { tick } from "svelte";
   import PracticeSession from "../lib/PracticeSession.svelte";
   import FormulationEditor from "../lib/FormulationEditor.svelte";
 
@@ -37,6 +39,7 @@
       const b = await loadBook();
       missing = b === null;
       book = b;
+      arrive();
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -45,6 +48,21 @@
     }
   }
   load();
+
+  // from the Day tab (#/practice?s=<session>): that session open to change
+  const arrived = arrivedAt("practice");
+  async function arrive() {
+    const id = arrived.get("s");
+    arrived.delete("s");
+    const s = book?.sessions.find((x) => x.id === id);
+    if (!s) return;
+    skill = null;
+    if (practices.find((p) => p.id === s.practice_id)?.done_on) showDone = true;
+    editing = null;
+    sessionForm = { practice: s.practice_id, session: s };
+    await tick();
+    document.querySelector(".sessions li.editing")?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
 
   const practices = $derived(book?.practices ?? []);
   const active = $derived(practices.filter((p) => !p.done_on));

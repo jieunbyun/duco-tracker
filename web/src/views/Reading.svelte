@@ -7,6 +7,8 @@
   } from "../lib/reading";
   import type { Reading, Note, QuoteRow } from "../lib/reading";
   import { fmtDay, today } from "../lib/dates";
+  import { arrivedAt } from "../lib/dayBack.svelte";
+  import { tick } from "svelte";
   import ReadingForm from "../lib/ReadingForm.svelte";
 
 
@@ -27,6 +29,7 @@
       [items, projects] = await Promise.all([loadReadings(), loadProjects()]);
       error = "";
       prunePdfs(items).catch(() => {}); // files left behind by deletes in earlier sessions
+      arrive();
     } catch (e) {
       error = (e as Error).message;
     } finally {
@@ -168,6 +171,25 @@
     return quotes.filter((x) => !q || [x.quote, x.body, x.page, x.reading?.title, x.reading?.authors].some((v) => v?.toLowerCase().includes(q)));
   });
   /** Back to the list, with the reading a quote is from open. */
+  // from the Day tab (#/reading?r=<reading>&n=<note>): that reading open, the note in its form
+  const arrived = arrivedAt("reading");
+  async function arrive() {
+    const r = arrived.get("r");
+    arrived.delete("r");
+    if (!r || !items.some((x) => x.id === r)) return;
+    goTo(r);
+    const n = arrived.get("n");
+    if (n) {
+      const all = await loadNotes(r).catch(() => [] as Note[]);
+      if (open !== r) return;
+      notes = all;
+      const x = all.find((y) => y.id === n);
+      if (x) editNote(x);
+    }
+    await tick();
+    document.querySelector("li.open")?.scrollIntoView({ block: "start", behavior: "smooth" });
+  }
+
   function goTo(readingId: string) {
     view = "items";
     filter = "all";
