@@ -1,8 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { saveTodo, deleteTodo, saveSlot } from "./data";
-  import type { Taxonomy, Project, Todo, Slot, TodoFields } from "./data";
-  import { addDays } from "./dates";
+  import { saveTodo, deleteTodo, saveSlot, loadTodoNotes, addIdeaNote, saveIdeaNote, deleteIdeaNote } from "./data";
+  import type { Taxonomy, Project, Todo, Slot, TodoFields, IdeaNote } from "./data";
+  import { addDays, fmtDay } from "./dates";
+  import { undoable } from "./undo.svelte";
   import { LIVE_STATUSES } from "./horizon";
   import Linked from "./Linked.svelte";
 
@@ -18,8 +19,9 @@
     /** what happened, and the ids of any to-dos created (for undo) */
     onsaved: (info: { action: "created" | "updated" | "deleted" | "cancelled" | "restored"; ids?: string[] }) => void;
     oncancel: () => void;
+    oncomments?: () => void; // a comment was added, changed or deleted (saved at once)
   };
-  let { todo, slots, tax, projects, weekStart, day, placeOnDay, kind: kind0, onsaved, oncancel }: Props = $props();
+  let { todo, slots, tax, projects, weekStart, day, placeOnDay, kind: kind0, onsaved, oncancel, oncomments }: Props = $props();
 
   const init = untrack(() => ({ todo, slots, weekStart, day, kind0, placeOnDay }));
   const t0 = init.todo;
@@ -144,6 +146,56 @@
     }
   }
 
+  // ---- comments: dated, newest first, each saved at once (as on a Logbook action) -----------
+  let comments = $state<IdeaNote[]>([]);
+  let commentText = $state("");
+  let commentEdit = $state<{ id: string; body: string } | null>(null);
+  let commentBusy = $state(false);
+  async function loadComments() {
+    if (t0) comments = await loadTodoNotes(t0.id).catch(() => [] as IdeaNote[]);
+  }
+  loadComments();
+  async function commentAct(label: string, run: () => Promise<unknown>): Promise<boolean> {
+    commentBusy = true;
+    try {
+      await undoable(label, run);
+      await loadComments();
+      oncomments?.();
+      return true;
+    } catch (err) {
+      error = (err as Error).message;
+      return false;
+    } finally {
+      commentBusy = false;
+    }
+  }
+  async function addComment() {
+    const body = commentText.trim();
+    if (!t0 || !body) return;
+    if (await commentAct(`Commented on “${t0.title}”`, () => addIdeaNote(t0.id, body))) commentText = "";
+  }
+  async function keepComment() {
+    const e = commentEdit;
+    if (!e || !t0) return;
+    const was = comments.find((c) => c.id === e.id);
+    if (!e.body.trim() || e.body.trim() === was?.body) return void (commentEdit = null);
+    if (await commentAct(`Changed a comment on “${t0.title}”`, () => saveIdeaNote(e.id, e.body.trim()))) commentEdit = null;
+  }
+  function removeComment(c: IdeaNote) {
+    if (!t0 || !confirm("Delete this comment?")) return;
+    commentEdit = null;
+    commentAct(`Deleted a comment on “${t0.title}”`, () => deleteIdeaNote(c.id));
+  }
+  // Enter adds (or keeps an edit) rather than saving the whole form; Shift+Enter starts a new line
+  function commentKeys(ev: KeyboardEvent, run: () => unknown) {
+    if (ev.key === "Enter" && !ev.shiftKey) { ev.preventDefault(); run(); }
+    if (ev.key === "Escape" && commentEdit) { ev.preventDefault(); ev.stopPropagation(); commentEdit = null; }
+  }
+  function startCommentEdit(ev: Event, c: IdeaNote) {
+    if ((ev.target as HTMLElement).closest("a") || getSelection()?.toString()) return;
+    commentEdit = { id: c.id, body: c.body };
+  }
+
   async function remove() {
     if (!t0 || !confirm(`Delete “${t0.title}”${t0.kind === "task" ? " and its planned days" : ""}? Logged time stays.`)) return;
     busy = true;
@@ -233,9 +285,42 @@
     </label>
   {:else}
     <div class="wide note">
-      Note
+      <span class="note-head">Note <button type="button" class="mini" onclick={editNote}>Edit</button></span>
       <span class="note-text" role="button" tabindex="0" title="Click to edit" onclick={editNote}
             onkeydown={(ev) => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); editNote(ev); } }}><Linked text={note} /></span>
+    </div>
+  {/if}
+
+  {#if t0}
+    <div class="wide comments">
+      <span class="note-head">Comments{#if comments.length} <span class="count">{comments.length}</span>{/if}</span>
+      <textarea class="comment-add" rows="1" bind:value={commentText} disabled={commentBusy} aria-label="Add a comment"
+                placeholder="Add a comment — Enter adds it (saved at once); a web address shows as a short “link”"
+                onkeydown={(ev) => commentKeys(ev, addComment)}></textarea>
+      {#if comments.length}
+        <ul>
+          {#each comments as c (c.id)}
+            <li>
+              <span class="when">{fmtDay(c.created_at.slice(0, 10))}</span>
+              {#if commentEdit?.id === c.id}
+                <span class="comment-edit">
+                  <textarea rows="2" bind:value={commentEdit.body} aria-label="Comment" disabled={commentBusy}
+                            onkeydown={(ev) => commentKeys(ev, keepComment)}></textarea>
+                  <span class="comment-actions">
+                    <button type="button" class="mini" onclick={keepComment} disabled={commentBusy}>Keep</button>
+                    <button type="button" class="mini" onclick={() => (commentEdit = null)}>Cancel</button>
+                    <button type="button" class="mini danger" onclick={() => removeComment(c)} disabled={commentBusy}>Delete</button>
+                  </span>
+                </span>
+              {:else}
+                <span class="note-text" role="button" tabindex="0" title="Click to change or delete"
+                      onclick={(ev) => startCommentEdit(ev, c)}
+                      onkeydown={(ev) => { if (ev.target === ev.currentTarget && (ev.key === "Enter" || ev.key === " ")) { ev.preventDefault(); startCommentEdit(ev, c); } }}><Linked text={c.body} /></span>
+              {/if}
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
   {/if}
 
@@ -260,7 +345,20 @@
   label { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
   .wide { grid-column: 1 / -1; }
   .note { display: grid; gap: 0.25rem; font-size: 0.82rem; color: var(--ink-soft); }
-  .note-text { justify-self: start; cursor: text; font-size: 0.92rem; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere; }
+  .note-text {
+    justify-self: start; cursor: text; font-size: 0.92rem; color: var(--ink); white-space: pre-line; overflow-wrap: anywhere;
+    border-radius: var(--radius); padding: 0.1rem 0.3rem; margin-left: -0.3rem;
+  }
+  .note-text:hover, .note-text:focus-visible { background: var(--panel); }
+  .note-head { display: flex; align-items: center; gap: 0.5rem; }
+  .mini { font-size: 0.75rem; padding: 0.1rem 0.5rem; }
+  .comments { display: grid; gap: 0.35rem; font-size: 0.82rem; color: var(--ink-soft); }
+  .comments .count { font-size: 0.75rem; }
+  .comments ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; max-height: 14rem; overflow-y: auto; }
+  .comments li { display: flex; gap: 0.6rem; align-items: baseline; }
+  .comments .when { flex: none; font-size: 0.75rem; font-variant-numeric: tabular-nums; }
+  .comment-edit { flex: 1; display: grid; gap: 0.3rem; }
+  .comment-actions { display: flex; gap: 0.35rem; }
   .hint { grid-column: 1 / -1; margin: -0.35rem 0 0; font-size: 0.8rem; color: var(--ink-soft); white-space: pre-line; }
   .project-empty { font-size: 0.8rem; color: var(--ink-soft); }
 

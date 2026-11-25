@@ -388,6 +388,13 @@ export async function loadIdeaNotes(): Promise<IdeaNote[]> {
   const { data, error } = await supabase.from("idea_note").select("id,todo_id,body,created_at").order("created_at");
   return error ? [] : (data as IdeaNote[]);
 }
+/** A to-do's comments (kept as its notes, as an idea's), newest first. */
+export async function loadTodoNotes(todo_id: string): Promise<IdeaNote[]> {
+  const { data, error } = await supabase.from("idea_note").select("id,todo_id,body,created_at")
+    .eq("todo_id", todo_id).order("created_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return data as IdeaNote[];
+}
 export async function addIdeaNote(todo_id: string, body: string): Promise<void> {
   await check(supabase.from("idea_note").insert({ todo_id, body }));
 }

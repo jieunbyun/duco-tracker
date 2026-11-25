@@ -110,8 +110,11 @@ export async function loadDay(day: string): Promise<DayLog> {
 
   // the names of what the notes are on
   const actionIds = [...comments.map((c) => c.action_id), ...actionTime.map((t) => t.action_id)];
-  const [ideaTitles, series, topics, readings, contacts, nodes, practices, failures, actionTitles, budgets] = await Promise.all([
-    namesOf("todo", "title", ideaNotes.map((n) => n.todo_id)),
+  const noteIds = [...new Set(ideaNotes.map((n) => n.todo_id))];
+  const [noteOn, series, topics, readings, contacts, nodes, practices, failures, actionTitles, budgets] = await Promise.all([
+    noteIds.length
+      ? rows<{ id: string; title: string; kind: string; due_on: string }>(supabase.from("todo").select("id,title,kind,due_on").in("id", noteIds))
+      : [],
     namesOf("meeting_series", "name", meetings.map((m) => m.series_id)),
     rows<{ id: string; title: string; parent_id: string | null }>(supabase.from("exp_topic").select("id,title,parent_id")),
     namesOf("reading", "title", readingNotes.map((n) => n.reading_id)),
@@ -129,6 +132,7 @@ export async function loadDay(day: string): Promise<DayLog> {
       : [],
   ]);
 
+  const onTodo = (n: { todo_id: string }) => noteOn.find((t) => t.id === n.todo_id);
   const cat = (id: string | null) => (id ? tax?.allCategories.find((c) => c.id === id)?.label ?? "" : "");
   const proj = (id: string | null) => (id ? projects.find((p) => p.id === id)?.name ?? "" : "");
   const topicPath = (id: string) => {
@@ -198,6 +202,15 @@ export async function loadDay(day: string): Promise<DayLog> {
     })),
   });
 
+  add({
+    key: "comments", title: "Comments on to-dos",
+    items: ideaNotes.filter((n) => onTodo(n) && onTodo(n)!.kind !== "idea").map((n) => {
+      const t = onTodo(n)!;
+      // opened in the week it is filed under, where its window has the comments
+      return { key: n.id, text: n.body, meta: `on ${t.title}`, href: `#/week?w=${weekStart(t.due_on)}&d=${t.due_on}&todo=${t.id}` };
+    }),
+  });
+
   // ---- meetings -----------------------------------------------------------------------
   add({
     key: "meetings", title: "Meetings",
@@ -225,8 +238,8 @@ export async function loadDay(day: string): Promise<DayLog> {
     key: "ideas", title: "Ideas",
     items: [
       ...newIdeas.map((t) => ({ key: t.id, text: t.title, more: clip(t.note), meta: "jotted down", href: `${week}&idea=${t.id}` })),
-      ...ideaNotes.map((n) => ({
-        key: n.id, text: n.body, meta: `on ${ideaTitles.get(n.todo_id) ?? "an idea"}`, href: `${week}&idea=${n.todo_id}&note=${n.id}`,
+      ...ideaNotes.filter((n) => onTodo(n)?.kind === "idea").map((n) => ({
+        key: n.id, text: n.body, meta: `on ${onTodo(n)!.title}`, href: `${week}&idea=${n.todo_id}&note=${n.id}`,
       })),
     ],
   });

@@ -2026,7 +2026,7 @@
                 </button>
                 <span class="t-meta muted">
                   {label(t)}{label(t) && (t.est_hours || lh) ? " · " : ""}
-                  {#if lh}{fmtHours(lh)}{t.est_hours ? ` of ${fmtHours(t.est_hours)}` : ""} logged{#if !t.is_done && !t.is_cancelled && leftFor(t) !== null} · {leftText(leftFor(t)!)}{/if}{:else if t.est_hours}est. {fmtHours(t.est_hours)}{/if}
+                  {#if lh}{fmtHours(lh)}{t.est_hours ? ` of ${fmtHours(t.est_hours)}` : ""} logged{#if !t.is_done && !t.is_cancelled && leftFor(t) !== null} · {leftText(leftFor(t)!)}{/if}{:else if t.est_hours}est. {fmtHours(t.est_hours)}{/if}{#if notesOf(t).length}<span title="Comments — open the to-do to read or add">{label(t) || lh || t.est_hours ? " · " : ""}💬 {notesOf(t).length}</span>{/if}
                 </span>
                 {#if ts.length}
                   <span class="t-days">
@@ -2327,7 +2327,8 @@
       <h2>{panel.todo ? `Edit ${panel.todo.kind === "meeting" ? "meeting" : "to-do"}` : panel.as === "meeting" ? "New meeting" : "New to-do"}</h2>
       <TodoForm todo={panel.todo} slots={panel.todo ? slotsOf(panel.todo) : []} {tax} {projects}
                 weekStart={start} day={panel.day} placeOnDay={panel.place} kind={panel.as}
-                onsaved={closed} oncancel={() => (panel = null)} />
+                onsaved={closed} oncancel={() => (panel = null)}
+                oncomments={() => loadIdeaNotes().then((n) => (ideaNotes = n)).catch(() => {})} />
     {:else if panel.kind === "spread"}
       {@const t = panel.todo}
       <h2>Plan “{t.title}” across days</h2>
