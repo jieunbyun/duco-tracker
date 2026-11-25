@@ -1,6 +1,12 @@
 <script lang="ts">
-  import { loadProjects, loadTaxonomy, setProjectDates } from "../lib/data";
-  import type { Project, Taxonomy } from "../lib/data";
+  import { loadProjects, loadTaxonomy, setProjectDates, loadAllHours } from "../lib/data";
+  import type { Project, Taxonomy, HourRow } from "../lib/data";
+  import ProjectEditor from "../lib/ProjectEditor.svelte";
+  import Milestones from "../lib/Milestones.svelte";
+  import PwFailures from "../lib/PwFailures.svelte";
+  import { loadBoardBeside, onProject, onMilestone, saveFailure, isLate, NOWHERE } from "../lib/failures";
+  import type { Board, Failure, World } from "../lib/failures";
+  import type { GroupMilestone } from "../lib/group";
   import { LIVE_STATUSES, milestoneDates } from "../lib/plan";
   import { loadReadings } from "../lib/reading";
   import type { Reading } from "../lib/reading";
@@ -19,7 +25,7 @@
   import { undoable } from "../lib/undo.svelte";
   import { preview } from "../lib/preview.svelte";
   import type { Output, OutputLink } from "../lib/assets";
-  import { loadGroupProjects, loadMembers, myId } from "../lib/group";
+  import { loadGroupProjects, loadMembers, myId, loadMilestones as loadSharedMilestones } from "../lib/group";
   import type { GroupProject, Member } from "../lib/group";
   import { loadProjectActivity } from "../lib/actions";
   import { arrivedAt } from "../lib/dayBack.svelte";
@@ -42,6 +48,17 @@
   let groupActivity = $state(new Map<string, number>()); // comments on each shared project's actions this week
   let groupMembers = $state<Member[]>([]);
   let contributors = $state(new Map<string, string[]>());
+  // to change a linked project's Planning side and its Failures without leaving the map
+  let board = $state<Board | null>(null); // null before 0052 is run
+  let sharedMilestones = $state<GroupMilestone[]>([]);
+  let hours = $state<HourRow[]>([]); // logged, for the milestones' hours: read when first needed
+  let hoursRead = false;
+  function readHours() {
+    if (hoursRead) return;
+    hoursRead = true;
+    loadAllHours().then((h) => (hours = h)).catch(() => (hoursRead = false));
+  }
+  async function reloadBoard() { board = await loadBoardBeside(); }
 
   // three views of the same pathways: the map, a list for entering and linking, and the information system
   type View = "map" | "list" | "system";
@@ -87,12 +104,14 @@
       ({ outputs, links: outputLinks, titles: outputTitles } = out);
       me = id;
       // students' shared projects and their logbooks (none before 0015, or without a group)
-      [groupProjects, groupActivity, groupMembers, contributors] = await Promise.all([
+      [groupProjects, groupActivity, groupMembers, contributors, board, sharedMilestones] = await Promise.all([
         // (with any in the bin: saving an item must not unlink it)
         loadGroupProjects(true).catch(() => [] as GroupProject[]),
         loadProjectActivity(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)),
         loadMembers().catch(() => [] as Member[]), loadContributors(),
+        loadBoardBeside(), loadSharedMilestones().catch(() => [] as GroupMilestone[]),
       ]);
+      if (hoursRead) loadAllHours().then((h) => (hours = h)).catch(() => {});
       nodes = pw.nodes;
       links = pw.links;
       years = pw.years;
@@ -525,7 +544,7 @@
     if (!panel && dialog.open) dialog.close();
   });
 
-  function openEdit(n: PwNode) { panel = { node: n }; }
+  function openEdit(n: PwNode) { panel = { node: n }; sheetTab = "item"; }
 
   const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6, grant: 3, award: 3 };
   /** Whether a row in a lane is free over a span (goals: in the goals column), but for `except`. */
@@ -624,6 +643,128 @@
     await load();
   }
 
+  // ---- the side sheet: an item, and (linked to Planning) its project and its Failures ----------
+  type SheetTab = "item" | "planning" | "failures";
+  let sheetTab = $state<SheetTab>("item");
+  let msOpen = $state(false); // a milestone's form is open: the project's Delete steps aside
+  function setSheetTab(t: SheetTab) {
+    sheetTab = t;
+    if (t === "planning") readHours();
+  }
+  /** The item open in the sheet, as it is now (the sheet stays open while things reload). */
+  const cur = $derived.by(() => {
+    if (!panel || !("node" in panel) || !panel.node) return null;
+    const id = panel.node.id;
+    const n = nodes.find((x) => x.id === id);
+    return n ? eff(n) : null;
+  });
+  const curProject = $derived(cur?.project_id ? projById.get(cur.project_id) : undefined);
+  const curShared = $derived(curProject?.group_project_id ?? cur?.group_project_id ?? null);
+  const world = $derived<World>({ planning: projects, shared: groupProjects, sharedMilestones });
+  const privateShared = $derived(new Map(sharedMilestones.map((m) => [m.id, m.is_private])));
+  const actualByMilestone = $derived.by(() => {
+    const m = new Map<string, number>();
+    for (const h of hours) if (h.milestone_id) m.set(h.milestone_id, (m.get(h.milestone_id) ?? 0) + h.hours);
+    return m;
+  });
+  const editorCategories = $derived(
+    (tax?.categories ?? []).map((c) => ({ category: c, areaLabel: tax!.areas.find((a) => a.id === c.area_id)?.label ?? "" })),
+  );
+  // as in Planning: one in the bin stays listed while it is linked, so saving does not unlink it
+  const sharedChoices = $derived(groupProjects.map((g) => ({
+    id: g.id, title: g.title, taken: projects.some((p) => p.group_project_id === g.id), binned: !!g.deleted_at,
+  })).filter((g) => g.taken || !g.binned));
+
+  /** The hypotheses on an item: on its Planning project (or its milestones), or on the shared project it stands for. */
+  function failuresOn(n: PwNode): Failure[] {
+    if (!board || !(n.project_id || n.group_project_id)) return [];
+    const p = n.project_id ? projById.get(n.project_id) : undefined;
+    return board.items.filter((f) => onProject(f, p, p?.group_project_id ?? n.group_project_id));
+  }
+  const curFailures = $derived(cur ? failuresOn(cur) : []);
+  const curMilestoneOf = (f: Failure) =>
+    curProject?.milestone.find((m) => onMilestone(f, m, m.group_milestone_id))?.title;
+
+  // ---- the tray: what is not on the map yet, to drag onto it ---------------------------------
+  const onMap = $derived(new Set(nodes.map((n) => n.project_id).filter(Boolean)));
+  const trayProjects = $derived(projects.filter((p) => LIVE_STATUSES.has(p.status) && !onMap.has(p.id)));
+  // hypotheses on nothing yet (those on a project come with it)
+  const trayFailures = $derived(board ? board.items.filter((f) => !f.done_on && !f.project_id && !f.milestone_id
+    && !f.group_project_id && !f.group_milestone_id) : []);
+  const TRAY_KEY = "pathways.tray";
+  let trayOpen = $state(stored(TRAY_KEY) !== "closed");
+  $effect(() => store(TRAY_KEY, trayOpen ? null : "closed"));
+  const short = (s: string, k = 48) => (s.length > k ? `${s.slice(0, k)}…` : s);
+
+  type TrayDrag = { kind: "project" | "failure"; id: string; label: string; x: number; y: number; moved: boolean };
+  let trayDrag = $state<TrayDrag | null>(null);
+  function trayStart(ev: PointerEvent, kind: TrayDrag["kind"], id: string, label: string) {
+    if (ev.button !== 0) return;
+    ev.preventDefault();
+    trayDrag = { kind, id, label, x: ev.clientX, y: ev.clientY, moved: false };
+    window.addEventListener("pointermove", trayMove);
+    window.addEventListener("pointerup", trayUp);
+    window.addEventListener("pointercancel", trayUp);
+  }
+  function trayMove(ev: PointerEvent) {
+    if (trayDrag) trayDrag = { ...trayDrag, x: ev.clientX, y: ev.clientY, moved: true };
+  }
+  async function trayUp(ev: PointerEvent) {
+    window.removeEventListener("pointermove", trayMove);
+    window.removeEventListener("pointerup", trayUp);
+    window.removeEventListener("pointercancel", trayUp);
+    const d = trayDrag;
+    trayDrag = null;
+    if (!d?.moved || !mapEl || ev.type === "pointercancel") return;
+    const r = mapEl.getBoundingClientRect();
+    if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
+    if (d.kind === "project") {
+      const p = projects.find((x) => x.id === d.id);
+      if (p) await placeProject(p, bandAt(ev.clientY - r.top));
+      return;
+    }
+    const el = (document.elementFromPoint(ev.clientX, ev.clientY) as HTMLElement | null)?.closest<HTMLElement>("[data-node]");
+    const raw = el ? nodes.find((x) => x.id === el.dataset.node) : undefined;
+    await attachFailure(d.id, raw ? eff(raw) : undefined);
+  }
+  /** A Planning project onto the map: in the lane (and, by ambition, under the ambition) it is dropped in. */
+  async function placeProject(p: Project, where?: { lane: Lane; amb: string | null }) {
+    const def = laneFor(p);
+    const lane = !where || where.lane === "goals" ? def.lane : where.lane;
+    const kind = lane === "grants" ? "grant" : "project";
+    const s = p.start_on ?? monthStart(today());
+    const amb = where && byAmb ? where.amb : focusOn && focusOn !== "none" ? focusOn : null;
+    const fields: Partial<PwNodeFields> = {
+      kind, lane, title: p.name, project_id: p.id, potential: false, grant_stage: kind === "grant" ? "drafting" : null,
+      start_on: s, end_on: p.end_on ?? null, lane_row: freeRow(lane, kind, s, p.end_on ?? addMonths(s, 3)),
+      show_milestones: p.milestone.length > 0, ...(amb ? { ambition_id: amb } : {}),
+    };
+    try {
+      await undoable(`Put “${p.name}” on the map`, () => saveNode(null, fields));
+      await load();
+    } catch (e) {
+      const msg = (e as Error).message;
+      await load();
+      error = /ambition_id/.test(msg) ? "Putting it under an ambition needs web/db/0075_pw_ambition.sql run first, in the Supabase SQL editor." : msg;
+    }
+  }
+  /** A hypothesis onto an item: it goes on the item's Planning project (or the shared one it stands for). */
+  async function attachFailure(id: string, n: PwNode | undefined) {
+    const p = n?.project_id ? projById.get(n.project_id) : undefined;
+    const attach = p ? { ...NOWHERE, project_id: p.id } : n?.group_project_id ? { ...NOWHERE, group_project_id: n.group_project_id } : null;
+    if (!n || !attach) {
+      error = "Drop a hypothesis on an item that is a Planning project (or a member's project).";
+      return;
+    }
+    try {
+      await undoable(`Put a hypothesis on “${n.title}”`, () => saveFailure(id, attach));
+      error = "";
+      await reloadBoard();
+    } catch (e) {
+      error = (e as Error).message;
+    }
+  }
+
   const kindLabel = (k: string) => NODE_KINDS.find((x) => x.key === k)?.label ?? k;
   const nodeById = $derived(new Map(nodes.map((n) => [n.id, n])));
   /** Funding of an item from grants: "funded" once one is awarded, "funding pending" while any is open. */
@@ -652,6 +793,11 @@
     if (who.length) bits.push(who.join(", "));
     const k = outputCount(n.id);
     if (k) bits.push(`${k} ${k === 1 ? "output" : "outputs"}`);
+    const fs = failuresOn(n).filter((f) => !f.done_on);
+    if (fs.length) {
+      const late = fs.filter((f) => isLate(f, today())).length;
+      bits.push(`${fs.length} ${fs.length === 1 ? "hypothesis" : "hypotheses"}${late ? ` (⚠ ${late} overdue)` : ""}`);
+    }
     return bits.join(" · ");
   }
 </script>
@@ -710,6 +856,34 @@
         <button class:on={byAmb} aria-pressed={byAmb} onclick={() => setRows("ambition")}>by ambition</button>
       </div>
     </div>
+  {/if}
+  {#if view === "map" && !member && (trayProjects.length || trayFailures.length)}
+    <details class="tray" bind:open={trayOpen}>
+      <summary>
+        Not on the map yet:
+        {#if trayProjects.length}{trayProjects.length} Planning {trayProjects.length === 1 ? "project" : "projects"}{/if}{#if trayProjects.length && trayFailures.length} · {/if}{#if trayFailures.length}{trayFailures.length} {trayFailures.length === 1 ? "hypothesis" : "hypotheses"} on no project{/if}
+      </summary>
+      <div class="tray-items">
+        {#each trayProjects as p (p.id)}
+          {@const k = board?.items.filter((f) => !f.done_on && onProject(f, p, p.group_project_id)).length ?? 0}
+          <span class="tray-chip" role="button" tabindex="0" title={`Drag onto the map, into a lane — or press Enter to put it in its area's lane`}
+                onpointerdown={(ev) => trayStart(ev, "project", p.id, p.name)}
+                onkeydown={(ev) => { if (ev.key === "Enter") { ev.preventDefault(); placeProject(p); } }}>
+            <span class="grip" aria-hidden="true">⠿</span>{p.name}{#if k}<span class="muted"> · {k} {k === 1 ? "hypothesis" : "hypotheses"}</span>{/if}
+          </span>
+        {/each}
+        {#each trayFailures as f (f.id)}
+          <span class="tray-chip hyp" role="button" tabindex="-1" title={`${f.hypothesis}\nDrag onto a project on the map to put it there`}
+                onpointerdown={(ev) => trayStart(ev, "failure", f.id, short(f.hypothesis, 40))}>
+            <span class="grip" aria-hidden="true">⠿</span>⚑ {short(f.hypothesis)}
+          </span>
+        {/each}
+      </div>
+      <p class="hint muted">Drop a project in a lane{byAmb ? ", under the ambition it serves" : ""}; drop a hypothesis on a project's card.</p>
+    </details>
+  {/if}
+  {#if trayDrag?.moved}
+    <div class="tray-ghost" style:left={`${trayDrag.x + 12}px`} style:top={`${trayDrag.y + 8}px`}>{trayDrag.kind === "failure" ? "⚑ " : ""}{trayDrag.label}</div>
   {/if}
   {#if error}<p class="error">{error}</p>{/if}
   {#if loading}<p class="muted">Loading…</p>{/if}
@@ -809,7 +983,7 @@
   {/if}
 </section>
 
-<dialog bind:this={dialog} onclose={() => (panel = null)}>
+<dialog bind:this={dialog} onclose={() => (panel = null)} class:sheet={!!panel && "node" in panel}>
   {#if panel && "importing" in panel}
     <h2>Projects from Planning</h2>
     <p class="muted small">Tick the projects to put on the map. Each lands in its area's lane with its dates, linked to the Planning project.</p>
@@ -844,13 +1018,45 @@
       <button onclick={() => (panel = null)}>Cancel</button>
     </div>
   {:else if panel && "node" in panel}
-    <h2>{panel.node ? `Edit ${kindLabel(panel.node.kind).toLowerCase()}` : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
+    <div class="sheet-head">
+      <h2>{cur ? cur.title : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
+      <button type="button" class="x" aria-label="Close" onclick={() => (panel = null)}>✕</button>
+    </div>
+    {#if cur && (curProject || (board && curShared))}
+      <div class="sheet-tabs" role="tablist" aria-label="What to change">
+        <button role="tab" aria-selected={sheetTab === "item"} class:on={sheetTab === "item"} onclick={() => setSheetTab("item")}>On the map</button>
+        {#if curProject}
+          <button role="tab" aria-selected={sheetTab === "planning"} class:on={sheetTab === "planning"} onclick={() => setSheetTab("planning")}>In Planning</button>
+        {/if}
+        {#if board}
+          {@const k = curFailures.filter((f) => !f.done_on).length}
+          <button role="tab" aria-selected={sheetTab === "failures"} class:on={sheetTab === "failures"} onclick={() => setSheetTab("failures")}>Failures{k ? ` (${k})` : ""}</button>
+        {/if}
+      </div>
+    {/if}
+    {#if sheetTab === "planning" && curProject}
+      <div class="sheet-body" data-unsaved-scope>
+        <p class="muted small">Planning's own project, changed here: saving updates the map behind.</p>
+        {#key curProject.id}
+          <ProjectEditor project={curProject} categories={editorCategories} categoryId={curProject.category_id} shared={sharedChoices}
+                         onsaved={load} oncancel={() => (panel = null)} hideDelete={msOpen} />
+        {/key}
+        <Milestones project={curProject} {actualByMilestone} {privateShared} {board} onchange={load}
+                    onediting={(on) => (msOpen = on)} />
+      </div>
+    {:else if sheetTab === "failures" && board && cur && tax}
+      <div class="sheet-body">
+        <PwFailures {board} items={curFailures} {world} {tax} milestoneOf={curMilestoneOf} onchange={reloadBoard}
+                    attach={curProject ? { ...NOWHERE, project_id: curProject.id } : { ...NOWHERE, group_project_id: curShared }} />
+      </div>
+    {:else}
     {#key panel}
       <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} {tax} members={groupMembers}
         ambitions={allAmbs.map(eff).filter((a) => a.status === "active" || (panel && "node" in panel && a.id === panel.node?.ambition_id)).map((a) => ({ id: a.id, title: a.title }))}
         inferred={panel.node ? inferredTitle(panel.node) : null}
         contributors={panel.node ? contributors.get(panel.node.id) ?? [] : []} onsaved={saved} oncancel={() => (panel = null)} />
     {/key}
+    {/if}
   {/if}
 </dialog>
 
@@ -989,6 +1195,42 @@
     border: 1px solid var(--rule); border-radius: var(--radius); background: var(--paper); color: var(--ink); padding: 1.1rem 1.2rem;
   }
   dialog::backdrop { background: rgb(0 0 0 / 0.35); }
+  /* an item opens at the side, the map still in sight behind */
+  dialog.sheet {
+    margin: 0 0 0 auto; width: min(44rem, 100vw); height: 100dvh; max-height: 100dvh; box-sizing: border-box;
+    border-width: 0 0 0 1px; border-radius: 0; overflow-y: auto; box-shadow: -8px 0 24px rgb(0 0 0 / 0.15);
+  }
+  dialog.sheet::backdrop { background: rgb(0 0 0 / 0.12); }
+  .sheet-head { display: flex; align-items: flex-start; gap: 0.6rem; }
+  .sheet-head h2 { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .sheet-head .x { background: none; border: none; font-size: 1rem; padding: 0.1rem 0.4rem; color: var(--ink-soft); }
+  .sheet-tabs { display: flex; gap: 0.25rem; margin: -0.3rem 0 0.9rem; font-family: var(--font-ui); border-bottom: 1px solid var(--rule); }
+  .sheet-tabs button {
+    font-size: 0.85rem; padding: 0.35rem 0.8rem; border: none; border-bottom: 2px solid transparent; border-radius: 0;
+    background: none; color: var(--ink-soft); margin-bottom: -1px;
+  }
+  .sheet-tabs button.on { border-bottom-color: var(--ink); color: var(--ink); font-weight: 600; }
+  .sheet-body .small { margin: 0 0 0.6rem; }
+
+  /* ---- the tray: what is not on the map yet ---- */
+  .tray { margin: 0 0 0.6rem; border: 1px dashed var(--rule); padding: 0.35rem 0.6rem; font-family: var(--font-ui); font-size: 0.82rem; }
+  .tray summary { cursor: pointer; color: var(--ink-soft); }
+  .tray-items { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.5rem 0 0.3rem; max-height: 9rem; overflow-y: auto; }
+  .tray-chip {
+    display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.2rem 0.55rem; border: 1px solid var(--rule);
+    border-left: 3px solid var(--lane-publications); background: var(--paper); cursor: grab; user-select: none; touch-action: none;
+    max-width: 22rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 0.8rem;
+  }
+  .tray-chip.hyp { border-left-color: var(--danger); }
+  .tray-chip:hover { border-color: var(--ink-soft); }
+  .tray-chip:focus-visible { outline: 2px solid var(--accent); }
+  .tray-chip .grip { color: var(--ink-soft); }
+  .tray .hint { margin: 0; font-size: 0.76rem; }
+  .tray-ghost {
+    position: fixed; z-index: 80; pointer-events: none; padding: 0.25rem 0.6rem; background: var(--paper);
+    border: 1px solid var(--ink-soft); box-shadow: 0 6px 16px rgb(0 0 0 / 0.2); font-family: var(--font-ui); font-size: 0.8rem;
+    max-width: 20rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
   .small { font-size: 0.82rem; font-family: var(--font-ui); }
   .imp { display: grid; gap: 0.4rem; max-height: 55vh; overflow-y: auto; font-family: var(--font-ui); margin: 0.6rem 0; }
   .imp-group { border: 1px solid var(--rule); border-radius: var(--radius); padding: 0.3rem 0.6rem; }

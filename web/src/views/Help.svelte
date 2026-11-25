@@ -184,6 +184,13 @@
       fade the rest (click again for all), and a new item added meanwhile serves it. <em>Rows: by ambition</em> puts
       each ambition's lanes under its heading (what serves none goes last), laid out by time; there, drag an item
       under another ambition to move it there. Needs <code>0075_pw_ambition.sql</code>.
+      Clicking an item opens it at the side, the map still in sight. One linked to a Planning project has
+      three tabs: <em>On the map</em> (the item itself), <em>In Planning</em> (the project's details and its milestones,
+      as in Planning — saving there updates the map) and <em>Failures</em> (its hypotheses: add one, click one to edit it,
+      tick it complete; <em>Failures ›</em> for its observations). A card counts the ongoing hypotheses on its project
+      (⚠ overdue). Above the map, <em>Not on the map yet</em> holds your live Planning projects not on it, and
+      hypotheses on no project: drag a project into a lane (under an ambition, with rows by ambition; or focus it and
+      press Enter for its area's lane), and a hypothesis onto a project's card to put it on that project.
       Mark a project <em>hands-on</em> (✋, in its editor or on its row in the List) when your own research time
       goes into it substantially; it stands out on the map, bolder and shaded.
       Dates on Pathways are months: an item runs from the start of its first month to the end of its last
