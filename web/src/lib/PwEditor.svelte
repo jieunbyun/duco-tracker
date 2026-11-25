@@ -178,7 +178,11 @@
   }
 
   async function remove() {
-    if (!n0 || !confirm(`Delete “${n0.title}” and its links?`)) return;
+    // only the item on the map goes (with its links); a Planning project, its milestones and Experiments stay
+    const ask = n0?.project_id
+      ? `Take “${n0?.title}” off the map? It stays in Planning, as it is; only this item and its links on the map go.`
+      : `Delete “${n0?.title}” and its links?`;
+    if (!n0 || !confirm(ask)) return;
     busy = true;
     try {
       await deleteNode(n0.id);
@@ -389,7 +393,8 @@
   <div class="actions wide">
     <button class="primary" type="submit" disabled={busy}>{n0 ? "Save" : "Add"}</button>
     <button type="button" onclick={oncancel} disabled={busy}>Cancel</button>
-    {#if n0}<button type="button" class="danger push" onclick={remove} disabled={busy}>Delete</button>{/if}
+    {#if n0}<button type="button" class="danger push" onclick={remove} disabled={busy}
+                    title={n0.project_id ? "Off the map only: it stays in Planning" : "Delete this item from the map"}>{n0.project_id ? "Take off the map" : "Delete"}</button>{/if}
   </div>
 </form>
 

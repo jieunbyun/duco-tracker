@@ -654,7 +654,6 @@
   // ---- the side sheet: an item, its Experiments, and (linked to Planning) its project ----------
   type SheetTab = "item" | "planning" | "experiments";
   let sheetTab = $state<SheetTab>("item");
-  let msOpen = $state(false); // a milestone's form is open: the project's Delete steps aside
   function setSheetTab(t: SheetTab) {
     sheetTab = t;
     if (t === "planning") readHours();
@@ -1001,13 +1000,12 @@
     {/if}
     {#if sheetTab === "planning" && curProject}
       <div class="sheet-body" data-unsaved-scope>
-        <p class="muted small">Planning's own project, changed here: saving updates the map behind.</p>
+        <p class="muted small">Planning's own project, changed here: saving updates the map behind. (To delete the project itself, go to Planning; <em>Take off the map</em>, under <em>On the map</em>, leaves it there.)</p>
         {#key curProject.id}
           <ProjectEditor project={curProject} categories={editorCategories} categoryId={curProject.category_id} shared={sharedChoices}
-                         onsaved={load} oncancel={() => (panel = null)} hideDelete={msOpen} />
+                         onsaved={load} oncancel={() => (panel = null)} hideDelete />
         {/key}
-        <Milestones project={curProject} {actualByMilestone} {privateShared} onchange={load}
-                    onediting={(on) => (msOpen = on)} />
+        <Milestones project={curProject} {actualByMilestone} {privateShared} onchange={load} />
       </div>
     {:else if sheetTab === "experiments" && expLinks && cur}
       <div class="sheet-body">
