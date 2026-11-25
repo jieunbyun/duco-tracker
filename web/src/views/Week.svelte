@@ -22,7 +22,9 @@
   import { loadFeed, syncOutlook, isStale, loadUnreviewed, dismissOutlook } from "../lib/outlook";
   import type { Feed } from "../lib/outlook";
   import { undoable, nameLast, undoLast, quietly } from "../lib/undo.svelte";
-  import { loadTidies, addTidy, saveTidy, deleteTidy, cleanLink } from "../lib/tidy";
+  import {
+    loadTidies, addTidy, saveTidy, deleteTidy, cleanLink, addFollowOn, loadLinked, moveWithFollowOns, unlinkFollowOns, noFollows,
+  } from "../lib/tidy";
   import { agendasFor } from "../lib/meetings";
   import BackLink from "../lib/BackLink.svelte";
   import { tick } from "svelte";
@@ -159,6 +161,10 @@
       repeats = series;
       tidyMissing = small === null;
       tidies = (small ?? []).filter((t) => !t.skipped); // one deleted from its series stays hidden
+      // the follow-ons of these, and what they follow on from, in other weeks (none until 0072 is run)
+      const linked = await loadLinked(tidies).catch(() => [] as Tidy[]);
+      if (id !== request) return;
+      tidyLinked = linked.filter((t) => !t.skipped);
       projects = p;
       inbox = review;
       ideas = thoughts;
@@ -182,6 +188,7 @@
         openMilestones();
       }
       if (fromDay) arriveFromDay(fromDay);
+      if (showTidy) lightTidy(showTidy);
     } catch (e) {
       if (id === request) error = (e as Error).message;
     } finally {
@@ -635,6 +642,7 @@
   // A checkbox and a few words; moved like a to-do's card (the day before, the day after, or
   // any date), renamed or deleted from its menu. Never counted as planned or logged time.
   let tidies = $state<Tidy[]>([]);
+  let tidyLinked = $state<Tidy[]>([]); // follow-ons (and what they follow) not among these days
   let tidyMissing = $state(false); // until 0058 is run
   let repeats = $state<Repeat[] | null>(null); // repeating small tasks; null until 0071 is run
   const repeatOf = (t: Tidy) => (t.repeat_id ? repeats?.find((r) => r.id === t.repeat_id) : undefined);
@@ -749,7 +757,10 @@
   }
   function moveTidy(t: Tidy, to: string) {
     if (!to || to === t.day) return;
-    // goes to the end of that day's list
+    // goes to the end of that day's list; its follow-ons (and what it follows) not ticked go along, as many days
+    if (followsOf(t) || followOnsOf(t).length) {
+      return change(`Moved ${q(t)} to ${fmtDay(to)}, with what goes with it`, () => moveWithFollowOns(t, to));
+    }
     return change(`Moved small task ${q(t)} to ${fmtDay(to)}`, () => saveTidy(t.id, { day: to, sort_order: null }));
   }
   async function renameTidy() {
@@ -761,10 +772,55 @@
     await change(`Renamed small task ${q(t)}`, () => saveTidy(t.id, { title }));
   }
   function removeTidy(t: Tidy) {
+    // what follows it on follows the one before it instead (or nothing)
+    const relink = followOnsOf(t).length ? () => unlinkFollowOns(t) : async () => {};
     // one of a series: hidden, so it is not made again; the series goes on
-    if (t.repeat_id) return change(`Deleted ${q(t)} on ${fmtDay(t.day)} (the series goes on)`, () => saveTidy(t.id, { skipped: true }));
-    return change(`Deleted small task ${q(t)}`, () => deleteTidy(t.id)); // Undo brings it back
+    if (t.repeat_id) {
+      return change(`Deleted ${q(t)} on ${fmtDay(t.day)} (the series goes on)`,
+        async () => { await relink(); await saveTidy(t.id, t.follows ? { skipped: true, follows: null } : { skipped: true }); });
+    }
+    return change(`Deleted small task ${q(t)}`, async () => { await relink(); await deleteTidy(t.id); }); // Undo brings it back
   }
+
+  // ---- follow-ons (0072_tidy_follow.sql): another small task that goes with this one ----------
+  const allTidies = $derived([...tidies, ...tidyLinked]);
+  const followsOf = (t: Tidy) => (t.follows ? allTidies.find((x) => x.id === t.follows) : undefined);
+  const followOnsOf = (t: Tidy) => allTidies.filter((x) => x.follows === t.id)
+    .sort((a, b) => a.day.localeCompare(b.day) || tidyOrder(a, b));
+  let followTitle = $state("");
+  let followDate = $state("");
+  async function makeFollowOn(t: Tidy, title: string, day: string) {
+    title = title.trim();
+    if (!title || !day) return;
+    const order = Math.max(0, ...tidiesOn(day).map((x) => x.sort_order ?? 0)) + 10;
+    const ok = await change(`Added ${q({ title })}, a follow-on to ${q(t)}`, () => addFollowOn(t, day, title, order));
+    if (!ok && noFollows(error)) error = "Follow-ons need web/db/0072_tidy_follow.sql run first, in the Supabase SQL editor.";
+  }
+  function unfollow(t: Tidy) {
+    const p = followsOf(t);
+    return change(`${q(t)} no longer follows on from ${p ? q(p) : "another"}`, () => saveTidy(t.id, { follows: null }));
+  }
+  // going to the other one: lit up, in its week (or month) if it is not on screen
+  let showTidy: string | null = null;
+  function goToTidy(x: Tidy) {
+    tidyMenu = null;
+    if (tidies.some((t) => t.id === x.id) && (monthView || days.includes(x.day))) {
+      if (phone && !monthView) pickedDay = x.day;
+      return lightTidy(x.id);
+    }
+    showTidy = x.id;
+    pickedDay = x.day;
+    if (monthView) monthAt = `${x.day.slice(0, 7)}-01`;
+    else offset = Math.round((daysIn({ from: weekStart(today()), to: weekStart(x.day) }) - 1) / 7);
+  }
+  function lightTidy(id: string) {
+    showTidy = null;
+    lit = id;
+    tick().then(() => document.querySelector(`.tidy-row[data-id="${id}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" }));
+    setTimeout(() => { if (lit === id) lit = null; }, 2500);
+  }
+  const shortDay = (d: string) =>
+    `${dayName(d)} ${dayNum(d)}${d.slice(0, 7) === today().slice(0, 7) ? "" : ` ${parse(d).toLocaleDateString("en-GB", { month: "short" })}`}`;
 
   // ---- repeating small tasks (lib/repeat.ts) ----------------------------------------
   let repeatWay = $state<Every>("year");
@@ -805,6 +861,10 @@
       { label: "‹ Move to the day before", run: () => moveTidy(t, addDays(t.day, -1)) },
       { label: "Move to the day after ›", run: () => moveTidy(t, addDays(t.day, 1)) },
       { label: "Move to a date…", run: () => { moveDate = t.day; panel = { kind: "tidyMove", tidy: t }; } },
+      { label: "+ Follow-on…", run: () => { followTitle = ""; followDate = t.day; panel = { kind: "followOn", tidy: t }; } },
+      ...(followsOf(t) ? [{ label: `← Go to “${followsOf(t)!.title}”`, run: () => goToTidy(followsOf(t)!) }] : []),
+      ...followOnsOf(t).map((x) => ({ label: `→ Go to “${x.title}”`, run: () => goToTidy(x) })),
+      ...(t.follows ? [{ label: "Unlink from the one before", run: () => unfollow(t) }] : []),
       { label: t.is_tidy ? "☑ Tidy-up" : "☐ Tidy-up", run: () => setTidyUp(t, !t.is_tidy) },
       { label: "Rename", run: () => (tidyEdit = { id: t.id, title: t.title }) },
       { label: t.link ? "Change link…" : "Add link…", run: () => { linkDraft = t.link ?? ""; panel = { kind: "tidyLink", tidy: t }; } },
@@ -827,7 +887,7 @@
   type Item = { label: string; run?: () => unknown; danger?: boolean; go?: Sub | "main" };
   let menu = $state<Menu | null>(null);
   const MENU_W = 220;
-  const MENU_H = 340; // a small task's menu, with its repeat items, is the tallest
+  const MENU_H = 420; // a small task's menu, with its repeat items, is the tallest
 
   /** Where a menu opens: at the pointer for a right-click, under the thing clicked otherwise. */
   function menuAt(ev: MouseEvent): { x: number; y: number } {
@@ -973,6 +1033,7 @@
     | { kind: "spread"; todo: Todo }
     | { kind: "moveTo"; todo: Todo; slot: Slot }
     | { kind: "tidyMove"; tidy: Tidy }
+    | { kind: "followOn"; tidy: Tidy }
     | { kind: "tidyLink"; tidy: Tidy }
     | { kind: "repeat"; tidy: Tidy }
     | { kind: "repeats" }
@@ -2184,6 +2245,18 @@
         {:else}
           <button class="tidy-title" aria-haspopup="menu" title={t.title}
                   onclick={(ev) => openTidyMenu(ev, t)} oncontextmenu={(ev) => openTidyMenu(ev, t)}>{t.title}</button>
+          {@const before = followsOf(t)}
+          {@const after = followOnsOf(t)}
+          {#if before}
+            <button type="button" class="tidy-follow" onclick={() => goToTidy(before)}
+                    title={`Follows on from “${before.title}” (${shortDay(before.day)}) — go to it`}
+                    aria-label={`Go to “${before.title}”, which this follows on from`}>←</button>
+          {/if}
+          {#each after as x (x.id)}
+            <button type="button" class="tidy-follow" onclick={() => goToTidy(x)}
+                    title={`Followed by “${x.title}” (${shortDay(x.day)}) — go to it`}
+                    aria-label={`Go to its follow-on “${x.title}”`}>→</button>
+          {/each}
           {#if t.repeat_id}
             {@const r = repeatOf(t)}
             <span class="tidy-repeat" title={r ? `Repeats ${describeRepeat(r)}` : "Repeats"} aria-label="Repeats">↻</span>
@@ -2390,6 +2463,21 @@
         <p class="muted small">Now on {fmtDay(mt.day)}. Any day will do, in this week or another.</p>
         <div class="pick-actions">
           <button class="primary" type="submit" disabled={!moveDate || moveDate === mt.day}>Move</button>
+          <button type="button" onclick={() => (panel = null)}>Cancel</button>
+        </div>
+      </form>
+    {:else if panel.kind === "followOn"}
+      {@const ft = panel.tidy}
+      <h2>Follow-on to “{ft.title}”</h2>
+      <form class="move-to" onsubmit={(ev) => { ev.preventDefault(); const t = ft, title = followTitle, d = followDate; panel = null; makeFollowOn(t, title, d); }}>
+        <label>What <input bind:value={followTitle} required placeholder="e.g. Chase a reply" use:focusSelect /></label>
+        <label>On <input type="date" bind:value={followDate} required /></label>
+        <p class="muted small">
+          A small task of its own, linked to this one (on {fmtDay(ft.day)}). Move either, and the other moves by as many
+          days, unless it is ticked. ← and → beside them go from one to the other.
+        </p>
+        <div class="pick-actions">
+          <button class="primary" type="submit" disabled={!followTitle.trim() || !followDate}>Add</button>
           <button type="button" onclick={() => (panel = null)}>Cancel</button>
         </div>
       </form>
@@ -2840,6 +2928,11 @@
   /* repeating small tasks: the list's button, the ↻ on a task of a series, the dialogs */
   .repeat-open { margin: 0 0 0.6rem 0.5rem; padding: 0.3rem 0.7rem; font-family: var(--font-ui); font-size: 0.82rem; vertical-align: top; }
   .tidy-repeat { flex-shrink: 0; font-size: 0.72rem; line-height: 1.5; color: var(--ink-soft); }
+  .tidy-follow {
+    flex-shrink: 0; padding: 0 0.15rem; border: none; background: none; font-size: 0.72rem; line-height: 1.5;
+    color: var(--ink-soft); cursor: pointer;
+  }
+  .tidy-follow:hover, .tidy-follow:focus-visible { color: var(--accent); }
   .repeat-ways { display: grid; gap: 0.35rem; margin: 0; padding: 0; border: none; }
   .repeat-ways label { display: flex; gap: 0.45rem; align-items: center; font-weight: normal; }
   .repeat-ways input { width: auto; margin: 0; }

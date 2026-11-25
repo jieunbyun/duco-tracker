@@ -80,6 +80,10 @@
       <em>Stop repeating after this one</em>, in the menu of any task of a series, ends it there; <em>Stop</em> in
       <em>↻ Repeating</em>, beside the Week / Month switch, ends it today. Either way the tasks before stay, and later
       ones not yet ticked are taken off.
+      <em>+ Follow-on…</em> in a task's menu adds another small task that goes with it — its own name, on the same day
+      or another (say, “Chase a reply” a week after “Send the form”). ← and → beside them go from one to the other, in
+      whatever week. Move either and the others move by as many days, unless they are ticked. Deleting one in the middle
+      joins the one after to the one before; <em>Unlink from the one before</em> undoes a link.
       <em>Month · small tasks</em>, above the days, swaps the week for a month of them alone — ‹ › for other months,
       each day's list scrolling in its box, and all of them working as in the week; on a phone the month is a list of
       its days, opened at today. <em>Week</em> brings the days back; the choice is remembered in this browser.
