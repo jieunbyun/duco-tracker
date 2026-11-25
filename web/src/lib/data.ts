@@ -129,6 +129,7 @@ export type Project = {
   notes: string | null;
   folder_url: string | null; // its folder on OneDrive
   group_project_id?: string | null; // the shared project it stands for: its milestones come in (0040)
+  sort_order?: number | null; // its place in its category on Planning, once dragged (0074)
   milestone: Milestone[];
 };
 
@@ -148,7 +149,7 @@ export async function loadProjects(): Promise<Project[]> {
   }));
 }
 
-export type ProjectFields = Omit<Project, "id" | "milestone">;
+export type ProjectFields = Omit<Project, "id" | "milestone" | "sort_order">;
 export type MilestoneFields = Omit<Milestone, "id" | "after_ids"> & { after_ids?: string[] };
 
 async function check<T>(q: PromiseLike<{ error: { message: string } | null; data?: T | null }>): Promise<T | null | undefined> {
@@ -171,6 +172,12 @@ export async function setProjectDates(id: string, start_on: string | null, end_o
 }
 export async function setProjectStatus(id: string, status: string): Promise<void> {
   await check(supabase.from("project").update({ status }).eq("id", id));
+}
+/** Store projects' order (within a category, on Planning) as 10, 20, 30…, changing only those that moved. */
+export async function saveProjectOrder(ids: string[], was: Map<string, number | null | undefined>): Promise<void> {
+  for (const [i, id] of ids.entries()) {
+    if (was.get(id) !== (i + 1) * 10) await check(supabase.from("project").update({ sort_order: (i + 1) * 10 }).eq("id", id));
+  }
 }
 export async function deleteProject(id: string): Promise<void> {
   await check(supabase.from("project").delete().eq("id", id));

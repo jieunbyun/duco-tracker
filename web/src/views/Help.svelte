@@ -150,7 +150,7 @@
     <dt>Planning</dt>
     <dd>
       Projects under each project-based category, with dates, planned hours and milestones, against the hours
-      logged. Drag a milestone's ⠿ handle to put a project's milestones in order. Above them, how much of the planning
+      logged. Drag a project's ⠿ handle (or press ↑ ↓ on it) to put the projects in a category in your own order (until you do, ★ first, then by end date; a new one goes on top; needs <code>0074_project_order.sql</code>), and a milestone's to put a project's milestones in order. Above them, how much of the planning
       horizon is still free per area. Below, the weekly targets and settings. A Planning project can stand for a shared project (<em>Shared project</em> in its details; marked ⇄),
       so its milestones are kept in one list, in step both ways: the shared project's public milestones come in
       (⇄), and the Planning project's own go over as private ones (🔒, only you see them there) — those it had when

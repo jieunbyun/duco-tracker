@@ -3,7 +3,8 @@
   import ExportData from "../lib/ExportData.svelte";
   import { tick } from "svelte";
   import { undoable, undoLast } from "../lib/undo.svelte";
-  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus } from "../lib/data";
+  import { loadTaxonomy, loadProjects, loadAllHours, targetOn, fmtHours, setProjectStatus, saveProjectOrder } from "../lib/data";
+  import Sortable from "../lib/Sortable.svelte";
   import type { Taxonomy, Project, HourRow, Category } from "../lib/data";
   import { horizonRange, projectLoad, areaHorizons, plannedOf, PLANNABLE_KINDS, PACE_DAYS } from "../lib/horizon";
   import type { ProjectLoad } from "../lib/horizon";
@@ -192,10 +193,37 @@
     })),
   );
 
+  // within a category: your own order, once dragged (0074_project_order.sql); the ones not yet
+  // placed (all of them until then, and a new one) on top, ★ first, then by end date
+  function byOrder(a: Project, b: Project): number {
+    const sa = a.sort_order ?? null, sb = b.sort_order ?? null;
+    if ((sa === null) !== (sb === null)) return sa === null ? -1 : 1;
+    if (sa !== null && sb !== null && sa !== sb) return sa - sb;
+    return Number(b.is_important) - Number(a.is_important) || (a.end_on ?? "9").localeCompare(b.end_on ?? "9");
+  }
   function projectsIn(c: Category): Project[] {
-    return visible
-      .filter((p) => p.category_id === c.id)
-      .sort((a, b) => Number(b.is_important) - Number(a.is_important) || (a.end_on ?? "9").localeCompare(b.end_on ?? "9"));
+    return visible.filter((p) => p.category_id === c.id).sort(byOrder);
+  }
+
+  // drag a project's ⠿ (or ↑ ↓ on it); the done and dropped ones, when hidden, keep their places
+  let ordering = $state(false);
+  async function reorderProjects(c: Category, ids: string[]) {
+    const moved = new Set(ids);
+    let k = 0;
+    const all = projects.filter((p) => p.category_id === c.id).sort(byOrder)
+      .map((p) => (moved.has(p.id) ? ids[k++] : p.id));
+    const was = new Map(projects.map((p) => [p.id, p.sort_order]));
+    projects = projects.map((p) => (all.includes(p.id) ? { ...p, sort_order: (all.indexOf(p.id) + 1) * 10 } : p)); // at once
+    ordering = true;
+    try {
+      await undoable(`Reordered the projects in ${c.label}`, () => saveProjectOrder(all, was));
+    } catch (e) {
+      const msg = (e as Error).message;
+      showFlash(/sort_order/.test(msg) ? "Reordering projects needs web/db/0074_project_order.sql run first, in the Supabase SQL editor." : msg);
+    } finally {
+      ordering = false;
+    }
+    await load(); // confirms it, or puts them back as they were
   }
 
   function toggle(id: string) {
@@ -363,7 +391,9 @@
         <h3>{a.label}</h3>
 
         {#snippet projectList(c: Category)}
-          {#each projectsIn(c) as p (p.id)}
+          <div class="project-sort">
+          <Sortable items={projectsIn(c)} onreorder={(ids) => reorderProjects(c, ids)} disabled={ordering}>
+          {#snippet row(p: Project)}
             {@const l = loads.get(p.id)!}
             {@const plan = plannedOf(p)}
             <div class="project" id={`pl-${p.id}`} class:open={expanded === p.id} class:complete={p.status === "done"}>
@@ -405,7 +435,9 @@
                 </div>
               {/if}
             </div>
-          {/each}
+          {/snippet}
+          </Sortable>
+          </div>
         {/snippet}
 
         {#each plannable as c (c.id)}
@@ -576,6 +608,7 @@
   .cats summary .muted { font-size: 0.82rem; margin-left: 0.4rem; }
   .cats[open] summary { margin-bottom: 0.8rem; }
   .project { border-radius: var(--radius); scroll-margin-top: 4.5rem; }
+  .project-sort :global(.grip) { margin-top: 0.45rem; } /* level with the project's name */
   .p-line { display: flex; align-items: flex-start; gap: 0.2rem; }
   .p-done { width: auto; flex: none; margin: 0.75rem 0.6rem 0 0.2rem; }
   .project.complete .p-name { text-decoration: line-through; color: var(--ink-soft); }
