@@ -2,7 +2,7 @@
   // The hypotheses (Failures) on a Pathways item's project, changed right there: add one, edit it,
   // tick it complete or delete it. Its observations and calibrations stay in Failures (›).
   import FailureForm from "./FailureForm.svelte";
-  import { saveFailure, deleteFailure, isLate, toFailures } from "./failures";
+  import { saveFailure, deleteFailure, isLate, toFailures, placeOf } from "./failures";
   import type { Board, Failure, Attachment, World } from "./failures";
   import type { Taxonomy } from "./data";
   import { undoable } from "./undo.svelte";
@@ -19,7 +19,7 @@
   };
   let { board, items, attach, world, tax, milestoneOf, onchange }: Props = $props();
 
-  let editing = $state<string | null>(null); // a hypothesis's id, or "new"
+  let editing = $state<string | null>(null); // a hypothesis's id, "new", or "existing" (picking one)
   let busy = $state(false);
   let error = $state("");
   const open = $derived(items.filter((f) => !f.done_on));
@@ -46,6 +46,31 @@
     editing = null;
     change("Deleted hypothesis", () => deleteFailure(f.id));
   }
+  // ---- an existing hypothesis, from anywhere in Failures, put on this item ----------------
+  let find = $state("");
+  const here = $derived(new Set(items.map((f) => f.id)));
+  const whereNow = (f: Failure) => {
+    const at = placeOf(f, world);
+    return at.project?.name ?? at.group?.title ?? null;
+  };
+  /** The rest, by theme: ongoing first, then completed; narrowed by what is typed. */
+  const candidates = $derived.by(() => {
+    const q = find.trim().toLocaleLowerCase();
+    const rest = board.items.filter((f) => !here.has(f.id)
+      && (!q || `${f.hypothesis} ${f.test ?? ""} ${f.lesson ?? ""}`.toLocaleLowerCase().includes(q)));
+    return board.themes.map((t) => ({
+      theme: t,
+      items: rest.filter((f) => f.theme_id === t.id).sort((a, b) => Number(!!a.done_on) - Number(!!b.done_on)),
+    })).filter((g) => g.items.length);
+  });
+  function pick(f: Failure) {
+    const from = whereNow(f);
+    if (from && !confirm(`It is on “${from}” now. Move it here?`)) return;
+    editing = null;
+    find = "";
+    change(from ? "Moved a hypothesis" : "Put a hypothesis on a project", () => saveFailure(f.id, attach));
+  }
+
   async function saved() {
     editing = null;
     await onchange();
@@ -82,10 +107,37 @@
 <div class="pw-failures">
   <div class="head">
     <span class="muted">{open.length} ongoing{done.length ? ` · ${done.length} completed` : ""}</span>
+    <span class="spacer"></span>
+    <button type="button" class="mini" disabled={!!editing || !!board.error || !board.items.length}
+            title="One already in Failures" onclick={() => (editing = "existing")}>+ Existing…</button>
     <button type="button" class="primary mini" disabled={!!editing || !!board.error} onclick={() => (editing = "new")}>+ Hypothesis</button>
   </div>
   {#if board.error}<p class="error">Could not load Failures: {board.error}</p>{/if}
   {#if error}<p class="error">{error}</p>{/if}
+  {#if editing === "existing"}
+    <div class="existing">
+      <div class="find">
+        <!-- svelte-ignore a11y_autofocus -->
+        <input type="search" bind:value={find} placeholder="Find a hypothesis (its words, test or lesson)…" autofocus
+               onkeydown={(ev) => { if (ev.key === "Escape") { ev.preventDefault(); ev.stopPropagation(); editing = null; } }} />
+        <button type="button" class="mini" onclick={() => { editing = null; find = ""; }}>Cancel</button>
+      </div>
+      {#each candidates as g (g.theme.id)}
+        <div class="theme">
+          <h5>{g.theme.name}</h5>
+          {#each g.items as f (f.id)}
+            {@const from = whereNow(f)}
+            <button type="button" class="cand" class:done={!!f.done_on} disabled={busy} onclick={() => pick(f)}>
+              <span class="cand-text">{f.hypothesis}</span>
+              <span class="meta">{from ? `on ${from}` : "on no project"}{f.done_on ? ` · completed ${fmtDay(f.done_on)}` : f.due_on ? ` · deadline ${fmtDay(f.due_on)}` : ""}</span>
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <p class="muted small">{find.trim() ? "None match." : "Every hypothesis is on it already."}</p>
+      {/each}
+    </div>
+  {/if}
   {#if editing === "new"}
     <FailureForm failure={null} {attach} themes={board.themes} {world} {tax} onsaved={saved} oncancel={() => (editing = null)} />
   {/if}
@@ -104,7 +156,19 @@
 
 <style>
   .pw-failures { font-family: var(--font-ui); display: grid; gap: 0.4rem; }
-  .head { display: flex; align-items: center; gap: 0.6rem; justify-content: space-between; }
+  .head { display: flex; align-items: center; gap: 0.4rem; }
+  .spacer { flex: 1; }
+  .existing { background: var(--panel); padding: 0.6rem; display: grid; gap: 0.5rem; max-height: 22rem; overflow-y: auto; }
+  .find { display: flex; gap: 0.4rem; align-items: center; position: sticky; top: -0.6rem; background: var(--panel); padding: 0.1rem 0; }
+  .find input { flex: 1; }
+  .theme h5 { margin: 0 0 0.2rem; font-size: 0.78rem; color: var(--ink-soft); font-weight: 600; }
+  .cand {
+    display: grid; gap: 0.1rem; width: 100%; text-align: left; background: var(--paper); border: 1px solid var(--rule);
+    border-radius: 0; padding: 0.35rem 0.5rem; margin-bottom: 0.25rem; cursor: pointer;
+  }
+  .cand:hover { border-color: var(--ink-soft); }
+  .cand-text { font-size: 0.84rem; color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cand.done .cand-text { text-decoration: line-through; color: var(--ink-soft); }
   .head .muted { font-size: 0.82rem; }
   ul { list-style: none; margin: 0; padding: 0; }
   li { display: flex; gap: 0.5rem; align-items: flex-start; padding: 0.4rem 0; border-bottom: 1px solid var(--rule); }

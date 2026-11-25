@@ -186,8 +186,8 @@
       under another ambition to move it there. Needs <code>0075_pw_ambition.sql</code>.
       Clicking an item opens it at the side, the map still in sight. One linked to a Planning project has
       three tabs: <em>On the map</em> (the item itself), <em>In Planning</em> (the project's details and its milestones,
-      as in Planning — saving there updates the map) and <em>Failures</em> (its hypotheses: add one, click one to edit it,
-      tick it complete; <em>Failures ›</em> for its observations). A card counts the ongoing hypotheses on its project
+      as in Planning — saving there updates the map) and <em>Failures</em> (its hypotheses: add one, or bring in one already in Failures with <em>+ Existing…</em> —
+      moved from the project it was on — click one to edit it, tick it complete; <em>Failures ›</em> for its observations). A card counts the ongoing hypotheses on its project
       (⚠ overdue). Above the map, <em>Not on the map yet</em> holds your live Planning projects not on it, and
       hypotheses on no project: drag a project into a lane (under an ambition, with rows by ambition; or focus it and
       press Enter for its area's lane), and a hypothesis onto a project's card to put it on that project.
