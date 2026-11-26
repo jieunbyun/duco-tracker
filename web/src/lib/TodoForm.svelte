@@ -29,6 +29,8 @@
   const meetingSlot = t0?.kind === "meeting" ? init.slots[0] ?? null : null;
 
   let kind = $state<"task" | "meeting">(t0?.kind === "meeting" ? "meeting" : t0 ? "task" : init.kind0 ?? "task");
+  // a meeting from Outlook can be turned into a to-do (what you note in Outlook as something to do)
+  const canTurn = t0?.kind === "meeting" && t0.source === "outlook";
   let title = $state(t0?.title ?? "");
   let category_id = $state(t0?.category_id ?? "");
   let project_id = $state(t0?.project_id ?? "");
@@ -160,8 +162,12 @@
         note: note.trim() || null,
       };
       if (kind === "task") {
-        const id = await saveTodo(t0?.id ?? null, { ...base, due_on, est_hours: est ?? null, must_this_week: must });
+        const id = await saveTodo(t0?.id ?? null, {
+          ...base, due_on, est_hours: est ?? null, must_this_week: must, ...(meetingSlot ? { is_tentative: false } : {}),
+        });
         created.push(id);
+        // a meeting turned into a to-do: its sitting stays on its day, without clock times
+        if (meetingSlot) await saveSlot(meetingSlot.id, { start_time: null, end_time: null, planned_hours: null });
         if (!t0 && init.placeOnDay && init.day) {
           await saveSlot(null, { todo_id: id, planned_on: init.day, planned_hours: null });
         }
@@ -274,7 +280,7 @@
 </script>
 
 <form class="todo-form" onsubmit={save}>
-  {#if !t0}
+  {#if !t0 || canTurn}
     <div class="kind wide" role="group" aria-label="Kind">
       <button type="button" class:on={kind === "task"} aria-pressed={kind === "task"} onclick={() => (kind = "task")}>Duty / to-do</button>
       <button type="button" class:on={kind === "meeting"} aria-pressed={kind === "meeting"} onclick={() => (kind = "meeting")}>Meeting</button>

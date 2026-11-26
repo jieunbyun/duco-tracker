@@ -2,7 +2,8 @@
 // calendar; everything else happens here, as you (row-level security applies).
 //
 // Each Outlook occurrence becomes a to-do (a meeting, or a task for an all-day
-// event) with one sitting, marked unreviewed until you keep it. Later syncs:
+// event) with one sitting, marked unreviewed until you keep it (a meeting can be
+// kept as a task instead: on its day, without clock times). Later syncs:
 //   - new in Outlook            → added, unreviewed
 //   - moved/renamed in Outlook   → follows, unless that sitting is logged
 //   - gone/cancelled in Outlook  → removed if unreviewed; if kept, cancelled
@@ -183,18 +184,20 @@ export async function syncOutlook(): Promise<SyncResult> {
     const reappeared = !!s?.is_cancelled && s.cancelled_by_sync && !s.entry_id;
     // accepted or declined in Outlook since: the tentative mark follows (unless logged)
     const statusChanged = t.source_tentative !== m.tentative;
+    // kept as a to-do: it moves with the event, but keeps no clock times and your estimate
+    const timed = !m.allDay && t.kind !== "task";
     if (!moved && !renamed && !reappeared && !statusChanged && t.source_free === m.free) continue;
 
     await saveTodo(t.id, {
       ...outlookFields,
       ...(renamed ? { title: m.title } : {}),
       ...(statusChanged && !s?.entry_id ? { is_tentative: m.tentative } : {}),
-      ...(moved && !s?.entry_id ? { due_on: m.date, ...(m.allDay ? {} : { est_hours: len }) } : {}),
+      ...(moved && !s?.entry_id ? { due_on: m.date, ...(timed ? { est_hours: len } : {}) } : {}),
     });
     if (s && !s.entry_id && (moved || reappeared)) {
       await saveSlot(s.id, {
         planned_on: m.date, ...(reappeared ? { is_cancelled: false, cancelled_by_sync: false } : {}),
-        ...(m.allDay ? {} : { start_time: m.start, end_time: m.end, planned_hours: len }),
+        ...(timed ? { start_time: m.start, end_time: m.end, planned_hours: len } : {}),
       });
     }
     result.updated += 1;
