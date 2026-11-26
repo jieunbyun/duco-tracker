@@ -2,6 +2,7 @@
   import { untrack } from "svelte";
   import {
     LANES, NODE_KINDS, GRANT_STAGES, staged, setContributors, fromMonth, saveNode, deleteNode, saveLink, deleteLink, loadRevisions, addRevision,
+    setAmbitions,
   } from "./pathways";
   import type { PwNode, PwNodeFields, PwLink, PwRevision, NodeKind, Lane, GrantStage } from "./pathways";
   import type { Project } from "./data";
@@ -25,13 +26,15 @@
     contributors?: string[]; // this item's contributors now
     tax?: Taxonomy | null; // Planning's categories, to create the project there too
     ambitions?: { id: string; title: string }[]; // the big goals an item can serve
-    inferred?: string | null; // the ambition its links lead to (what leaving it empty means)
+    served?: string[]; // the ambitions it is ticked for (a new one: those it starts with)
+    via?: string[]; // with none ticked: the ambitions its links lead to (what leaving them empty means)
+    ambReady?: boolean; // ticks can be saved (0080 is run)
     onsaved: () => void;
     oncancel: () => void;
   };
   let {
     node, draft, nodes, links, projects, readings, groupProjects = [], members = [], contributors = [], tax = null,
-    ambitions = [], inferred = null, onsaved, oncancel,
+    ambitions = [], served = [], via = [], ambReady = false, onsaved, oncancel,
   }: Props = $props();
 
   // "+ Create it in Planning too": a new Planning project from this item, linked to it
@@ -78,6 +81,10 @@
     ambition_id: n0?.ambition_id ?? d0.ambition_id ?? "",
   });
   const ambitionChoices = $derived(ambitions.filter((a) => a.id !== n0?.id));
+  // the ambitions it serves, ticked (a goal is an ambition itself, or, from before, a step towards one)
+  const hadAmbs = untrack(() => served);
+  let serves = $state<string[]>([...untrack(() => served)]);
+  const ambsChanged = $derived(serves.length !== hadAmbs.length || serves.some((a) => !hadAmbs.includes(a)));
   // projects and grants can each be a Planning project (a grant: one under Proposals)
   const plannable = $derived(f.kind === "project" || f.kind === "grant");
   // an item for one milestone of a Planning project (0077): named and dated by the milestone (as given)
@@ -131,6 +138,9 @@
     event.preventDefault();
     if (!f.title.trim()) return (error = "Give it a title.");
     if (f.start_on && f.end_on && f.end_on < f.start_on) return (error = "It ends before it starts.");
+    if (f.kind !== "goal" && ambsChanged && !ambReady) {
+      return (error = "Ticking its ambitions needs web/db/0080_pw_node_ambition.sql run first, in the Supabase SQL editor.");
+    }
     busy = true;
     error = "";
     const p = linkedProject;
@@ -163,8 +173,8 @@
         ...(groupProjects.length || n0?.group_project_id ? { group_project_id: f.kind === "project" ? f.group_project_id || null : null } : {}),
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
-      // sent only when it changes, so the rest saves before 0075 is run
-      if ((f.ambition_id || null) !== (n0?.ambition_id ?? null)) fields.ambition_id = f.ambition_id || null;
+      // a goal's step towards an ambition, sent only when it changes (so the rest saves before 0075 is run)
+      if (f.kind === "goal" && (f.ambition_id || null) !== (n0?.ambition_id ?? null)) fields.ambition_id = f.ambition_id || null;
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
       // a linked project keeps the Planning project's dates in step
       if (p && !ms0 && (startOn !== p.start_on || endOn !== p.end_on)) {
@@ -173,11 +183,13 @@
       // and a milestone's item, the milestone's
       if (ms0 && (startOn !== wasStart || endOn !== wasEnd)) await setMilestoneDates(ms0.id, { start_on: startOn, due_on: endOn });
       const id = await saveNode(n0?.id ?? null, fields);
+      if (f.kind !== "goal" && ambsChanged) await setAmbitions(id, serves, hadAmbs);
       if (members.length) await setContributors(id, contrib, had);
       onsaved();
     } catch (e) {
       const msg = (e as Error).message;
-      error = /ambition_id/.test(msg) ? "Choosing an ambition needs web/db/0075_pw_ambition.sql run first, in the Supabase SQL editor." : msg;
+      error = /pw_node_ambition/.test(msg) ? "Ticking its ambitions needs web/db/0080_pw_node_ambition.sql run first, in the Supabase SQL editor."
+        : /ambition_id/.test(msg) ? "Ambitions need web/db/0075_pw_ambition.sql run first, in the Supabase SQL editor." : msg;
     } finally {
       busy = false;
     }
@@ -247,18 +259,25 @@
     <input bind:value={f.title} required readonly={!!linkedProject} />
     {#if linkedProject}<span class="synced">Named in Planning; its dates here and in Planning stay in step.</span>{/if}
   </label>
-  {#if f.kind === "goal" ? ambitionChoices.length : ambitions.length}
-    <label class="wide">{f.kind === "goal" ? "Ambition" : "Serves the ambition"}
-      <select bind:value={f.ambition_id}>
-        {#if f.kind === "goal"}
+  {#if f.kind === "goal"}
+    {#if n0?.ambition_id && ambitionChoices.length}
+      <!-- from before: a goal that steps towards an ambition; clear it to make it an ambition of its own -->
+      <label class="wide">Ambition
+        <select bind:value={f.ambition_id}>
           <option value="">— none: it is an ambition itself —</option>
           {#each ambitionChoices as a (a.id)}<option value={a.id}>A step towards “{a.title}”</option>{/each}
-        {:else}
-          <option value="">{inferred ? `— from its links: “${inferred}” —` : "— none yet (or link it towards one) —"}</option>
-          {#each ambitionChoices as a (a.id)}<option value={a.id}>{a.title}</option>{/each}
-        {/if}
-      </select>
-    </label>
+        </select>
+      </label>
+    {:else}
+      <p class="hint wide">An ambition: one of your few big ones. Tick what serves it in the <em>Ambitions</em> view; the description can say what achieving it looks like.</p>
+    {/if}
+  {:else if ambitions.length}
+    <fieldset class="wide contrib">
+      <legend>Serves the ambitions{!serves.length && via.length ? ` — none ticked: through its links, “${via.join("”, “")}”` : ""}</legend>
+      {#each ambitionChoices as a (a.id)}
+        <label class="check"><input type="checkbox" value={a.id} bind:group={serves} /> {a.title}</label>
+      {/each}
+    </fieldset>
   {/if}
   <label class="wide">OneDrive folder (link)
     <input type="url" bind:value={f.folder_url} placeholder={linkedProject?.folder_url ? "the Planning project's folder" : "https://…sharepoint.com/…"} />

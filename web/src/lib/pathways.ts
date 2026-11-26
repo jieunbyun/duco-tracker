@@ -14,7 +14,7 @@ export const LANES = [
 export type Lane = (typeof LANES)[number]["key"];
 
 export const NODE_KINDS = [
-  { key: "goal", label: "Goal", lane: "goals" },
+  { key: "goal", label: "Ambition", lane: "goals" }, // a goal serving no other goal: one of your few big ones
   { key: "objective", label: "Objective", lane: "goals" },
   { key: "project", label: "Project", lane: "publications" },
   { key: "person", label: "Person", lane: "publications" },
@@ -99,42 +99,67 @@ export function ambitionsIn(nodes: PwNode[]): PwNode[] {
 }
 
 /**
- * The ambition each item serves: its own choice (a goal: itself, or the ambition of the goal it
- * steps towards), else the one ambition its links lead to, following the arrows forward
- * (inferred). Links that lead to two ambitions, or to none, leave it with none.
+ * The ambitions each item without ticks serves through its links alone, following the arrows
+ * forward: an ambition reached, or an item with ticks (its ambitions), ends that path. A goal that
+ * steps towards an ambition (ambition_id) serves that one.
  */
-export function ambitionMap(nodes: PwNode[], links: PwLink[]): Map<string, { amb: string | null; inferred: boolean }> {
+export function ambitionsVia(nodes: PwNode[], links: PwLink[], ticks: Map<string, string[]>): Map<string, string[]> {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const top = (id: string): string | null => {
-    let n = byId.get(id);
+  const top = (n: PwNode | undefined): string | null => {
     for (let i = 0; n && i < 20; i++) {
       if (isAmbition(n)) return n.id;
       n = n.ambition_id ? byId.get(n.ambition_id) : undefined;
     }
     return null;
   };
-  const chosen = (n: PwNode) => (isAmbition(n) ? n.id : n.ambition_id ? top(n.ambition_id) : null);
+  const own = (n: PwNode): string[] => {
+    if (isAmbition(n)) return [n.id];
+    if (n.kind === "goal" && n.ambition_id) { const t = top(n); return t ? [t] : []; }
+    return ticks.get(n.id) ?? [];
+  };
   const next = new Map<string, string[]>();
   for (const l of links) next.set(l.from_id, [...(next.get(l.from_id) ?? []), l.to_id]);
-  const out = new Map<string, { amb: string | null; inferred: boolean }>();
+  const out = new Map<string, string[]>();
   for (const n of nodes) {
-    const c = chosen(n);
-    if (c) { out.set(n.id, { amb: c, inferred: false }); continue; }
-    const found = new Set<string>(), seen = new Set([n.id]);
-    const queue = [...(next.get(n.id) ?? [])];
-    while (queue.length && found.size < 2) {
+    if (isAmbition(n) || ticks.get(n.id)?.length) continue;
+    const found = new Set<string>(n.kind === "goal" ? own(n) : []);
+    const seen = new Set([n.id]);
+    const queue = found.size ? [] : [...(next.get(n.id) ?? [])];
+    while (queue.length) {
       const id = queue.shift()!;
       if (seen.has(id)) continue;
       seen.add(id);
       const m = byId.get(id);
       if (!m) continue;
-      const a = chosen(m);
-      if (a) found.add(a);
+      const o = own(m);
+      if (o.length) o.forEach((a) => found.add(a));
       else queue.push(...(next.get(id) ?? []));
     }
-    out.set(n.id, { amb: found.size === 1 ? [...found][0] : null, inferred: found.size === 1 });
+    if (found.size) out.set(n.id, [...found]);
   }
   return out;
+}
+
+// ---- which ambitions each item serves: a tick per item and ambition (0080) -----------------
+export type PwAmbLink = { node_id: string; ambition_id: string };
+/** The ticks; null before 0080 is run. */
+export async function loadAmbLinks(): Promise<PwAmbLink[] | null> {
+  const { data, error } = await supabase.from("pw_node_ambition").select("node_id,ambition_id").order("created_at");
+  if (error) {
+    if (error.code === "PGRST205" || error.code === "42P01" || /pw_node_ambition/.test(error.message)) return null;
+    throw new Error(error.message);
+  }
+  return data as PwAmbLink[];
+}
+/** An item's ambitions from `had` to `want`. */
+export async function setAmbitions(node_id: string, want: string[], had: string[]): Promise<void> {
+  const add = want.filter((a) => !had.includes(a));
+  const drop = had.filter((a) => !want.includes(a));
+  if (add.length) {
+    await check(supabase.from("pw_node_ambition").upsert(add.map((ambition_id) => ({ node_id, ambition_id })),
+      { onConflict: "node_id,ambition_id", ignoreDuplicates: true }));
+  }
+  if (drop.length) await check(supabase.from("pw_node_ambition").delete().eq("node_id", node_id).in("ambition_id", drop));
 }
 
 // ---- Experiments on items (0076) ---------------------------------------------------------

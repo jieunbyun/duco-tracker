@@ -163,7 +163,7 @@
 
     <dt>Pathways</dt>
     <dd>
-      A map of where your work is heading: rows for Goals &amp; Objectives, Awards, Publications &amp; code/database, Teaching, Outreach and Grant
+      Four views: <em>Ambitions</em>, <em>Map</em>, <em>List</em> and <em>Outputs</em>. The <em>Map</em> shows where your work is heading: rows for Goals &amp; Objectives, Awards, Publications &amp; code/database, Teaching, Outreach and Grant
       Writing, time running
       from now to a horizon you choose (3–20 years), and long-term goals on the right. Add goals, near-term
       objectives, projects (linked to a Planning project — + From Planning brings several at once, each into its
@@ -177,14 +177,22 @@
       kept apart under <em>No longer valid</em> — struck through, with when and why — to bring back with
       <em>Valid again</em>. A new project (or grant) can also be created in Planning from here: choose “+ Create it in Planning too” and a category. Linking an item to a Planning project takes its name and dates, and can show its milestones (◆ at their due dates, read from Planning). An item linked to a Planning project shows that project's name and dates, and
       moving it on the map moves the project too.
-      <em>Ambitions</em>: a goal that serves no other goal is an ambition — keep these to your few big ones. Every
-      other item serves one: choose it in the item's editor (<em>Serves the ambition</em>), or leave it empty and it
-      serves the ambition its links lead to. A goal given an ambition is a step towards it. Each ambition has its
-      colour, shown as a bar along the top of what serves it; click its name above the map to bring it forward and
-      fade the rest (click again for all), and a new item added meanwhile serves it. <em>Rows: by ambition</em> puts
-      each ambition's lanes under its heading (what serves none goes last), laid out by time; there, drag an item
-      under another ambition to move it there, and drag an ambition's heading by its ⠿ (or press ↑ ↓ on it) to put
-      the ambitions in your order (<code>0078_pw_ambition_order.sql</code>; each keeps its colour). Needs <code>0075_pw_ambition.sql</code>.
+      <em>Ambitions</em> (the first view): your few big ones, as columns, and every activity once, as a row under its
+      type of work (Publications, Grant Writing, Awards, Teaching, then Outreach and objectives when there are any).
+      Add one with <em>+ Ambition</em>; click its name to change it (its description can say what achieving it looks
+      like), and drag its ⠿ (or press ← → on it) to put them in your order — each keeps its colour. Click a cell to tick
+      an activity for an ambition, or untick it: an activity can serve several. A hollow square means it serves that
+      ambition only through its links (an arrow towards the ambition, or to something that serves it); click it to
+      tick it. Each type's heading counts what serves each ambition, so a <strong>0</strong> is a gap: its
+      <strong>+</strong> adds something there — new, from Planning (a project, or find one by name for its milestones),
+      or an activity on Pathways already, ticked for it. <em>Active</em> hides what is done, retired or declined
+      (<em>All</em> shows it, greyed); <em>Period</em> keeps what overlaps this year, the next 12 months, or months you
+      choose (one without dates always shows, as “no dates”); the counts follow both, and both are remembered on this
+      computer. Clicking an activity's name opens it at the side, where <em>Serves the ambitions</em> ticks them too.
+      Needs <code>0080_pw_node_ambition.sql</code> (each item's one ambition so far becomes its first tick). On the map
+      the ambitions are not drawn: a card's small squares, top right, show the ambitions it serves (hollow: through
+      its links); click an ambition's name above the map to bring it forward and fade the rest (click again for all),
+      and a project put on the map meanwhile serves it.
       Clicking an item opens it at the side, the map still in sight (<em>Logbook ›</em> at its top, for one with a
       project, shows that project's actions in the Logbook), with up to three tabs: <em>On the map</em> (the
       item itself), <em>In Planning</em> for one linked to a Planning project (the project's details and its milestones,
@@ -193,8 +201,7 @@
       <em>+ New</em> (a subtopic under a topic, or a topic of its own); open one to read its notes and add one (Enter),
       <em>Experiments ›</em> to change it there, ✕ to unlink it (it stays in Experiments). A topic can be on several
       items. A card counts its experiments. Needs <code>0076_pw_experiments.sql</code>. Above the map, <em>Not on the
-      map yet</em> holds your live Planning projects not on it: drag one into a lane (under an ambition, with rows by
-      ambition), or focus it and press Enter for its area's lane. Type in its box to find a project by name: it shows
+      map yet</em> holds your live Planning projects not on it: drag one into a lane, or focus it and press Enter for its area's lane. Type in its box to find a project by name: it shows
       with its open milestones, each of which can go on the map on its own (◆, named and dated by the milestone —
       moving it moves the milestone in Planning; needs <code>0077_pw_milestone.sql</code>). <em>+ From Planning</em> finds
       them the same way. <em>Take off the map</em>, in an item's editor, takes off just the item: the project or
@@ -209,9 +216,9 @@
       The <em>Grant Writing</em> row holds grant applications: writing period up to the deadline, stage
       (drafting, submitted, awarded, declined) and, if you like, the amount sought. Link a grant to whatever it
       would fund, in any lane; that item reads “funding pending” until the grant is awarded, then “funded”. Projects under Proposals in Planning arrive here as grants.
-      <em>List</em> (the second view) shows every item by lane, with quick entry at the top — kind, title, lane and
+      <em>List</em> (the third view) shows every item by lane, with quick entry at the top — kind, title, lane and
       optional dates, Enter to add and straight on to the next — and each item's links, which you can add
-      or remove right there. <em>Outputs</em> (the third view) is the group's map of what it has developed, in three bands —
+      or remove right there. <em>Outputs</em> (the fourth view) is the group's map of what it has developed, in three bands —
       inference algorithms; data, models &amp; simulators; others — with time running left to right by when each
       was developed. Each output has its contributors, the publications it belongs to (picked from Publications
       &amp; code/database), and a link to where its data or code lives. Drag an output's ○ onto another to connect

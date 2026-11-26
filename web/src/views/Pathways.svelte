@@ -13,9 +13,10 @@
   import {
     LANES, NODE_KINDS, staged, loadPathways, loadMemberMap, loadContributors, saveYears, saveNode, saveLink,
     monthStart, monthEnd, fmtMonth, addMonths, fraction, monthAt, monthsBetween, shiftMonths,
-    isAmbition, ambitionsIn, ambitionMap, loadExpLinks,
+    isAmbition, ambitionsIn, ambitionsVia, loadExpLinks, loadAmbLinks, setAmbitions,
   } from "../lib/pathways";
-  import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane } from "../lib/pathways";
+  import type { PwNode, PwLink, PwNodeFields, NodeKind, Lane, PwAmbLink } from "../lib/pathways";
+  import PwCoverage from "../lib/PwCoverage.svelte";
   import { today, fmtDay } from "../lib/dates";
   import PwEditor from "../lib/PwEditor.svelte";
   import OutputsMap from "../lib/OutputsMap.svelte";
@@ -53,6 +54,7 @@
   let expNotes = $state<ExpNote[]>([]);
   let expLinks = $state<{ node_id: string; topic_id: string }[] | null>(null); // null before 0076 is run
   let sharedMilestones = $state<GroupMilestone[]>([]);
+  let ambLinks = $state<PwAmbLink[] | null>(null); // the ambitions ticked for each item; null before 0080 is run
   let hours = $state<HourRow[]>([]); // logged, for the milestones' hours: read when first needed
   let hoursRead = false;
   function readHours() {
@@ -68,14 +70,16 @@
     [expTopics, expNotes, expLinks] = [e.topics, e.notes, l];
   }
 
-  // three views of the same pathways: the map, a list for entering and linking, and the information system
-  type View = "map" | "list" | "system";
+  // four views of the same pathways: the ambitions and what serves each, the map, a list for entering
+  // and linking, and the information system
+  type View = "ambitions" | "map" | "list" | "system";
   const VIEW_KEY = "pathways.view";
   function savedView(): View {
+    if (member) return "map";
     try {
       const v = localStorage.getItem(VIEW_KEY);
-      return v === "system" || v === "list" ? v : "map";
-    } catch { return "map"; }
+      return v === "system" || v === "list" || v === "map" ? v : "ambitions";
+    } catch { return "ambitions"; }
   }
   let view = $state<View>(savedView());
   function setView(v: View) {
@@ -112,12 +116,12 @@
       ({ outputs, links: outputLinks, titles: outputTitles } = out);
       me = id;
       // students' shared projects and their logbooks (none before 0015, or without a group)
-      [groupProjects, groupActivity, groupMembers, contributors, , sharedMilestones] = await Promise.all([
+      [groupProjects, groupActivity, groupMembers, contributors, , sharedMilestones, ambLinks] = await Promise.all([
         // (with any in the bin: saving an item must not unlink it)
         loadGroupProjects(true).catch(() => [] as GroupProject[]),
         loadProjectActivity(new Date(Date.now() - 7 * 86_400_000).toISOString().slice(0, 10)),
         loadMembers().catch(() => [] as Member[]), loadContributors(),
-        loadExp(), loadSharedMilestones().catch(() => [] as GroupMilestone[]),
+        loadExp(), loadSharedMilestones().catch(() => [] as GroupMilestone[]), loadAmbLinks().catch(() => null),
       ]);
       if (hoursRead) loadAllHours().then((h) => (hours = h)).catch(() => {});
       nodes = pw.nodes;
@@ -151,7 +155,9 @@
   let width = $state(1000);
   const mapW = $derived(Math.max(width, 980));
   const x0 = LABEL_W;
-  const x1 = $derived(mapW - GOAL_W - GAP);
+  // the goals column, only while a goal is on the map (ambitions are in the Ambitions view; a member's chart has them)
+  const hasCol = $derived(member || nodes.some((n) => n.kind === "goal" && !isAmbition(n)));
+  const x1 = $derived(mapW - (hasCol ? GOAL_W + GAP : 30));
   const from = $derived(monthStart(today()));
   const to = $derived(addMonths(from, years * 12));
   const xOf = (iso: string) => x0 + Math.min(1, Math.max(0, fraction(iso, from, to))) * (x1 - x0);
@@ -184,8 +190,7 @@
   }
   const visible = $derived(nodes.map(eff).filter((n) => showAll || n.status === "active"));
 
-  // ---- ambitions: the few big goals; each item serves one (chosen, or where its links lead) ----
-  const ambMap = $derived(ambitionMap(nodes, links));
+  // ---- ambitions: the few big goals; an item serves any of them (ticked, or where its links lead) ----
   const allAmbs = $derived(ambitionsIn(nodes)); // in your order
   const ambsByAge = $derived(nodes.filter(isAmbition)); // colours: by when each was made, so they stay put
   const shownAmbs = $derived(allAmbs.map(eff).filter((a) => visible.some((v) => v.id === a.id)));
@@ -194,26 +199,56 @@
     const i = id ? ambsByAge.findIndex((a) => a.id === id) : -1;
     return i < 0 ? null : i < AMB_COLOURS ? `var(--amb-${i + 1})` : "var(--ink-soft)";
   }
-  const ambTitle = (id: string) => eff(nodes.find((x) => x.id === id) ?? ({ title: "" } as PwNode)).title;
-  /** What the links alone would make it serve (for the editor: what leaving the choice empty means). */
-  function inferredTitle(n: PwNode): string | null {
-    if (n.kind === "goal") return null;
-    const a = ambitionMap(nodes.map((x) => (x.id === n.id ? { ...x, ambition_id: null } : x)), links).get(n.id)?.amb;
-    return a ? ambTitle(a) : null;
+  const ambIds = $derived(new Set(ambsByAge.map((a) => a.id)));
+  /** The ticks by item (before 0080: each item's one ambition so far). */
+  const ambTicks = $derived.by(() => {
+    const rows = ambLinks ?? nodes.filter((n) => n.kind !== "goal" && n.ambition_id).map((n) => ({ node_id: n.id, ambition_id: n.ambition_id! }));
+    const m = new Map<string, string[]>();
+    const order = (id: string) => allAmbs.findIndex((a) => a.id === id);
+    for (const r of rows) if (ambIds.has(r.ambition_id)) m.set(r.node_id, [...(m.get(r.node_id) ?? []), r.ambition_id]);
+    for (const [k, v] of m) m.set(k, v.sort((a, b) => order(a) - order(b)));
+    return m;
+  });
+  const ambVia = $derived(ambitionsVia(nodes, links, ambTicks));
+  /** The ambitions an item serves, in your order: ticked, else where its links lead (via). */
+  function servesOf(id: string): { ids: string[]; via: boolean } {
+    const t = ambTicks.get(id);
+    return t?.length ? { ids: t, via: false } : { ids: ambVia.get(id) ?? [], via: true };
   }
+  /** A cell of the Ambitions view clicked: with no ticks yet, those its links lead to are ticked with it. */
+  async function tick(nodeId: string, amb: string) {
+    if (!ambLinks) return (error = sqlHint("pw_node_ambition"));
+    const had = ambTicks.get(nodeId) ?? [];
+    const base = had.length ? had : ambVia.get(nodeId) ?? [];
+    const want = had.length ? (had.includes(amb) ? had.filter((a) => a !== amb) : [...had, amb]) : base.includes(amb) ? base : [...base, amb];
+    const on = want.includes(amb);
+    const what = eff(nodes.find((x) => x.id === nodeId) ?? ({ title: "" } as PwNode)).title;
+    // at once; the reload confirms
+    ambLinks = [...ambLinks.filter((l) => l.node_id !== nodeId), ...want.map((a) => ({ node_id: nodeId, ambition_id: a }))];
+    try {
+      await undoable(on ? `Ticked “${ambTitle(amb)}” for “${what}”` : `Unticked “${ambTitle(amb)}” for “${what}”`,
+        () => setAmbitions(nodeId, want, had));
+      ambLinks = await loadAmbLinks();
+    } catch (e) {
+      const msg = (e as Error).message;
+      ambLinks = await loadAmbLinks().catch(() => null);
+      error = sqlHint(msg);
+    }
+  }
+  const ambTitle = (id: string) => eff(nodes.find((x) => x.id === id) ?? ({ title: "" } as PwNode)).title;
+  const covAmbitions = $derived(allAmbs.map(eff).map((a) => ({
+    id: a.id, title: a.title, detail: a.detail, active: a.status === "active", colour: ambColour(a.id) ?? "var(--ink-soft)",
+  })));
+  const covItems = $derived(nodes.filter((n) => !isAmbition(n)).map(eff));
 
-  // rows by type of work (the lanes), or by ambition (each ambition's lanes under it); and one
-  // ambition brought forward, the rest faded — both remembered on this computer
-  const ROWS_KEY = "pathways.rows", FOCUS_KEY = "pathways.focus";
+  // one ambition brought forward on the map, the rest faded — remembered on this computer
+  const FOCUS_KEY = "pathways.focus";
   function stored(k: string): string | null {
     try { return localStorage.getItem(k); } catch { return null; }
   }
   function store(k: string, v: string | null) {
     try { if (v === null) localStorage.removeItem(k); else localStorage.setItem(k, v); } catch {}
   }
-  let rowsBy = $state<"type" | "ambition">(stored(ROWS_KEY) === "ambition" ? "ambition" : "type");
-  const byAmb = $derived(rowsBy === "ambition");
-  function setRows(r: "type" | "ambition") { rowsBy = r; store(ROWS_KEY, r); }
   let focus = $state<string | null>(stored(FOCUS_KEY)); // an ambition's id, or "none"
   function setFocus(f: string) { focus = focus === f ? null : f; store(FOCUS_KEY, focus); }
 
@@ -225,8 +260,7 @@
   // ---- dragging (move / stretch / link) -------------------------------------------
   type Drag =
     | { mode: "move" | "resize"; id: string; px: number; py: number; moved: boolean;
-        dated: boolean; start: string; end: string | null; lane: Lane; row: number;
-        amb?: string | null } // rows by ambition: the ambition it is over
+        dated: boolean; start: string; end: string | null; lane: Lane; row: number }
 
     | { mode: "link"; id: string; x: number; y: number };
   let drag = $state<Drag | null>(null);
@@ -239,18 +273,17 @@
     }
     return n;
   }
-  const drawn = $derived(visible.map(shown));
+  // the ambitions themselves are in the Ambitions view, not on the map (a member's chart keeps its goals)
+  const mapNodes = $derived(member ? visible : visible.filter((n) => !isAmbition(n)));
+  const drawn = $derived(mapNodes.map(shown));
 
-  /** The ambition an item is drawn under: its own, while that ambition is on the map; else none. */
-  function groupOf(n: PwNode): string | null {
-    if (drag && drag.mode !== "link" && drag.id === n.id && drag.moved && drag.amb !== undefined) return drag.amb;
-    const a = ambMap.get(n.id)?.amb ?? null;
-    return a && shownAmbs.some((x) => x.id === a) ? a : null;
-  }
   const focusOn = $derived(focus === "none" || shownAmbs.some((a) => a.id === focus) ? focus : null);
-  const fadedIds = $derived(new Set(focusOn === null ? [] : drawn.filter((n) => (groupOf(n) ?? "none") !== focusOn).map((n) => n.id)));
+  const fadedIds = $derived(new Set(focusOn === null ? [] : drawn.filter((n) => {
+    const a = servesOf(n.id).ids;
+    return focusOn === "none" ? a.length > 0 : !a.includes(focusOn);
+  }).map((n) => n.id)));
 
-  // ---- rows: a band per lane (by type), or per ambition and lane (by ambition) -------------
+  // ---- rows: a band per lane -------------------------------------------------------------
   type Span = { x: number; w: number; open: boolean };
   function span(n: PwNode): Span {
     if (inColumn(n)) return { x: x1 + GAP, w: GOAL_W - GOAL_R, open: false };
@@ -260,57 +293,25 @@
     const right = xOf(e > to ? to : e);
     return { x: left, w: Math.max(MIN_W, right - left), open: !n.end_on };
   }
-  type Band = { key: string; lane: Lane; amb: string | null; top: number; rows: number };
-  const GROUP_H = 26;
-  const bandKey = (lane: Lane, amb: string | null) => (byAmb ? `${amb ?? "none"}|${lane}` : lane);
+  type Band = { key: string; lane: Lane; top: number; rows: number };
   const layout = $derived.by(() => {
     const bands: Band[] = [];
-    const heads: { id: string | null; top: number }[] = [];
-    const row = new Map<string, number>();
     let y = AXIS_H;
-    if (!byAmb) {
-      // your own rows in each lane, with an empty one below to drag into
-      for (const l of LANES) {
-        const rows = Math.max(0, ...drawn.filter((n) => n.lane === l.key).map((n) => n.lane_row)) + 2;
-        bands.push({ key: l.key, lane: l.key, amb: null, top: y, rows });
-        y += rows * ROW_H + 2 * PAD;
-      }
-      for (const n of drawn) row.set(n.id, n.lane_row);
-    } else {
-      // each ambition, then its lanes that hold something, packed by time in the order of your
-      // rows by type (the item being dragged last, so the others stay put)
-      for (const g of [...shownAmbs.map((a) => a.id), null]) {
-        const mine = drawn.filter((n) => groupOf(n) === g);
-        if (!mine.length) continue;
-        heads.push({ id: g, top: y });
-        y += GROUP_H;
-        for (const l of LANES) {
-          const here = mine.filter((n) => n.lane === l.key).sort((a, b) =>
-            Number(drag?.id === a.id) - Number(drag?.id === b.id) || a.lane_row - b.lane_row
-            || (a.start_on ?? "").localeCompare(b.start_on ?? ""));
-          if (!here.length) continue;
-          const taken: Span[][] = [];
-          for (const n of here) {
-            const s = span(n);
-            let r = 0;
-            while ((taken[r] ?? []).some((o) => s.x < o.x + o.w + 24 && o.x < s.x + s.w + 24)) r++; // room for the ○
-            (taken[r] ??= []).push(s);
-            row.set(n.id, r);
-          }
-          bands.push({ key: bandKey(l.key, g), lane: l.key, amb: g, top: y, rows: taken.length });
-          y += taken.length * ROW_H + 2 * PAD;
-        }
-      }
+    // your own rows in each lane, with an empty one below to drag into
+    for (const l of LANES) {
+      const rows = Math.max(0, ...drawn.filter((n) => n.lane === l.key).map((n) => n.lane_row)) + 2;
+      bands.push({ key: l.key, lane: l.key, top: y, rows });
+      y += rows * ROW_H + 2 * PAD;
     }
-    return { bands, heads, row, height: y + 8 };
+    return { bands, height: y + 8 };
   });
   const bandByKey = $derived(new Map(layout.bands.map((b) => [b.key, b])));
   const mapH = $derived(layout.height);
 
   type Box = { x: number; y: number; w: number; open: boolean };
   function box(n: PwNode): Box {
-    const b = bandByKey.get(bandKey(n.lane, groupOf(n)));
-    return { ...span(n), y: (b?.top ?? AXIS_H) + PAD + (layout.row.get(n.id) ?? 0) * ROW_H };
+    const b = bandByKey.get(n.lane);
+    return { ...span(n), y: (b?.top ?? AXIS_H) + PAD + n.lane_row * ROW_H };
   }
   const boxes = $derived(new Map(drawn.map((n) => [n.id, box(n)])));
 
@@ -318,12 +319,12 @@
     const r = mapEl!.getBoundingClientRect();
     return { x: ev.clientX - r.left, y: ev.clientY - r.top };
   }
-  /** The band under a point: its lane, its ambition (rows by ambition) and the row in it. */
-  function bandAt(y: number): { lane: Lane; amb: string | null; row: number } {
+  /** The band under a point: its lane and the row in it. */
+  function bandAt(y: number): { lane: Lane; row: number } {
     let b = layout.bands[0];
     for (const x of layout.bands) if (y >= x.top) b = x;
-    if (!b) return { lane: "goals", amb: null, row: 0 };
-    return { lane: b.lane, amb: b.amb, row: Math.max(0, Math.min(b.rows - 1, Math.floor((y - b.top - PAD) / ROW_H))) };
+    if (!b) return { lane: "goals", row: 0 };
+    return { lane: b.lane, row: Math.max(0, Math.min(b.rows - 1, Math.floor((y - b.top - PAD) / ROW_H))) };
   }
 
   function begin(ev: PointerEvent, n: PwNode, mode: "move" | "resize" | "link") {
@@ -336,8 +337,7 @@
     } else {
       const s = n.start_on ?? today();
       drag = { mode, id: n.id, px: p.x, py: p.y, moved: false, dated: !inColumn(n),
-               start: s, end: n.kind === "goal" ? n.end_on : endOf(n, s), lane: n.lane, row: n.lane_row,
-               amb: byAmb ? groupOf(n) : undefined };
+               start: s, end: n.kind === "goal" ? n.end_on : endOf(n, s), lane: n.lane, row: n.lane_row };
     }
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
@@ -402,8 +402,6 @@
       drag = { ...drag, moved: true, end };
     } else {
       const where = bandAt(p.y);
-      // rows by ambition: over another ambition's band, it goes to that ambition (an ambition stays its own)
-      if (byAmb && !isAmbition(n)) drag = { ...drag, amb: where.amb };
       if (n.kind === "goal" && p.x > x1) {
         // dropped in the goals column: no dates
         drag = { ...drag, moved: true, dated: false, lane: where.lane, row: where.row };
@@ -444,14 +442,6 @@
       if (!d.moved) return openEdit(raw!); // a click
       const fields: Partial<PwNodeFields> = { lane: d.lane, lane_row: d.row };
       Object.assign(fields, d.dated ? { start_on: d.start, end_on: d.end } : { start_on: null, end_on: null });
-      if (d.amb !== undefined) {
-        // rows by ambition place items by time; their row by type stays, unless it is taken there now
-        const kind = !d.dated ? "goal" : n.kind === "goal" ? "project" : n.kind;
-        const e = d.dated ? endOf({ ...n, end_on: d.end }, d.start) : d.start;
-        fields.lane_row = d.lane === n.lane && rowFree(d.lane, kind, d.start, e, n.lane_row, n.id)
-          ? n.lane_row : freeRow(d.lane, kind, d.start, e, [], n.id);
-        if (d.amb !== groupOf(n)) fields.ambition_id = d.amb;
-      }
       // show it where it was dropped straight away; the reload confirms
       nodes = nodes.map((x) => (x.id === n.id ? { ...x, ...fields } as PwNode : x));
       if (n.milestone_id && n.project_id) {
@@ -476,6 +466,7 @@
   function sqlHint(msg: string): string {
     const need = /milestone_id/.test(msg) ? ["Milestones on the map need", "0077_pw_milestone.sql"]
       : /ambition_order/.test(msg) ? ["Ordering the ambitions needs", "0078_pw_ambition_order.sql"]
+      : /pw_node_ambition/.test(msg) ? ["Ticking an item for its ambitions needs", "0080_pw_node_ambition.sql"]
       : /ambition_id/.test(msg) ? ["Ambitions need", "0075_pw_ambition.sql"] : null;
     return need ? `${need[0]} web/db/${need[1]} run first, in the Supabase SQL editor.` : msg;
   }
@@ -562,7 +553,10 @@
   const todayX = $derived(xOf(today()));
 
   // ---- adding and editing ------------------------------------------------------------
-  let panel = $state<{ node: PwNode | null; draft?: Partial<PwNodeFields> } | { importing: true } | null>(null);
+  // an item (or a new one, with the ambitions it serves), the projects from Planning, or what to add for an ambition
+  type Panel = { node: PwNode | null; draft?: Partial<PwNodeFields>; serves?: string[] } | { importing: true }
+    | { adding: { lane: Lane; amb: string } };
+  let panel = $state<Panel | null>(null);
   /** How many of the group's outputs name this item as their publication. */
   const outputCount = (id: string) => outputs.filter((o) => o.status !== "retired" && o.publications.includes(id)).length;
   // what an output can name as its publication: the items in Publications & code/database
@@ -582,15 +576,15 @@
   const DEFAULT_MONTHS: Record<NodeKind, number> = { goal: 0, objective: 12, project: 12, person: 3 * 12, gap: 6, grant: 3, award: 3 };
   /** Whether a row in a lane is free over a span (goals: in the goals column), but for `except`. */
   function rowFree(lane: Lane, kind: NodeKind, s: string, e: string, row: number, except?: string, also: PwNode[] = []): boolean {
-    return ![...visible, ...also].some((n) => n.id !== except && n.lane === lane && (kind === "goal") === inColumn(n)
+    return ![...mapNodes, ...also].some((n) => n.id !== except && n.lane === lane && (kind === "goal") === inColumn(n)
       && n.lane_row === row && (kind === "goal" || ((n.start_on ?? today()) <= e && endOf(n, n.start_on ?? today()) >= s)));
   }
   /** The first row in a lane free over a span (goals: the first free row in the goals column). */
   function freeRow(lane: Lane, kind: NodeKind, s: string, e: string, also: PwNode[] = [], except?: string): number {
     for (let row = 0; ; row++) if (rowFree(lane, kind, s, e, row, except, also)) return row;
   }
-  function openNew(kind: NodeKind) {
-    const lane = (NODE_KINDS.find((k) => k.key === kind)?.lane ?? "goals") as Lane;
+  function openNew(kind: NodeKind, inLane?: Lane, amb?: string) {
+    const lane = inLane ?? (NODE_KINDS.find((k) => k.key === kind)?.lane ?? "goals") as Lane;
     const s = monthStart(today());
     const e = monthEnd(addMonths(s, Math.max(1, DEFAULT_MONTHS[kind]) - 1));
     panel = {
@@ -599,9 +593,9 @@
         kind, lane, potential: kind === "project", grant_stage: staged(kind) ? "drafting" : null,
         start_on: kind === "goal" ? null : s, end_on: kind === "goal" ? null : e,
         lane_row: freeRow(lane, kind, s, e),
-        // with an ambition brought forward, a new item serves it
-        ...(focusOn && focusOn !== "none" && kind !== "goal" ? { ambition_id: focusOn } : {}),
       },
+      // for an ambition's gap, or (on the map) with an ambition brought forward, a new item serves it
+      serves: kind === "goal" ? [] : amb ? [amb] : view === "map" && focusOn && focusOn !== "none" ? [focusOn] : [],
     };
   }
   /** Add an item straight from the list, with the same defaults as the + buttons. */
@@ -672,6 +666,8 @@
         const fields = fieldsFor(p, m, undefined, placed);
         if (!m) fields.show_milestones = importMilestones && p.milestone.length > 0;
         const id = await saveNode(null, fields);
+        const amb = focusAmb();
+        if (amb && ambLinks) await setAmbitions(id, [amb], []);
         placed.push({ ...(fields as PwNode), id });
       }
     } catch (e) {
@@ -776,27 +772,31 @@
     if (p) await placeProject(p, where);
   }
   /**
-   * A Planning project, or one of its milestones (m), as a new item: in the lane (and, by ambition,
-   * under the ambition) it is dropped in, else its area's lane; with its dates, linked to it.
+   * A Planning project, or one of its milestones (m), as a new item: in the lane it is dropped in, else
+   * its area's lane; with its dates, linked to it.
    */
-  function fieldsFor(p: Project, m: Milestone | null, where?: { lane: Lane; amb: string | null }, also: PwNode[] = []): Partial<PwNodeFields> {
+  function fieldsFor(p: Project, m: Milestone | null, where?: { lane: Lane }, also: PwNode[] = []): Partial<PwNodeFields> {
     const lane = !where || where.lane === "goals" ? laneFor(p).lane : where.lane;
     const kind = lane === "grants" ? "grant" : "project";
     const d = m ? milestoneDates(p, m) : { start: p.start_on, due: p.end_on };
     const s = d.start ?? monthStart(today());
     const e = d.due && d.due >= s ? d.due : null;
-    const amb = where && byAmb ? where.amb : focusOn && focusOn !== "none" ? focusOn : null;
     return {
       kind, lane, title: m ? m.title : p.name, project_id: p.id, ...(m ? { milestone_id: m.id } : {}),
       potential: false, grant_stage: kind === "grant" ? "drafting" : null,
       start_on: s, end_on: e, lane_row: freeRow(lane, kind, s, e ?? addMonths(s, 3), also),
-      show_milestones: !m && p.milestone.length > 0, ...(amb ? { ambition_id: amb } : {}),
+      show_milestones: !m && p.milestone.length > 0,
     };
   }
-  async function placeProject(p: Project, where?: { lane: Lane; amb: string | null }, m: Milestone | null = null) {
+  /** The ambition a new item serves, on the map: the one brought forward. */
+  const focusAmb = () => (focusOn && focusOn !== "none" ? focusOn : null);
+  async function placeProject(p: Project, where?: { lane: Lane }, m: Milestone | null = null, amb: string | null = focusAmb()) {
     const fields = fieldsFor(p, m, where);
     try {
-      await undoable(m ? `Put “${m.title}” (${p.name}) on the map` : `Put “${p.name}” on the map`, () => saveNode(null, fields));
+      await undoable(m ? `Put “${m.title}” (${p.name}) on Pathways` : `Put “${p.name}” on Pathways`, async () => {
+        const id = await saveNode(null, fields);
+        if (amb && ambLinks) await setAmbitions(id, [amb], []);
+      });
       await load();
     } catch (e) {
       const msg = (e as Error).message;
@@ -805,54 +805,11 @@
     }
   }
 
-  // ---- your order of the ambitions: drag one's heading (rows by ambition) ---------------------
-  let ambDrag = $state<{ id: string; y: number } | null>(null);
-  /** Where the ambition being dragged would go: its place among the others, and the line's height. */
-  const ambDrop = $derived.by(() => {
-    if (!ambDrag) return null;
-    const d = ambDrag;
-    const others = layout.heads.filter((h) => h.id && h.id !== d.id);
-    const k = others.filter((h) => h.top + GROUP_H / 2 < d.y).length;
-    const top = k < others.length ? others[k].top : (layout.heads.find((h) => h.id === null)?.top ?? layout.height - 8);
-    return { k, top };
-  });
-  function ambStart(ev: PointerEvent, id: string) {
-    if (ev.button !== 0 || member) return;
-    ev.preventDefault();
-    ev.stopPropagation();
-    ambDrag = { id, y: local(ev).y };
-    window.addEventListener("pointermove", ambMove);
-    window.addEventListener("pointerup", ambUp);
-    window.addEventListener("pointercancel", ambUp);
-  }
-  function ambMove(ev: PointerEvent) {
-    if (ambDrag && mapEl) ambDrag = { ...ambDrag, y: local(ev).y };
-  }
-  async function ambUp(ev: PointerEvent) {
-    window.removeEventListener("pointermove", ambMove);
-    window.removeEventListener("pointerup", ambUp);
-    window.removeEventListener("pointercancel", ambUp);
-    const d = ambDrag, at = ambDrop;
-    ambDrag = null;
-    if (!d || !at || ev.type === "pointercancel") return;
-    const ids = shownAmbs.map((a) => a.id).filter((id) => id !== d.id);
-    ids.splice(at.k, 0, d.id);
-    await reorderAmbitions(ids);
-  }
-  async function ambKey(ev: KeyboardEvent, id: string) {
-    if (ev.key !== "ArrowUp" && ev.key !== "ArrowDown") return;
-    ev.preventDefault();
-    const ids = shownAmbs.map((a) => a.id);
-    const i = ids.indexOf(id), j = i + (ev.key === "ArrowUp" ? -1 : 1);
-    if (j < 0 || j >= ids.length) return;
-    [ids[i], ids[j]] = [ids[j], ids[i]];
-    await reorderAmbitions(ids);
-    requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-amb-grip="${id}"]`)?.focus());
-  }
+  // ---- your order of the ambitions: drag a column's ⠿ in the Ambitions view --------------------
   /** The ambitions shown, in a new order; hidden ones (done, retired) keep their places. */
   async function reorderAmbitions(shownIds: string[]) {
-    if (shownIds.join() === shownAmbs.map((a) => a.id).join()) return;
     const moved = new Set(shownIds);
+    if (shownIds.join() === allAmbs.filter((a) => moved.has(a.id)).map((a) => a.id).join()) return;
     let k = 0;
     const all = allAmbs.map((a) => (moved.has(a.id) ? shownIds[k++] : a.id));
     const was = new Map(nodes.map((n) => [n.id, n.ambition_order]));
@@ -867,6 +824,41 @@
       await load();
       error = sqlHint(msg);
     }
+  }
+
+  // ---- + in the Ambitions view: something new, from Planning, or already on Pathways, for an ambition ----
+  const LANE_KIND: Record<Lane, NodeKind> = {
+    goals: "objective", awards: "award", publications: "project", teaching: "project", outreach: "project", grants: "grant",
+  };
+  let addFind = $state("");
+  function openAdding(lane: Lane, amb: string) {
+    addFind = "";
+    panel = { adding: { lane, amb } };
+  }
+  /** Planning projects off Pathways whose name matches (with their open milestones off it), or all such projects. */
+  const addFound = $derived.by(() => {
+    const q = addFind.trim().toLocaleLowerCase();
+    return liveProjects.map((p) => {
+      const hit = !q || p.name.toLocaleLowerCase().includes(q);
+      const ms = q ? p.milestone.filter((m) => m.status === "active" && !msOnMap.has(m.id) && (hit || m.title.toLocaleLowerCase().includes(q))) : [];
+      return { p, ms, hit: hit && !onMap.has(p.id) };
+    }).filter((x) => x.hit || x.ms.length);
+  });
+  /** What is on Pathways already in that lane, not serving the ambition yet. */
+  const addExisting = $derived.by(() => {
+    if (!panel || !("adding" in panel)) return [];
+    const { lane, amb } = panel.adding;
+    const q = addFind.trim().toLocaleLowerCase();
+    return covItems.filter((n) => n.lane === lane && n.status === "active" && !servesOf(n.id).ids.includes(amb)
+      && (!q || n.title.toLocaleLowerCase().includes(q)));
+  });
+  async function addFromPlanning(p: Project, m: Milestone | null, lane: Lane, amb: string) {
+    panel = null;
+    await placeProject(p, { lane }, m, amb);
+  }
+  async function addExistingTo(n: PwNode, amb: string) {
+    panel = null;
+    await tick(n.id, amb);
   }
 
   const kindLabel = (k: string) => NODE_KINDS.find((x) => x.key === k)?.label ?? k;
@@ -909,6 +901,9 @@
   <h1>Pathways</h1>
 
   <div class="views" role="tablist" aria-label="Pathways view">
+    {#if !member}
+      <button role="tab" aria-selected={view === "ambitions"} class:on={view === "ambitions"} onclick={() => setView("ambitions")}>Ambitions</button>
+    {/if}
     <button role="tab" aria-selected={view === "map"} class:on={view === "map"} onclick={() => setView("map")}>Map</button>
     {#if !member}
       <button role="tab" aria-selected={view === "list"} class:on={view === "list"} onclick={() => setView("list")}>List</button>
@@ -919,10 +914,18 @@
   {#if view === "system"}
     <OutputsMap {outputs} links={outputLinks} titles={outputTitles} members={groupMembers} {me} supervisor={!member} readonly={!!preview.as}
                 publications={publicationOptions} onchanged={load} />
+  {:else if view === "ambitions" && !member}
+    {#if error}<p class="error">{error}</p>{/if}
+    {#if loading}<p class="muted">Loading…</p>{:else}
+      <PwCoverage items={covItems} ambitions={covAmbitions} ticks={ambTicks} via={ambVia} ready={!!ambLinks} readonly={!!preview.as}
+                  projectName={(id) => projById.get(id)?.name ?? "a project"}
+                  onopen={(id) => { const n = nodes.find((x) => x.id === id); if (n) openEdit(n); }}
+                  ontick={tick} onadd={openAdding} onnewamb={() => openNew("goal")} onreorder={reorderAmbitions} />
+    {/if}
   {:else}
   <div class="toolbar">
     {#if !member}
-      {#each NODE_KINDS as k (k.key)}
+      {#each NODE_KINDS.filter((k) => k.key !== "goal") as k (k.key)}
         <button class:primary={k.key === "project"} onclick={() => openNew(k.key)}>+ {k.label}</button>
       {/each}
       <button onclick={openImport} title="Put existing Planning projects on the map, linked to them">+ From Planning</button>
@@ -947,16 +950,10 @@
         <button class="amb-chip" class:on={focusOn === a.id} aria-pressed={focusOn === a.id} style:--amb={ambColour(a.id)}
                 title={focusOn === a.id ? "Show them all again" : `Bring “${a.title}” forward`} onclick={() => setFocus(a.id)}>{a.title}</button>
       {/each}
-      {#if drawn.some((n) => groupOf(n) === null)}
+      {#if drawn.some((n) => !servesOf(n.id).ids.length)}
         <button class="amb-chip" class:on={focusOn === "none"} aria-pressed={focusOn === "none"}
                 title="What serves no ambition yet" onclick={() => setFocus("none")}>No ambition yet</button>
       {/if}
-      <span class="spacer"></span>
-      <div class="years" role="group" aria-label="Rows">
-        <span class="muted">Rows</span>
-        <button class:on={!byAmb} aria-pressed={!byAmb} onclick={() => setRows("type")}>by type</button>
-        <button class:on={byAmb} aria-pressed={byAmb} onclick={() => setRows("ambition")}>by ambition</button>
-      </div>
     </div>
   {/if}
   {#snippet projChip(p: Project)}
@@ -1003,7 +1000,7 @@
           {#if !trayProjects.length}<span class="muted small">Every live project is on the map; find one for its milestones.</span>{/if}
         </div>
       {/if}
-      <p class="hint muted">Drop a project or milestone in a lane{byAmb ? ", under the ambition it serves" : ""}, or focus it and press Enter for its area's lane.</p>
+      <p class="hint muted">Drop a project or milestone in a lane, or focus it and press Enter for its area's lane{focusAmb() ? ` (it serves “${ambTitle(focusAmb()!)}”, brought forward)` : ""}.</p>
     </details>
   {/if}
   {#if trayDrag?.moved}
@@ -1019,15 +1016,15 @@
     {#if member}
       <span class="hint">Your items, and the goals and objectives they lead to.</span>
     {:else}
-      <span class="hint">Drag an item to move it in time or across lanes (hold Shift to keep its dates) · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit{byAmb ? " · drag it under another ambition to move it there" : ""}</span>
+      <span class="hint">Drag an item to move it in time or across lanes (hold Shift to keep its dates) · drag its right edge to stretch it · drag its ○ onto another item to link them · click to edit · its squares: the ambitions it serves (hollow: through its links)</span>
     {/if}
   </div>
 
   <div class="scroller" bind:clientWidth={width}>
     <div class="map" bind:this={mapEl} style:width={`${mapW}px`} style:height={`${mapH}px`} class:dragging={!!drag}>
-      <!-- lanes (by ambition: each ambition's lanes, under its heading) -->
+      <!-- lanes -->
       {#each layout.bands as b, i (b.key)}
-        <div class="lane lane-{b.lane}" class:alt={i % 2 === 1} class:sub={byAmb} style:top={`${b.top}px`}
+        <div class="lane lane-{b.lane}" class:alt={i % 2 === 1} style:top={`${b.top}px`}
              style:height={`${b.rows * ROW_H + 2 * PAD}px`}>
           <span class="lane-label">{LANES.find((l) => l.key === b.lane)?.label}</span>
         </div>
@@ -1036,20 +1033,8 @@
       {#each ticks as t (t.x)}
         <div class="tick" class:major={t.major} style:left={`${t.x}px`} style:height={`${mapH - 6}px`}><span>{t.label}</span></div>
       {/each}
-      {#each layout.heads as h (h.id ?? "none")}
-        <div class="amb-head" class:faded={focusOn !== null && (h.id ?? "none") !== focusOn} class:lifting={ambDrag?.id === h.id} style:top={`${h.top}px`}
-             style:height={`${GROUP_H}px`} style:--amb={ambColour(h.id) ?? "var(--ink-soft)"}>
-          {#if h.id && !member && shownAmbs.length > 1}
-            <span class="amb-grip" role="button" tabindex="0" data-amb-grip={h.id} aria-label="Drag to reorder the ambitions (or use the arrow keys)"
-                  title="Drag to put the ambitions in your order" onpointerdown={(ev) => ambStart(ev, h.id!)}
-                  onkeydown={(ev) => ambKey(ev, h.id!)}>⠿</span>
-          {/if}
-          <span>{h.id ? ambTitle(h.id) : "No ambition yet"}</span>
-        </div>
-      {/each}
-      {#if ambDrop}<div class="amb-drop" style:top={`${ambDrop.top - 2}px`}></div>{/if}
       <div class="now" style:left={`${todayX}px`} style:height={`${mapH - 6}px`}><span>now</span></div>
-      <div class="goals-head" style:left={`${x1 + GAP}px`} style:width={`${GOAL_W - GOAL_R}px`}>Goals · by {fmtDay(to).replace(/^1 /, "")}</div>
+      {#if hasCol}<div class="goals-head" style:left={`${x1 + GAP}px`} style:width={`${GOAL_W - GOAL_R}px`}>Goals · by {fmtDay(to).replace(/^1 /, "")}</div>{/if}
 
       <!-- links -->
       <svg class="links" width={mapW} height={mapH} aria-hidden="true">
@@ -1074,14 +1059,22 @@
         {@const b = boxes.get(n.id)!}
         <div class="node kind-{n.kind} lane-{n.lane} {staged(n.kind) ? `gs-${n.grant_stage ?? "drafting"}` : ""}" class:potential={n.potential} class:hands-on={n.kind === "project" && n.hands_on} class:open-end={b.open}
              class:inactive={n.status !== "active"} class:moving={drag?.id === n.id}
-             class:faded={fadedIds.has(n.id)} class:ambition={isAmbition(n)} class:has-amb={!!ambColour(groupOf(n))}
-             style:--amb={ambColour(groupOf(n))}
+             class:faded={fadedIds.has(n.id)}
              data-node={n.id} role="button" tabindex="0" title={`${n.title}${n.detail ? `\n${n.detail}` : ""}`}
              style:left={`${b.x}px`} style:top={`${b.y}px`} style:width={`${b.w}px`} style:height={`${NODE_H}px`}
              onpointerdown={(ev) => begin(ev, n, "move")}
              onkeydown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); openEdit(n); } }}>
           <span class="n-title">{n.kind === "goal" ? "◎ " : n.kind === "gap" ? "? " : n.milestone_id ? "◆ " : ""}{#if n.kind === "project" && n.hands_on}<span class="hand" title="Hands-on">✋</span>{/if}{n.title}<FolderLink url={n.folder_url} /></span>
           <span class="n-sub">{n.status !== "active" ? `${n.status} · ` : ""}{sub(n)}</span>
+          {#if !member}
+            {@const sv = servesOf(n.id)}
+            {#if sv.ids.length}
+              <!-- the ambitions it serves (hollow: through its links) -->
+              <span class="amb-marks" class:via={sv.via} aria-hidden="true">
+                {#each sv.ids as a (a)}<i style:--amb={ambColour(a) ?? "var(--ink-soft)"} title={`${sv.via ? "Through its links: " : ""}${ambTitle(a)}`}></i>{/each}
+              </span>
+            {/if}
+          {/if}
           {#if n.show_milestones && n.project_id}
             <!-- the Planning project's milestones, at their due dates (read from Planning, never copied) -->
             {#each projById.get(n.project_id)?.milestone ?? [] as m (m.id)}
@@ -1107,14 +1100,56 @@
   </div>
 
   {#if !loading && !nodes.length}
-    <p class="muted">Nothing on the map yet. Start with a goal on the right, then add projects and link them towards it.</p>
+    <p class="muted">Nothing on Pathways yet. Start in <em>Ambitions</em> with your two or three big ones, then add what serves them.</p>
   {/if}
   {/if}
   {/if}
 </section>
 
 <dialog bind:this={dialog} onclose={() => (panel = null)} class:sheet={!!panel && "node" in panel}>
-  {#if panel && "importing" in panel}
+  {#if panel && "adding" in panel}
+    {@const ad = panel.adding}
+    {@const laneLabel = LANES.find((l) => l.key === ad.lane)?.label ?? ""}
+    <h2>{laneLabel} for “{ambTitle(ad.amb)}”</h2>
+    <div class="add-new">
+      <button class="primary" onclick={() => openNew(LANE_KIND[ad.lane], ad.lane, ad.amb)}>+ New {kindLabel(LANE_KIND[ad.lane]).toLowerCase()}…</button>
+      {#if ad.lane === "publications"}
+        <button onclick={() => openNew("person", ad.lane, ad.amb)}>+ New person…</button>
+      {:else if ad.lane === "goals"}
+        <button onclick={() => openNew("gap", ad.lane, ad.amb)}>+ New knowledge gap…</button>
+      {/if}
+    </div>
+    <input class="imp-find" type="search" bind:value={addFind} placeholder="Find a Planning project, milestone or item by name…" aria-label="Find by name" />
+    <div class="imp">
+      {#if addExisting.length}
+        <div class="imp-group">
+          <p class="add-h">On Pathways already: tick it for this ambition</p>
+          {#each addExisting.slice(0, 30) as n (n.id)}
+            <button class="add-row" onclick={() => addExistingTo(n, ad.amb)}>{n.milestone_id ? "◆ " : ""}{n.title}
+              <span class="muted">{n.start_on ? fmtMonth(n.start_on) : n.end_on ? `by ${fmtMonth(n.end_on)}` : "no dates"}</span></button>
+          {/each}
+        </div>
+      {/if}
+      <div class="imp-group">
+        <p class="add-h">From Planning: put it on Pathways, in {laneLabel}{addFind.trim() ? "" : " (type a name to see milestones)"}</p>
+        {#each addFound.slice(0, 60) as x (x.p.id)}
+          {#if x.hit}
+            <button class="add-row" onclick={() => addFromPlanning(x.p, null, ad.lane, ad.amb)}>{x.p.name}
+              <span class="muted">{x.p.start_on || x.p.end_on ? `${x.p.start_on ? fmtMonth(x.p.start_on) : "…"} → ${x.p.end_on ? fmtMonth(x.p.end_on) : "…"}` : "no dates"}</span></button>
+          {:else}
+            <p class="add-parent muted">{x.p.name} <span>· on Pathways</span></p>
+          {/if}
+          {#each x.ms as m (m.id)}
+            <button class="add-row add-ms" onclick={() => addFromPlanning(x.p, m, ad.lane, ad.amb)}>◆ {m.title}
+              <span class="muted">milestone of {x.p.name}</span></button>
+          {/each}
+        {:else}
+          <p class="muted small">{addFind.trim() ? "Nothing matches." : "Every live Planning project is on Pathways."}</p>
+        {/each}
+      </div>
+    </div>
+    <div class="imp-actions"><button onclick={() => (panel = null)}>Cancel</button></div>
+  {:else if panel && "importing" in panel}
     <h2>Projects from Planning</h2>
     <p class="muted small">Tick the projects to put on the map. Each lands in its area's lane with its dates, linked to the Planning project.
       Find one by name to tick its milestones too, each on the map on its own.</p>
@@ -1162,6 +1197,9 @@
   {:else if panel && "node" in panel}
     <div class="sheet-head">
       <h2>{cur ? cur.title : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
+      {#if cur && isAmbition(cur) && !member}
+        <span class="sheet-tag">Ambition</span>
+      {/if}
       {#if cur && (cur.project_id || cur.group_project_id)}
         <!-- its project's actions (at the milestone, for a milestone's item) -->
         <a class="sheet-link" title="Its project's actions in the Logbook"
@@ -1197,8 +1235,11 @@
     {:else}
     {#key panel}
       <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} {tax} members={groupMembers}
-        ambitions={allAmbs.map(eff).filter((a) => a.status === "active" || (panel && "node" in panel && a.id === panel.node?.ambition_id)).map((a) => ({ id: a.id, title: a.title }))}
-        inferred={panel.node ? inferredTitle(panel.node) : null}
+        ambitions={allAmbs.map(eff).filter((a) => a.status === "active" || (panel && "node" in panel && !!panel.node
+          && (a.id === panel.node.ambition_id || servesOf(panel.node.id).ids.includes(a.id)))).map((a) => ({ id: a.id, title: a.title }))}
+        served={panel.node ? ambTicks.get(panel.node.id) ?? [] : panel.serves ?? []}
+        via={panel.node && !ambTicks.get(panel.node.id)?.length ? (ambVia.get(panel.node.id) ?? []).map(ambTitle) : []}
+        ambReady={!!ambLinks}
         contributors={panel.node ? contributors.get(panel.node.id) ?? [] : []} onsaved={saved} oncancel={() => (panel = null)} />
     {/key}
     {/if}
@@ -1255,17 +1296,7 @@
   .lane-outreach .lane-label { color: var(--lane-outreach); }
   .lane-publications .lane-label { color: var(--lane-publications); }
   .lane-grants .lane-label { color: var(--lane-grants); }
-  .lane.sub .lane-label { font-size: 0.75rem; font-weight: 500; padding-left: 0.5rem; }
-  /* rows by ambition: each ambition's heading, across the map */
-  .amb-head {
-    position: absolute; left: 0; right: 0; box-sizing: border-box; display: flex; align-items: center; padding-left: 10px;
-    border-top: 2px solid var(--amb); background: color-mix(in srgb, var(--amb) 12%, var(--paper));
-    font-size: 0.85rem; font-weight: 700; color: var(--amb); white-space: nowrap; overflow: hidden;
-  }
-  .amb-head.faded { opacity: 0.35; }
   .ambs { display: flex; flex-wrap: wrap; gap: 0.35rem; align-items: center; margin: 0 0 0.5rem; font-family: var(--font-ui); font-size: 0.82rem; }
-  .ambs .years { align-items: center; }
-  .ambs .years .muted { margin-right: 0.2rem; }
   .amb-chip {
     font-size: 0.8rem; padding: 0.2rem 0.6rem; border-radius: 0; border-left: 4px solid var(--amb, var(--ink-soft));
     max-width: 18rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -1310,9 +1341,10 @@
   .node.gs-declined { opacity: 0.5; }
   .node.gs-declined .n-title { text-decoration: line-through; }
   .node.kind-goal { border-width: 2px; border-left-width: 6px; font-weight: 600; }
-  /* the ambition it serves: a bar along the top; an ambition itself takes its colour */
-  .node.has-amb::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--amb); pointer-events: none; }
-  .node.ambition.has-amb { border-left-color: var(--amb); background: color-mix(in srgb, var(--amb) 12%, var(--paper)); }
+  /* the ambitions it serves: a square each, at the top right (hollow: through its links) */
+  .amb-marks { position: absolute; top: -4px; right: 12px; display: flex; gap: 2px; pointer-events: auto; }
+  .amb-marks i { width: 8px; height: 8px; background: var(--amb); box-shadow: 0 0 0 1.5px var(--paper); }
+  .amb-marks.via i { background: var(--paper); box-shadow: inset 0 0 0 1.5px var(--amb), 0 0 0 1.5px var(--paper); }
   .node.kind-objective { background: color-mix(in srgb, var(--panel) 70%, var(--paper)); border-width: 2px; border-left-width: 6px; }
   .node.potential { border-style: dashed; border-left-style: dashed; background: transparent; }
   .node.kind-gap { border-style: dotted; border-left-style: solid; }
@@ -1379,11 +1411,6 @@
   .tray .small { font-size: 0.76rem; }
   .imp-find { width: 100%; margin: 0.3rem 0; }
   .imp-msrow { padding-left: 1.6rem; font-size: 0.82rem; }
-  /* the ambitions in your order: drag a heading's ⠿ */
-  .amb-grip { cursor: grab; margin-right: 0.45rem; padding: 0 0.15rem; user-select: none; touch-action: none; font-weight: 400; }
-  .amb-grip:focus-visible { outline: 2px solid var(--accent); }
-  .amb-head.lifting { opacity: 0.5; }
-  .amb-drop { position: absolute; left: 0; right: 0; height: 3px; background: var(--accent); z-index: 6; pointer-events: none; }
   .tray-ghost {
     position: fixed; z-index: 80; pointer-events: none; padding: 0.25rem 0.6rem; background: var(--paper);
     border: 1px solid var(--ink-soft); box-shadow: 0 6px 16px rgb(0 0 0 / 0.2); font-family: var(--font-ui); font-size: 0.8rem;
@@ -1399,5 +1426,17 @@
   .imp-name { font-weight: 600; }
   .imp-row .muted { font-size: 0.78rem; }
   .imp-actions { display: flex; gap: 0.5rem; font-family: var(--font-ui); }
+  .add-new { display: flex; flex-wrap: wrap; gap: 0.4rem; font-family: var(--font-ui); margin-bottom: 0.4rem; }
+  .add-h { margin: 0.1rem 0 0.3rem; font-size: 0.8rem; color: var(--ink-soft); }
+  .add-row {
+    display: flex; gap: 0.6rem; align-items: baseline; width: 100%; text-align: left; border: none; background: none;
+    padding: 0.3rem 0.2rem; font-size: 0.85rem; border-radius: 0;
+  }
+  .add-row:hover { background: var(--panel); }
+  .add-row .muted { font-size: 0.76rem; }
+  .add-ms { padding-left: 1.4rem; }
+  .add-parent { margin: 0.3rem 0 0; font-size: 0.82rem; font-weight: 600; }
+  .add-parent span { font-weight: 400; }
+  .sheet-tag { font-family: var(--font-ui); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-soft); padding-top: 0.45rem; }
   dialog h2 { margin: 0 0 0.8rem; font-size: 1.1rem; }
 </style>
