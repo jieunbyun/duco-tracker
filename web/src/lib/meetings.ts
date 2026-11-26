@@ -14,11 +14,15 @@ export type Meeting = {
 };
 export type MeetingFields = Pick<Meeting, "series_id" | "met_on" | "title" | "people" | "sections" | "todo_id">;
 
-/** A meeting has its agenda (planned ahead), what was discussed, your actions and others'. */
+/** A meeting has its agenda (planned ahead), what was discussed, your actions and others', and your own observations. */
 export const AGENDA = "Agenda";
 export const DISCUSSION = "Discussion";
 export const ACTIONS = "My actions";
 export const OTHERS = "Others' actions";
+export const OBSERVATIONS = "Observations";
+/** A meeting's parts, in order. */
+export const HEADINGS = [AGENDA, DISCUSSION, ACTIONS, OTHERS, OBSERVATIONS];
+export const isObservations = (h: string) => h === OBSERVATIONS;
 /** Your actions: each line can go to Week as a to-do. */
 export const isAction = (h: string) => h === ACTIONS;
 export const isOthers = (h: string) => h === OTHERS;
@@ -36,14 +40,15 @@ function labelled(h: string, body: string): string {
   return [`- ${h}:`, ...lines.map((l) => `  ${/^\s*-\s/.test(l) ? l : `- ${l.trim()}`}`)].join("\n");
 }
 /**
- * Any meeting's sections as its four: Agenda; Discussion (and untitled notes; every other heading —
- * Purpose, Update, Decided, Open, Impressions… — goes there as a labelled line); My actions (I will,
- * Actions, Next steps, To do); and Others' actions (They will). A "They will: …" line kept among
- * the actions (as earlier versions wrote them) moves to Others' actions.
+ * Any meeting's sections as its five: Agenda; Discussion (and untitled notes; every other heading —
+ * Purpose, Update, Decided, Open… — goes there as a labelled line); My actions (I will,
+ * Actions, Next steps, To do); Others' actions (They will); and Observations, your own comments
+ * (Impressions, Comments, Reflections). A "They will: …" line kept among the actions (as earlier
+ * versions wrote them) moves to Others' actions.
  */
 export function asTwo(sections: Section[]): Section[] {
   const discussion: string[] = [], actions: string[] = [], sent: string[] = [], agenda: string[] = [], done: string[] = [];
-  const others: string[] = [], othersSent: string[] = [];
+  const others: string[] = [], othersSent: string[] = [], observations: string[] = [];
   /** Lines of "They will: …" (or "- They will:" with lines nested under it) taken out of `body`. */
   const theirs = (body: string): string => {
     const keep: string[] = [];
@@ -68,6 +73,7 @@ export function asTwo(sections: Section[]): Section[] {
       sent.push(...(s.sent ?? []));
     }
     else if (/^(they will|others'? actions|their actions)$/i.test(h)) { others.push(body); othersSent.push(...(s.sent ?? [])); }
+    else if (/^(observations?|impressions?|(my )?comments?|reflections?)$/i.test(h)) observations.push(body);
     else if (!h || /^(discussion|notes)$/i.test(h)) discussion.push(body);
     else discussion.push(labelled(h, body));
   }
@@ -79,6 +85,7 @@ export function asTwo(sections: Section[]): Section[] {
     { heading: DISCUSSION, body: join(discussion) },
     { heading: ACTIONS, body: join(actions), ...(sent.length ? { sent } : {}) },
     { heading: OTHERS, body: join(others), ...(othersSent.length ? { sent: othersSent } : {}) },
+    { heading: OBSERVATIONS, body: join(observations) },
   ];
 }
 
@@ -282,7 +289,7 @@ export function parseTex(tex: string, fileName = ""): ParsedLog {
     }
     meetings.push({ ...head, people: null, sections: asTwo(sections) });
   }
-  return { name, headings: [AGENDA, DISCUSSION, ACTIONS, OTHERS], meetings, skipped };
+  return { name, headings: HEADINGS, meetings, skipped };
 }
 
 // ---- to .tex -----------------------------------------------------------------------------

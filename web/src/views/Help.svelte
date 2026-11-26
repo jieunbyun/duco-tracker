@@ -378,7 +378,7 @@
     <dd>
       Your meeting logs, one <em>series</em> for each (a person, a group, or general meetings), linked to a Planning
       project if you like. A meeting can be planned ahead with its <em>Agenda</em> — one item a line, ticked off on the
-      day — and then kept with its <em>Discussion</em>, <em>My actions</em> and <em>Others' actions</em>. Write a
+      day — and then kept with its <em>Discussion</em>, <em>My actions</em>, <em>Others' actions</em> and <em>Observations</em> (your own comments on how it went). Write a
       line for each point: in the discussion each line is a bullet (“  - ” nests one); in the agenda and both lists of
       actions each line is a tick box, ticked on the meeting itself. Write links as [text](https://…). Meetings still to come are
       listed first, under <em>Coming up</em>, soonest first. A meeting can be tied to its entry on the Week calendar
@@ -392,9 +392,9 @@
       every word you type, across all series.
       <em>Import .tex…</em> reads your LaTeX logs (<code>\section*{'{'}DD-MM-YY. Title{'}'}</code> and
       <code>\paragraph{'{'}Heading.{'}'}</code>) into a new series or one you have, never adding a meeting twice:
-      I will, Actions and Next steps become My actions, They will becomes Others' actions; every other heading — Purpose,
-      Update, Decided, Open, Impressions… — becomes a labelled line of the discussion, so nothing is lost.
-      <em>Export .tex</em> writes a series back as a .tex file with the two parts. Private to you: nobody else sees
+      I will, Actions and Next steps become My actions, They will becomes Others' actions, Impressions and Comments become Observations; every other heading — Purpose,
+      Update, Decided, Open… — becomes a labelled line of the discussion, so nothing is lost.
+      <em>Export .tex</em> writes a series back as a .tex file with its parts. Private to you: nobody else sees
       them, not on shared projects either.
     </dd>
 

@@ -10,7 +10,7 @@
   // not yet done go to Week; search across them all; and .tex out and in.
   import {
     loadAll, saveSeries, deleteSeries, saveMeeting, deleteMeeting, importLog, sendToWeek, parseTex, toTex, downloadTex,
-    AGENDA, DISCUSSION, ACTIONS, OTHERS, isAction, isOthers, isAgenda, tickField, linesOf, calendarBetween, calendarFor, addToCalendar,
+    HEADINGS, isObservations, isAction, isOthers, isAgenda, tickField, linesOf, calendarBetween, calendarFor, addToCalendar,
   } from "../lib/meetings";
   import type { Series, Meeting, Section, ParsedLog, CalendarEntry } from "../lib/meetings";
   import BackLink from "../lib/BackLink.svelte";
@@ -127,7 +127,7 @@
     if (!name) return;
     let id = f.id;
     if (await act(f.id ? "Changed meeting series" : "Added meeting series", async () => {
-      id = await saveSeries(f.id, { name, headings: [AGENDA, DISCUSSION, ACTIONS, OTHERS], project_id: f.project_id });
+      id = await saveSeries(f.id, { name, headings: HEADINGS, project_id: f.project_id });
     })) {
       seriesForm = null;
       selected = id;
@@ -149,7 +149,7 @@
     todo_id: string | null; newCal: { start: string; end: string } | null; // newCal: add it to the calendar on saving
   };
   let draft = $state<Draft | null>(null);
-  const blankSections = (): Section[] => [AGENDA, DISCUSSION, ACTIONS, OTHERS].map((heading) => ({ heading, body: "" }));
+  const blankSections = (): Section[] => HEADINGS.map((heading) => ({ heading, body: "" }));
   function newMeeting(from?: { date: string; title: string; todo: string }) {
     choices = null;
     draft = {
@@ -481,7 +481,7 @@
       </div>
       {#each m.sections as s, si (si)}
         {#if s.body.trim()}
-          <div class="sec">
+          <div class="sec" class:own={isObservations(s.heading)}>
             <span class="heading">{s.heading}</span>
             {#if tickField(s.heading)}
               {@const f = tickField(s.heading)!}
@@ -544,10 +544,12 @@
         <label class="sec-edit">
           <span class="sec-head">{s.heading}<span class="muted small">{isAction(s.heading) ? " · one a line, each a tick box; it can go to Week"
             : isOthers(s.heading) ? " · one a line, each a tick box" : isAgenda(s.heading) ? " · one item a line, each a tick box for the day"
+            : isObservations(s.heading) ? " · your own comments: how it went, what you noticed"
             : " · one point a line, each a bullet (“  - ” nests one)"}</span></span>
           <textarea rows={isAction(s.heading) || isOthers(s.heading) ? 2 : isAgenda(s.heading) ? 3 : 4} bind:value={s.body}
                     placeholder={isAction(s.heading) ? "e.g. Send the HPC request" : isOthers(s.heading) ? "e.g. RH: check the EQ inputs"
-                      : isAgenda(s.heading) ? "e.g. Results on the larger graph" : "e.g. ShakeMap added; layout revised"}></textarea>
+                      : isAgenda(s.heading) ? "e.g. Results on the larger graph"
+                      : isObservations(s.heading) ? "e.g. Seemed unsure about the timeline; worth checking in next week" : "e.g. ShakeMap added; layout revised"}></textarea>
         </label>
       {/each}
       <div class="buttons">
@@ -614,6 +616,7 @@
   .m-head .tools { margin-left: auto; }
   .date { font-family: var(--font-ui); font-size: 0.82rem; color: var(--ink-soft); font-variant-numeric: tabular-nums; }
   .sec { display: grid; grid-template-columns: 9rem minmax(0, 1fr); gap: 0.8rem; }
+  .sec.own .body { font-style: italic; color: var(--ink-soft); } /* your own comments, set apart from the record */
   .heading { font-family: var(--font-ui); font-size: 0.78rem; font-weight: 600; color: var(--ink-soft); padding-top: 0.15rem; }
   .body { font-size: 0.93rem; overflow-wrap: anywhere; }
   .body :global(p) { margin: 0 0 0.25rem; }
