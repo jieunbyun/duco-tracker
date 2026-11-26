@@ -14,6 +14,7 @@
   } from "../lib/meetings";
   import type { Series, Meeting, Section, ParsedLog, CalendarEntry } from "../lib/meetings";
   import BackLink from "../lib/BackLink.svelte";
+  import { linkParts } from "../lib/links";
   import { tick } from "svelte";
   import { loadProjects } from "../lib/data";
   import type { Project } from "../lib/data";
@@ -279,10 +280,19 @@
     }
   }
 
-  // ---- showing a section's text: lines, "- " bullets (nested by indent), [links](https://…) ----
+  // ---- showing a section's text: lines, "- " bullets (nested by indent), [links](https://…), and a bare
+  // web address as a short "link" (the address on hover), as elsewhere in the app ----
   const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
+  const bare = (s: string) => linkParts(s).map((p) => p.url
+    ? `<a class="ulink" href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(p.url)}">link</a>`
+    : escapeHtml(p.text!)).join("");
   function inline(s: string): string {
-    return escapeHtml(s).replace(/\[([^\]]*)\]\((https?:\/\/[^)\s]+)\)/g, (_, t, u) => `<a href="${u}" target="_blank" rel="noopener noreferrer">${t || u}</a>`);
+    // [text](url) as its text; the rest, with any bare address in it
+    return s.split(/(\[[^\]]*\]\(https?:\/\/[^)\s]+\))/).map((part, i) => {
+      if (!(i % 2)) return bare(part);
+      const [, t, u] = part.match(/^\[([^\]]*)\]\((.*)\)$/)!;
+      return `<a href="${escapeHtml(u)}" target="_blank" rel="noopener noreferrer">${t ? escapeHtml(t) : "link"}</a>`;
+    }).join("");
   }
   function rich(body: string, bullets = false): string {
     let html = "";
@@ -622,6 +632,7 @@
   .body :global(p) { margin: 0 0 0.25rem; }
   .body :global(ul) { margin: 0 0 0.25rem; padding-left: 1.1rem; }
   .body :global(li) { margin: 0.05rem 0; }
+  .sec :global(a.ulink) { text-decoration: underline; color: var(--accent); }
 
   .meeting-form .row { display: flex; flex-wrap: wrap; gap: 0.6rem; }
   .meeting-form .row label:first-child { width: 10rem; }

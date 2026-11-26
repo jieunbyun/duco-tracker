@@ -179,8 +179,12 @@
       moving it on the map moves the project too.
       <em>Ambitions</em> (the first view): your few big ones, as columns, and every activity once, as a row under its
       type of work (Publications, Grant Writing, Awards, Teaching, then Outreach and objectives when there are any).
-      Add one with <em>+ Ambition</em>; click its name to change it (its description can say what achieving it looks
-      like), and drag its ⠿ (or press ← → on it) to put them in your order — each keeps its colour. Click a cell to tick
+      Your ambitions are the subtopics of one theme in Experiments (“Innovation ambitions” to begin with: its title is
+      yours to change as the theme moves on, and it cannot be deleted). Add one with <em>+ Ambition</em>; click its
+      name to open it at the side: rename it, mark it ⊘ outdated when it is done or let go (it shows, greyed, under
+      <em>All</em>), and read and add its notes (Enter) — the same notes as in Experiments (<em>Experiments ›</em>),
+      the first one that holds shown under its name. Drag its ⠿ (or press ← → on it) to put them in your order —
+      each keeps its colour. Click a cell to tick
       an activity for an ambition, or untick it: an activity can serve several. A hollow square means it serves that
       ambition only through its links (an arrow towards the ambition, or to something that serves it); click it to
       tick it. Each type's heading counts what serves each ambition, so a <strong>0</strong> is a gap: its
@@ -189,7 +193,9 @@
       (<em>All</em> shows it, greyed); <em>Period</em> keeps what overlaps this year, the next 12 months, or months you
       choose (one without dates always shows, as “no dates”); the counts follow both, and both are remembered on this
       computer. Clicking an activity's name opens it at the side, where <em>Serves the ambitions</em> ticks them too.
-      Needs <code>0080_pw_node_ambition.sql</code> (each item's one ambition so far becomes its first tick). On the map
+      Needs <code>0080_pw_node_ambition.sql</code> (each item's one ambition so far becomes its first tick), then
+      <code>0081_ambitions_in_experiments.sql</code>, which copies the ambitions you had as goals into Experiments —
+      their descriptions, Thoughts and earlier wordings as notes — and turns arrows straight to one into ticks. On the map
       the ambitions are not drawn: a card's small squares, top right, show the ambitions it serves (hollow: through
       its links); click an ambition's name above the map to bring it forward and fade the rest (click again for all),
       and a project put on the map meanwhile serves it.
@@ -311,6 +317,9 @@
       <em>Life is experiments</em>: Tips, Failures, Practice and Diary in one tab, laid out like the Logbook. Umbrella
       topics, each with subtopics, and notes under either. Every note carries one or more tags — Tip, Hypothesis,
       Practice, Self, Innovation, Modelling, Teaching (<code>0079_exp_teaching.sql</code>) — and the buttons at the top show just one tag; the search box finds words in notes and topic names.
+      One topic is the theme of your ambitions (<code>0081_ambitions_in_experiments.sql</code>), marked <em>Ambitions on
+      Pathways ›</em>: its subtopics are your ambitions, the columns of Pathways' Ambitions view. It is always there
+      and cannot be deleted; rename it as the theme moves on.
       A topic or subtopic can carry tags too (click its title to set them, or set them when you add it): they count for everything
       under it, so showing a tag shows that topic whole, with its subtopics and notes. A new subtopic starts with its
       topic's tags; one with none of its own shows its topic's, lighter. A new note starts with its
@@ -387,7 +396,7 @@
       project if you like. A meeting can be planned ahead with its <em>Agenda</em> — one item a line, ticked off on the
       day — and then kept with its <em>Discussion</em>, <em>My actions</em>, <em>Others' actions</em> and <em>Observations</em> (your own comments on how it went). Write a
       line for each point: in the discussion each line is a bullet (“  - ” nests one); in the agenda and both lists of
-      actions each line is a tick box, ticked on the meeting itself. Write links as [text](https://…). Meetings still to come are
+      actions each line is a tick box, ticked on the meeting itself. A web address shows as a short <em>link</em> (the address on hover), or write [text](https://…) to name it. Meetings still to come are
       listed first, under <em>Coming up</em>, soonest first. A meeting can be tied to its entry on the Week calendar
       (<em>Link to the calendar…</em> in its form: one of that day's meetings, or <em>+ Add to the calendar</em> with
       its times); its <em>📅 date and time ›</em> then opens that week with the meeting picked out, and
