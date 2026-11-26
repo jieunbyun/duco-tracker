@@ -14,7 +14,7 @@
   } from "../lib/meetings";
   import type { Series, Meeting, Section, ParsedLog, CalendarEntry } from "../lib/meetings";
   import BackLink from "../lib/BackLink.svelte";
-  import { linkParts } from "../lib/links";
+  import { linkParts, linkLabel } from "../lib/links";
   import { tick } from "svelte";
   import { loadProjects } from "../lib/data";
   import type { Project } from "../lib/data";
@@ -284,7 +284,7 @@
   // web address as a short "link" (the address on hover), as elsewhere in the app ----
   const escapeHtml = (s: string) => s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
   const bare = (s: string) => linkParts(s).map((p) => p.url
-    ? `<a class="ulink" href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(p.url)}">link</a>`
+    ? `<a class="ulink" href="${escapeHtml(p.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(p.url)}">${linkLabel(p.url)}</a>`
     : escapeHtml(p.text!)).join("");
   function inline(s: string): string {
     // [text](url) as its text; the rest, with any bare address in it
