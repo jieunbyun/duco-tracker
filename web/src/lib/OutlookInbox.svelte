@@ -34,7 +34,7 @@
         project_id: t.project_id ?? "",
         start: s?.start_time?.slice(0, 5) ?? "",
         end: s?.end_time?.slice(0, 5) ?? "",
-        hours: t.est_hours,
+        hours: t.source_all_day ? t.est_hours : null, // a timed event: empty, filled in to keep it as a to-do
       };
     }
   });
@@ -60,9 +60,13 @@
     }
   }
 
+  /** A timed event with hours put in its h box: kept as a to-do, not a meeting. */
+  const asTodo = (t: Todo, d: Draft) => !t.source_all_day && typeof d.hours === "number" && d.hours >= 0;
+
   function keep(t: Todo, tentative = false) {
     const d = drafts[t.id];
     if (!d) return;
+    if (!tentative && asTodo(t, d)) return keepAsTodo(t);
     const s = slotOf(t);
     if (!t.source_all_day && !(d.start && d.end && d.end > d.start)) return void (error = "The end time must be after the start.");
     return run(t, async () => {
@@ -80,18 +84,15 @@
     });
   }
 
-  /** Kept as a to-do, not a meeting: on its day with the event's length as the estimate, no clock time
+  /** Kept as a to-do, not a meeting: on its day with the hours as its estimate, no clock time
    *  (for what you note in Outlook as something to do). Later syncs still move it with the event. */
   function keepAsTodo(t: Todo) {
     const d = drafts[t.id];
     if (!d) return;
     const s = slotOf(t);
-    const len = t.source_all_day ? d.hours : d.start && d.end && d.end > d.start
-      ? Math.round(((+d.end.slice(0, 2) * 60 + +d.end.slice(3) - +d.start.slice(0, 2) * 60 - +d.start.slice(3)) / 60) * 100) / 100
-      : t.est_hours;
     return run(t, async () => {
       await saveTodo(t.id, {
-        kind: "task", category_id: d.category_id || null, project_id: d.project_id || null, est_hours: len,
+        kind: "task", category_id: d.category_id || null, project_id: d.project_id || null, est_hours: d.hours,
         reviewed: true, is_tentative: false,
       });
       if (s) await saveSlot(s.id, { start_time: null, end_time: null, planned_hours: null });
@@ -143,13 +144,14 @@
           {:else}
             <input type="time" step="300" bind:value={d.start} aria-label="Start" />
             <input type="time" step="300" bind:value={d.end} aria-label="End" />
+            <label class="hrs" title="Put hours in to keep it as a to-do with that estimate, not a meeting">h
+              <input type="number" min="0" step="0.25" bind:value={d.hours} aria-label="Hours, to keep it as a to-do" /></label>
           {/if}
         </div>
         <div class="acts">
-          <button class="primary" disabled={busy === t.id} onclick={() => keep(t)}>Keep</button>
-          <button disabled={busy === t.id} onclick={() => keepAsTodo(t)}
-                  title="A to-do on its day, not a meeting: the event's length (or the hours) as its estimate, ticked off when done">Keep as to-do</button>
-          <button disabled={busy === t.id} onclick={() => keep(t, true)}
+          <button class="primary" disabled={busy === t.id} onclick={() => keep(t)}
+                  title={asTodo(t, d) ? "Kept as a to-do with these hours, not a meeting" : undefined}>{asTodo(t, d) ? "Keep as to-do" : "Keep"}</button>
+          <button disabled={busy === t.id || asTodo(t, d)} onclick={() => keep(t, true)}
                   title="On the calendar, not counted as planned until you confirm it">Tentative</button>
           <button disabled={busy === t.id} onclick={() => dismiss(t, false)}>Irrelevant</button>
           {#if repeats(t)}

@@ -142,9 +142,9 @@
       this one, or every repeat — and it never comes back. <em>Tentative</em> keeps it on the calendar, dotted and not
       counted as planned, until you confirm it from its card's menu; events Outlook shows as tentative (or not yet
       accepted) arrive tagged so, and the mark follows when you accept or decline there. Any meeting can be marked
-      tentative from its menu. <em>Keep as to-do</em> keeps an event as a to-do instead of a meeting — for what you
-      note in Outlook as something to do: on its day, the event's length as its estimate, no clock time, ticked off
-      when done; a meeting already kept can be turned into one in its editor (<em>Duty / to-do</em>). Events moved in Outlook move here too unless already
+      tentative from its menu. Put hours in an event's <em>h</em> box and <em>Keep</em> becomes <em>Keep as to-do</em>:
+      it is kept as a to-do instead of a meeting — for what you note in Outlook as something to do — on its day,
+      those hours as its estimate, no clock time, ticked off when done (all-day events come in as to-dos already); a meeting already kept can be turned into one in its editor (<em>Duty / to-do</em>). Events moved in Outlook move here too unless already
       logged; events removed there disappear if unreviewed, or are struck through if kept. Ignored events can be
       brought back in the Outlook settings. The calendar link stays in your database.
     </dd>
