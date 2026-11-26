@@ -86,7 +86,7 @@
     const d = drafts[t.id];
     if (!d) return;
     const s = slotOf(t);
-    const len = d.start && d.end && d.end > d.start
+    const len = t.source_all_day ? d.hours : d.start && d.end && d.end > d.start
       ? Math.round(((+d.end.slice(0, 2) * 60 + +d.end.slice(3) - +d.start.slice(0, 2) * 60 - +d.start.slice(3)) / 60) * 100) / 100
       : t.est_hours;
     return run(t, async () => {
@@ -147,10 +147,8 @@
         </div>
         <div class="acts">
           <button class="primary" disabled={busy === t.id} onclick={() => keep(t)}>Keep</button>
-          {#if t.kind === "meeting"}
-            <button disabled={busy === t.id} onclick={() => keepAsTodo(t)}
-                    title="A to-do on its day, not a meeting: the event's length as its estimate, ticked off when done">Keep as to-do</button>
-          {/if}
+          <button disabled={busy === t.id} onclick={() => keepAsTodo(t)}
+                  title="A to-do on its day, not a meeting: the event's length (or the hours) as its estimate, ticked off when done">Keep as to-do</button>
           <button disabled={busy === t.id} onclick={() => keep(t, true)}
                   title="On the calendar, not counted as planned until you confirm it">Tentative</button>
           <button disabled={busy === t.id} onclick={() => dismiss(t, false)}>Irrelevant</button>
