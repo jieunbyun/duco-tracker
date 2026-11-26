@@ -4,7 +4,8 @@
   import ProjectEditor from "../lib/ProjectEditor.svelte";
   import Milestones from "../lib/Milestones.svelte";
   import PwExperiments from "../lib/PwExperiments.svelte";
-  import { loadExperiments } from "../lib/experiments";
+  import PwAmbition from "../lib/PwAmbition.svelte";
+  import { loadExperiments, ambitionsOf, placesOf, saveTopic } from "../lib/experiments";
   import type { Topic, Note as ExpNote } from "../lib/experiments";
   import type { GroupMilestone } from "../lib/group";
   import { LIVE_STATUSES, milestoneDates } from "../lib/plan";
@@ -55,6 +56,7 @@
   let expLinks = $state<{ node_id: string; topic_id: string }[] | null>(null); // null before 0076 is run
   let sharedMilestones = $state<GroupMilestone[]>([]);
   let ambLinks = $state<PwAmbLink[] | null>(null); // the ambitions ticked for each item; null before 0080 is run
+  let themed = $state(false); // the ambitions are the subtopics of a theme in Experiments (0081 is run)
   let hours = $state<HourRow[]>([]); // logged, for the milestones' hours: read when first needed
   let hoursRead = false;
   function readHours() {
@@ -64,10 +66,10 @@
   }
   async function loadExp() {
     const [e, l] = await Promise.all([
-      loadExperiments().catch(() => ({ topics: [] as Topic[], notes: [] as ExpNote[] })), // none before 0066
+      loadExperiments().catch(() => ({ topics: [] as Topic[], notes: [] as ExpNote[], themed: false })), // none before 0066
       loadExpLinks().catch(() => null),
     ]);
-    [expTopics, expNotes, expLinks] = [e.topics, e.notes, l];
+    [expTopics, expNotes, expLinks, themed] = [e.topics, e.notes, l, e.themed];
   }
 
   // four views of the same pathways: the ambitions and what serves each, the map, a list for entering
@@ -124,15 +126,18 @@
         loadExp(), loadSharedMilestones().catch(() => [] as GroupMilestone[]), loadAmbLinks().catch(() => null),
       ]);
       if (hoursRead) loadAllHours().then((h) => (hours = h)).catch(() => {});
-      nodes = pw.nodes;
-      links = pw.links;
+      nodes = pw.nodes.filter((n) => !n.ambition_topic_id); // an old ambition, copied into Experiments (0081), is not shown
+      const shownIds = new Set(nodes.map((n) => n.id));
+      links = pw.links.filter((l) => shownIds.has(l.from_id) && shownIds.has(l.to_id)); // nor are the arrows to it
       years = pw.years;
       projects = p;
       readings = r;
       const goal = arrived?.get("g");
       if (goal && arrived) arrived.delete("g");
       const n = nodes.find((x) => x.id === goal);
+      const copied = pw.nodes.find((x) => x.id === goal)?.ambition_topic_id;
       if (n) openEdit(n);
+      else if (copied && expTopics.some((t) => t.id === copied)) panel = { ambition: copied }; // now in Experiments
       error = "";
     } catch (e) {
       error = (e as Error).message;
@@ -156,7 +161,7 @@
   const mapW = $derived(Math.max(width, 980));
   const x0 = LABEL_W;
   // the goals column, only while a goal is on the map (ambitions are in the Ambitions view; a member's chart has them)
-  const hasCol = $derived(member || nodes.some((n) => n.kind === "goal" && !isAmbition(n)));
+  const hasCol = $derived(member || nodes.some((n) => n.kind === "goal" && !isAmb(n)));
   const x1 = $derived(mapW - (hasCol ? GOAL_W + GAP : 30));
   const from = $derived(monthStart(today()));
   const to = $derived(addMonths(from, years * 12));
@@ -190,26 +195,40 @@
   }
   const visible = $derived(nodes.map(eff).filter((n) => showAll || n.status === "active"));
 
-  // ---- ambitions: the few big goals; an item serves any of them (ticked, or where its links lead) ----
-  const allAmbs = $derived(ambitionsIn(nodes)); // in your order
-  const ambsByAge = $derived(nodes.filter(isAmbition)); // colours: by when each was made, so they stay put
-  const shownAmbs = $derived(allAmbs.map(eff).filter((a) => visible.some((v) => v.id === a.id)));
+  // ---- ambitions: your few big ones; an item serves any of them (ticked, or where its links lead) ----
+  // Since 0081 they are the subtopics of your ambitions theme in Experiments; before it, the goals
+  // that serve no other goal (goalsAre).
+  type Amb = { id: string; title: string; detail: string | null; active: boolean };
+  const goalsAre = $derived(!themed);
+  const isAmb = (n: PwNode) => goalsAre && isAmbition(n);
+  const amb0 = $derived(themed ? ambitionsOf(expTopics) : { theme: null, ambitions: [] as Topic[] });
+  const theme = $derived(amb0.theme);
+  const ambTopics = $derived(amb0.ambitions); // in your order
+  /** An ambition's first note that still holds: what it says about itself. */
+  const firstNote = (id: string) => expNotes.find((n) => n.topic_id === id && !n.outdated)?.body ?? null;
+  const allAmbs = $derived<Amb[]>(themed // in your order
+    ? ambTopics.map((t) => ({ id: t.id, title: t.title, detail: firstNote(t.id), active: !t.outdated }))
+    : ambitionsIn(nodes).map(eff).map((a) => ({ id: a.id, title: a.title, detail: a.detail, active: a.status === "active" })));
+  // colours: by when each was made, so they stay put
+  const ambsByAge = $derived(themed ? [...ambTopics].sort((a, b) => a.created_at.localeCompare(b.created_at)).map((t) => t.id)
+    : nodes.filter(isAmbition).map((n) => n.id));
+  const shownAmbs = $derived(allAmbs.filter((a) => showAll || a.active));
   const AMB_COLOURS = 4;
   function ambColour(id: string | null): string | null {
-    const i = id ? ambsByAge.findIndex((a) => a.id === id) : -1;
+    const i = id ? ambsByAge.indexOf(id) : -1;
     return i < 0 ? null : i < AMB_COLOURS ? `var(--amb-${i + 1})` : "var(--ink-soft)";
   }
-  const ambIds = $derived(new Set(ambsByAge.map((a) => a.id)));
+  const ambIds = $derived(new Set(ambsByAge));
   /** The ticks by item (before 0080: each item's one ambition so far). */
   const ambTicks = $derived.by(() => {
-    const rows = ambLinks ?? nodes.filter((n) => n.kind !== "goal" && n.ambition_id).map((n) => ({ node_id: n.id, ambition_id: n.ambition_id! }));
+    const rows = ambLinks ?? (themed ? [] : nodes.filter((n) => n.kind !== "goal" && n.ambition_id).map((n) => ({ node_id: n.id, ambition_id: n.ambition_id! })));
     const m = new Map<string, string[]>();
     const order = (id: string) => allAmbs.findIndex((a) => a.id === id);
     for (const r of rows) if (ambIds.has(r.ambition_id)) m.set(r.node_id, [...(m.get(r.node_id) ?? []), r.ambition_id]);
     for (const [k, v] of m) m.set(k, v.sort((a, b) => order(a) - order(b)));
     return m;
   });
-  const ambVia = $derived(ambitionsVia(nodes, links, ambTicks));
+  const ambVia = $derived(ambitionsVia(nodes, links, ambTicks, goalsAre));
   /** The ambitions an item serves, in your order: ticked, else where its links lead (via). */
   function servesOf(id: string): { ids: string[]; via: boolean } {
     const t = ambTicks.get(id);
@@ -235,11 +254,23 @@
       error = sqlHint(msg);
     }
   }
-  const ambTitle = (id: string) => eff(nodes.find((x) => x.id === id) ?? ({ title: "" } as PwNode)).title;
-  const covAmbitions = $derived(allAmbs.map(eff).map((a) => ({
-    id: a.id, title: a.title, detail: a.detail, active: a.status === "active", colour: ambColour(a.id) ?? "var(--ink-soft)",
-  })));
-  const covItems = $derived(nodes.filter((n) => !isAmbition(n)).map(eff));
+  const ambTitle = (id: string) => allAmbs.find((a) => a.id === id)?.title ?? "";
+  const covAmbitions = $derived(allAmbs.map((a) => ({ ...a, colour: ambColour(a.id) ?? "var(--ink-soft)" })));
+  const covItems = $derived(nodes.filter((n) => !isAmb(n)).map(eff));
+  /** The active activities serving an ambition, ticked or through their links. */
+  const servingCount = (id: string) => covItems.filter((n) => n.status === "active" && servesOf(n.id).ids.includes(id)).length;
+  /** + Ambition: since 0081, a new subtopic of the theme, at the side; before it, a new goal. */
+  function newAmbition() {
+    if (!themed) return openNew("goal");
+    if (!theme) return (error = "Your ambitions theme in Experiments is missing: reload the page.");
+    panel = { ambition: null };
+  }
+  /** An activity, or (since 0081) an ambition, at the side. */
+  function openAny(id: string) {
+    const n = nodes.find((x) => x.id === id);
+    if (n) openEdit(n);
+    else if (ambTopics.some((t) => t.id === id)) panel = { ambition: id };
+  }
 
   // one ambition brought forward on the map, the rest faded — remembered on this computer
   const FOCUS_KEY = "pathways.focus";
@@ -274,7 +305,7 @@
     return n;
   }
   // the ambitions themselves are in the Ambitions view, not on the map (a member's chart keeps its goals)
-  const mapNodes = $derived(member ? visible : visible.filter((n) => !isAmbition(n)));
+  const mapNodes = $derived(member ? visible : visible.filter((n) => !isAmb(n)));
   const drawn = $derived(mapNodes.map(shown));
 
   const focusOn = $derived(focus === "none" || shownAmbs.some((a) => a.id === focus) ? focus : null);
@@ -555,7 +586,7 @@
   // ---- adding and editing ------------------------------------------------------------
   // an item (or a new one, with the ambitions it serves), the projects from Planning, or what to add for an ambition
   type Panel = { node: PwNode | null; draft?: Partial<PwNodeFields>; serves?: string[] } | { importing: true }
-    | { adding: { lane: Lane; amb: string } };
+    | { adding: { lane: Lane; amb: string } } | { ambition: string | null }; // an ambition (0081): a subtopic's id, or null for a new one
   let panel = $state<Panel | null>(null);
   /** How many of the group's outputs name this item as their publication. */
   const outputCount = (id: string) => outputs.filter((o) => o.status !== "retired" && o.publications.includes(id)).length;
@@ -595,7 +626,7 @@
         lane_row: freeRow(lane, kind, s, e),
       },
       // for an ambition's gap, or (on the map) with an ambition brought forward, a new item serves it
-      serves: kind === "goal" ? [] : amb ? [amb] : view === "map" && focusOn && focusOn !== "none" ? [focusOn] : [],
+      serves: kind === "goal" && goalsAre ? [] : amb ? [amb] : view === "map" && focusOn && focusOn !== "none" ? [focusOn] : [],
     };
   }
   /** Add an item straight from the list, with the same defaults as the + buttons. */
@@ -812,6 +843,23 @@
     if (shownIds.join() === allAmbs.filter((a) => moved.has(a.id)).map((a) => a.id).join()) return;
     let k = 0;
     const all = allAmbs.map((a) => (moved.has(a.id) ? shownIds[k++] : a.id));
+    if (themed) {
+      // the subtopics' order in Experiments
+      const changes = placesOf(ambTopics, all);
+      const at = new Map(changes.map((c) => [c.id, c.sort_order]));
+      expTopics = expTopics.map((t) => (at.has(t.id) ? { ...t, sort_order: at.get(t.id)! } : t)); // at once
+      try {
+        await undoable("Reordered the ambitions", async () => {
+          for (const c of changes) await saveTopic(c.id, { sort_order: c.sort_order });
+        });
+        await loadExp();
+      } catch (e) {
+        const msg = (e as Error).message;
+        await loadExp();
+        error = msg;
+      }
+      return;
+    }
     const was = new Map(nodes.map((n) => [n.id, n.ambition_order]));
     nodes = nodes.map((n) => (all.includes(n.id) ? { ...n, ambition_order: (all.indexOf(n.id) + 1) * 10 } : n)); // at once
     try {
@@ -919,8 +967,7 @@
     {#if loading}<p class="muted">Loading…</p>{:else}
       <PwCoverage items={covItems} ambitions={covAmbitions} ticks={ambTicks} via={ambVia} ready={!!ambLinks} readonly={!!preview.as}
                   projectName={(id) => projById.get(id)?.name ?? "a project"}
-                  onopen={(id) => { const n = nodes.find((x) => x.id === id); if (n) openEdit(n); }}
-                  ontick={tick} onadd={openAdding} onnewamb={() => openNew("goal")} onreorder={reorderAmbitions} />
+                  onopen={openAny} ontick={tick} onadd={openAdding} onnewamb={newAmbition} onreorder={reorderAmbitions} />
     {/if}
   {:else}
   <div class="toolbar">
@@ -1106,8 +1153,26 @@
   {/if}
 </section>
 
-<dialog bind:this={dialog} onclose={() => (panel = null)} class:sheet={!!panel && "node" in panel}>
-  {#if panel && "adding" in panel}
+<dialog bind:this={dialog} onclose={() => (panel = null)} class:sheet={!!panel && ("node" in panel || "ambition" in panel)}>
+  {#if panel && "ambition" in panel}
+    {@const id = panel.ambition}
+    {@const at = id ? ambTopics.find((t) => t.id === id) ?? null : null}
+    <div class="sheet-head">
+      <h2>{at ? at.title : "New ambition"}</h2>
+      <span class="sheet-tag">Ambition</span>
+      <button type="button" class="x" aria-label="Close" onclick={() => (panel = null)}>✕</button>
+    </div>
+    <div class="sheet-body">
+      {#if theme && (at || !id)}
+        {#key panel}
+          <PwAmbition topic={at} {theme} ambitions={ambTopics} notes={expNotes} serving={at ? servingCount(at.id) : 0}
+                      readonly={!!preview.as} onchange={loadExp} onclose={() => (panel = null)} />
+        {/key}
+      {:else}
+        <p class="muted">That ambition is no longer there.</p>
+      {/if}
+    </div>
+  {:else if panel && "adding" in panel}
     {@const ad = panel.adding}
     {@const laneLabel = LANES.find((l) => l.key === ad.lane)?.label ?? ""}
     <h2>{laneLabel} for “{ambTitle(ad.amb)}”</h2>
@@ -1197,7 +1262,7 @@
   {:else if panel && "node" in panel}
     <div class="sheet-head">
       <h2>{cur ? cur.title : `New ${kindLabel(panel.draft?.kind ?? "project").toLowerCase()}`}</h2>
-      {#if cur && isAmbition(cur) && !member}
+      {#if cur && isAmb(cur) && !member}
         <span class="sheet-tag">Ambition</span>
       {/if}
       {#if cur && (cur.project_id || cur.group_project_id)}
@@ -1235,8 +1300,9 @@
     {:else}
     {#key panel}
       <PwEditor node={panel.node} draft={panel.draft} {nodes} {links} {projects} {readings} {groupProjects} {tax} members={groupMembers}
-        ambitions={allAmbs.map(eff).filter((a) => a.status === "active" || (panel && "node" in panel && !!panel.node
+        ambitions={allAmbs.filter((a) => a.active || (panel && "node" in panel && !!panel.node
           && (a.id === panel.node.ambition_id || servesOf(panel.node.id).ids.includes(a.id)))).map((a) => ({ id: a.id, title: a.title }))}
+        goalsServe={themed}
         served={panel.node ? ambTicks.get(panel.node.id) ?? [] : panel.serves ?? []}
         via={panel.node && !ambTicks.get(panel.node.id)?.length ? (ambVia.get(panel.node.id) ?? []).map(ambTitle) : []}
         ambReady={!!ambLinks}

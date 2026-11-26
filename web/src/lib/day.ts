@@ -111,7 +111,8 @@ export async function loadDay(day: string): Promise<DayLog> {
   // the names of what the notes are on
   const actionIds = [...comments.map((c) => c.action_id), ...actionTime.map((t) => t.action_id)];
   const noteIds = [...new Set(ideaNotes.map((n) => n.todo_id))];
-  const [noteOn, series, topics, readings, contacts, nodes, practices, failures, actionTitles, budgets] = await Promise.all([
+  const thoughtNodes = [...new Set(thoughts.map((t) => t.node_id))];
+  const [noteOn, series, topics, readings, contacts, nodes, practices, failures, actionTitles, budgets, copied] = await Promise.all([
     noteIds.length
       ? rows<{ id: string; title: string; kind: string; due_on: string }>(supabase.from("todo").select("id,title,kind,due_on").in("id", noteIds))
       : [],
@@ -130,7 +131,12 @@ export async function loadDay(day: string): Promise<DayLog> {
       ? rows<{ id: string; name: string; currency: string }>(
         supabase.from("budget").select("id,name,currency").in("id", [...new Set(expenses.map((e) => e.budget_id))]))
       : [],
+    // old ambitions copied into Experiments (0081): their thoughts are notes there now, shown with the notes
+    thoughtNodes.length
+      ? rows<{ id: string }>(supabase.from("pw_node").select("id").in("id", thoughtNodes).not("ambition_topic_id", "is", null))
+      : [],
   ]);
+  const gone = new Set(copied.map((x) => x.id));
 
   const onTodo = (n: { todo_id: string }) => noteOn.find((t) => t.id === n.todo_id);
   const cat = (id: string | null) => (id ? tax?.allCategories.find((c) => c.id === id)?.label ?? "" : "");
@@ -249,7 +255,7 @@ export async function loadDay(day: string): Promise<DayLog> {
   });
   add({
     key: "pathways", title: "Pathways thoughts",
-    items: thoughts.map((t) => ({ key: t.id, text: t.body, meta: join(nodes.get(t.node_id), t.valid ? "" : "no longer valid"), href: `#/pathways?g=${t.node_id}` })),
+    items: thoughts.filter((t) => !gone.has(t.node_id)).map((t) => ({ key: t.id, text: t.body, meta: join(nodes.get(t.node_id), t.valid ? "" : "no longer valid"), href: `#/pathways?g=${t.node_id}` })),
   });
   add({
     key: "practice", title: "Practice",

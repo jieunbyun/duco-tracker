@@ -13,6 +13,8 @@
   // Experiments: what were Tips, Failures, Practice and Diary, in one place, laid out
   // like the Logbook. Umbrella topics with subtopics, notes under either, each note
   // tagged and in your own order (drag ⠿), marked ⊘ outdated (notes, topics and subtopics alike).
+  // One topic is the theme of your ambitions (0081): its subtopics are the ambitions on Pathways; it
+  // is always there (its title yours to change) and cannot be deleted.
   import { tick } from "svelte";
   import {
     TAGS, TAG_LABEL, loadExperiments, addTopic, saveTopic, deleteTopic, addNote, saveNote, deleteNote, placesOf, matches,
@@ -272,6 +274,7 @@
   }
 
   async function removeTopic(t: Topic) {
+    if (t.ambitions) return; // the theme of your ambitions stays
     const subs = subsOf(t).length;
     const n = allNotesOf(t).length + subsOf(t).flatMap(allNotesOf).length;
     const what = [subs && `${subs} ${subs === 1 ? "subtopic" : "subtopics"}`, n && `${n} ${n === 1 ? "note" : "notes"}`].filter(Boolean).join(" and ");
@@ -341,7 +344,7 @@
     <input class="draft" bind:value={draft} placeholder={label} aria-label={label} onkeydown={keys} />
     {@render tagPicker()}
     {#if t}{@render outToggle()}{/if}
-    {#if t}<button type="button" class="danger" onclick={() => removeTopic(t)}>Delete</button>{/if}
+    {#if t && !t.ambitions}<button type="button" class="danger" onclick={() => removeTopic(t)}>Delete</button>{/if}
     <button class="primary" disabled={!draft.trim() || saving}>Save</button>
     <button type="button" onclick={cancel}>Cancel</button>
   </form>
@@ -424,6 +427,11 @@
         <!-- after the title, floated right into the room left on its last line (as a note's) -->
         <span class="right">
         <span class="topic-meta">
+          {#if t.ambitions}
+            <a class="chip amb-link" href="#/pathways" title="Its subtopics are your ambitions: the columns of the Ambitions view on Pathways, to tick what serves each">Ambitions on Pathways ›</a>
+          {:else if sub && topics.find((p) => p.id === t.parent_id)?.ambitions}
+            <span class="chip amb-chip" title="One of your ambitions on Pathways">ambition</span>
+          {/if}
           {#each t.tags as x (x)}<span class="chip tag-chip">{TAG_LABEL[x]}</span>{/each}
           <!-- a subtopic with no tags of its own goes by its topic's: shown lighter -->
           {#if sub && !t.tags.length}
@@ -468,7 +476,8 @@
   <p class="muted intro">
     Topics, their subtopics, and notes under each — tagged Tip, Hypothesis, Practice, Self, Innovation, Modelling or Teaching (a topic's
     tags count for everything under it). Drag ⠿ to put them in
-    order; mark one ⊘ outdated when it no longer holds. Only you see them.
+    order; mark one ⊘ outdated when it no longer holds. The subtopics of your ambitions theme are your ambitions on Pathways.
+    Only you see them.
   </p>
   {#if error}<p class="error">{error}</p>{/if}
 
@@ -558,6 +567,9 @@
   .topic-meta { display: flex; flex-wrap: wrap; gap: 0.15rem 0.4rem; align-items: baseline; justify-content: flex-end; }
   .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; }
   .tag-chip.inherited { opacity: 0.55; border-style: dashed; }
+  .amb-link { text-decoration: none; font-weight: 600; }
+  .amb-link:hover { text-decoration: underline; }
+  .amb-chip { opacity: 0.75; }
   .head h3 { font-size: 1.02rem; font-weight: normal; }
   .name {
     padding: 0; border: none; background: none; font: inherit; color: var(--ink); text-align: left; cursor: text;

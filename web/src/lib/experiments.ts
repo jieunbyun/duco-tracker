@@ -1,7 +1,9 @@
 // Experiments ("Life is experiments", 0066_experiments.sql): umbrella topics, each
 // with subtopics, and notes under either, each note tagged Tip, Hypothesis,
 // Practice, Self, Innovation (0067), Modelling (0069) and/or Teaching (0079), and marked outdated (⊘) when it no longer holds;
-// a topic or subtopic can be marked outdated too (0070).
+// a topic or subtopic can be marked outdated too (0070). One umbrella topic is the theme of your
+// ambitions (0081): always there (made when missing; it cannot be deleted), its title yours to change, and
+// its subtopics are the ambitions Pathways ticks its activities for.
 // Both topics and notes are in your own order (sort_order 10, 20, 30…).
 import { supabase } from "./supabase";
 
@@ -14,8 +16,10 @@ export const TAG_LABEL: Record<Tag, string> = {
 /** tags (0068): none needed; they count for everything under the topic. outdated: 0070. */
 export type Topic = {
   id: string; parent_id: string | null; title: string; tags: Tag[]; outdated: boolean; sort_order: number; created_at: string;
+  ambitions?: boolean; // the theme of your ambitions (0081)
 };
 const TOPIC_COLS = "id, parent_id, title, tags, outdated, sort_order, created_at";
+export const THEME_TITLE = "Innovation ambitions"; // the theme's first title
 export type Note = {
   id: string;
   topic_id: string;
@@ -33,13 +37,39 @@ async function check<T>(q: PromiseLike<{ data: T | null; error: { message: strin
   return data as T;
 }
 
-export async function loadExperiments(): Promise<{ topics: Topic[]; notes: Note[] }> {
-  const [topics, notes] = await Promise.all([
-    check<Topic[]>(supabase.from("exp_topic").select(TOPIC_COLS).order("sort_order").order("created_at")),
+/**
+ * Every topic and note. themed: the theme of your ambitions is there (0081 is run); it is made
+ * here when it is missing, first among the topics.
+ */
+export async function loadExperiments(): Promise<{ topics: Topic[]; notes: Note[]; themed: boolean }> {
+  const topicsQ = async () => {
+    const r = await supabase.from("exp_topic").select(`${TOPIC_COLS}, ambitions`).order("sort_order").order("created_at");
+    if (r.error && /ambitions/.test(r.error.message)) return { themed: false, rows: await check<Topic[]>(supabase.from("exp_topic").select(TOPIC_COLS).order("sort_order").order("created_at")) };
+    if (r.error) throw new Error(r.error.message);
+    return { themed: true, rows: (r.data ?? []) as Topic[] };
+  };
+  const [t, notes] = await Promise.all([
+    topicsQ(),
     check<Note[]>(supabase.from("exp_note").select("id, topic_id, body, tags, outdated, noted_on, sort_order, created_at")
       .order("sort_order").order("created_at")),
   ]);
-  return { topics: topics ?? [], notes: notes ?? [] };
+  const topics = t.rows ?? [];
+  if (t.themed && !topics.some((x) => x.ambitions)) {
+    const top = topics.filter((x) => !x.parent_id);
+    const { data, error } = await supabase.from("exp_topic")
+      .insert({ title: THEME_TITLE, parent_id: null, tags: ["innovation"], ambitions: true, sort_order: top.length ? Math.min(...top.map((x) => x.sort_order)) - 10 : 0 })
+      .select(`${TOPIC_COLS}, ambitions`).single();
+    if (data) topics.unshift(data as Topic);
+    else if (error && !/duplicate|unique/i.test(error.message)) throw new Error(error.message);
+    else return loadExperiments(); // made meanwhile, elsewhere
+  }
+  return { topics, notes: notes ?? [], themed: t.themed };
+}
+/** The theme of your ambitions, and its subtopics (the ambitions) in your order. */
+export function ambitionsOf(topics: Topic[]): { theme: Topic | null; ambitions: Topic[] } {
+  const theme = topics.find((t) => t.ambitions) ?? null;
+  const ambitions = theme ? topics.filter((t) => t.parent_id === theme.id).sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at)) : [];
+  return { theme, ambitions };
 }
 
 export async function addTopic(title: string, parent_id: string | null, tags: Tag[], sort_order: number): Promise<Topic> {

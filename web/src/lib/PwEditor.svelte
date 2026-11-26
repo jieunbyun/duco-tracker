@@ -29,12 +29,13 @@
     served?: string[]; // the ambitions it is ticked for (a new one: those it starts with)
     via?: string[]; // with none ticked: the ambitions its links lead to (what leaving them empty means)
     ambReady?: boolean; // ticks can be saved (0080 is run)
+    goalsServe?: boolean; // the ambitions are in Experiments (0081): a goal is ticked for them like the rest
     onsaved: () => void;
     oncancel: () => void;
   };
   let {
     node, draft, nodes, links, projects, readings, groupProjects = [], members = [], contributors = [], tax = null,
-    ambitions = [], served = [], via = [], ambReady = false, onsaved, oncancel,
+    ambitions = [], served = [], via = [], ambReady = false, goalsServe = false, onsaved, oncancel,
   }: Props = $props();
 
   // "+ Create it in Planning too": a new Planning project from this item, linked to it
@@ -85,6 +86,8 @@
   const hadAmbs = untrack(() => served);
   let serves = $state<string[]>([...untrack(() => served)]);
   const ambsChanged = $derived(serves.length !== hadAmbs.length || serves.some((a) => !hadAmbs.includes(a)));
+  // what can be ticked for its ambitions: everything, once they are in Experiments; before, all but goals
+  const tickable = $derived(goalsServe || f.kind !== "goal");
   // projects and grants can each be a Planning project (a grant: one under Proposals)
   const plannable = $derived(f.kind === "project" || f.kind === "grant");
   // an item for one milestone of a Planning project (0077): named and dated by the milestone (as given)
@@ -138,7 +141,7 @@
     event.preventDefault();
     if (!f.title.trim()) return (error = "Give it a title.");
     if (f.start_on && f.end_on && f.end_on < f.start_on) return (error = "It ends before it starts.");
-    if (f.kind !== "goal" && ambsChanged && !ambReady) {
+    if (tickable && ambsChanged && !ambReady) {
       return (error = "Ticking its ambitions needs web/db/0080_pw_node_ambition.sql run first, in the Supabase SQL editor.");
     }
     busy = true;
@@ -174,7 +177,7 @@
       };
       if (!n0) Object.assign(fields, { lane_row: d0.lane_row ?? 0 });
       // a goal's step towards an ambition, sent only when it changes (so the rest saves before 0075 is run)
-      if (f.kind === "goal" && (f.ambition_id || null) !== (n0?.ambition_id ?? null)) fields.ambition_id = f.ambition_id || null;
+      if (!goalsServe && f.kind === "goal" && (f.ambition_id || null) !== (n0?.ambition_id ?? null)) fields.ambition_id = f.ambition_id || null;
       if (reworded && n0) await addRevision(n0.id, n0.title, n0.detail, reason.trim() || null);
       // a linked project keeps the Planning project's dates in step
       if (p && !ms0 && (startOn !== p.start_on || endOn !== p.end_on)) {
@@ -183,7 +186,7 @@
       // and a milestone's item, the milestone's
       if (ms0 && (startOn !== wasStart || endOn !== wasEnd)) await setMilestoneDates(ms0.id, { start_on: startOn, due_on: endOn });
       const id = await saveNode(n0?.id ?? null, fields);
-      if (f.kind !== "goal" && ambsChanged) await setAmbitions(id, serves, hadAmbs);
+      if (tickable && ambsChanged) await setAmbitions(id, serves, hadAmbs);
       if (members.length) await setContributors(id, contrib, had);
       onsaved();
     } catch (e) {
@@ -259,7 +262,7 @@
     <input bind:value={f.title} required readonly={!!linkedProject} />
     {#if linkedProject}<span class="synced">Named in Planning; its dates here and in Planning stay in step.</span>{/if}
   </label>
-  {#if f.kind === "goal"}
+  {#if f.kind === "goal" && !goalsServe}
     {#if n0?.ambition_id && ambitionChoices.length}
       <!-- from before: a goal that steps towards an ambition; clear it to make it an ambition of its own -->
       <label class="wide">Ambition

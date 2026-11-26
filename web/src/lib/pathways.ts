@@ -14,7 +14,7 @@ export const LANES = [
 export type Lane = (typeof LANES)[number]["key"];
 
 export const NODE_KINDS = [
-  { key: "goal", label: "Ambition", lane: "goals" }, // a goal serving no other goal: one of your few big ones
+  { key: "goal", label: "Goal", lane: "goals" }, // before 0081, a goal serving no other goal was an ambition
   { key: "objective", label: "Objective", lane: "goals" },
   { key: "project", label: "Project", lane: "publications" },
   { key: "person", label: "Person", lane: "publications" },
@@ -54,6 +54,7 @@ export type PwNode = {
   ambition_id?: string | null; // the ambition (a goal) it serves; empty: where its links lead (0075)
   milestone_id?: string | null; // one milestone of its Planning project, rather than the whole project (0077)
   ambition_order?: number | null; // an ambition's place among them, once dragged (0078)
+  ambition_topic_id?: string | null; // an old ambition, copied into Experiments as this subtopic (0081): no longer shown
 };
 export type PwNodeFields = Omit<PwNode, "id">;
 // A link is one kind of arrow, from one item to another; its direction says it all.
@@ -67,7 +68,7 @@ const num = (v: unknown) => (v === null || v === undefined ? null : Number(v));
 export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]; years: number }> {
   // the newer columns, each simply absent until its SQL is run
   const nodesQ = async () => {
-    let extra = ["ambition_id", "milestone_id", "ambition_order"];
+    let extra = ["ambition_id", "milestone_id", "ambition_order", "ambition_topic_id"];
     for (;;) {
       const r = await supabase.from("pw_node").select([NODE_COLS, ...extra].join(",")).order("created_at");
       const gone = r.error ? extra.find((c) => r.error!.message.includes(c)) : undefined;
@@ -88,11 +89,13 @@ export async function loadPathways(): Promise<{ nodes: PwNode[]; links: PwLink[]
   };
 }
 
-// ---- ambitions: the few big goals everything else serves --------------------------------
-/** A goal that serves no other goal is an ambition. */
+// ---- ambitions: the few big ones everything else serves --------------------------------
+// Since 0081 they are the subtopics of your ambitions theme in Experiments (see ambitionsOf there);
+// before it, a goal that served no other goal was one, and the helpers below are for that time.
+/** Before 0081: a goal that serves no other goal is an ambition. */
 export const isAmbition = (n: PwNode) => n.kind === "goal" && !n.ambition_id;
 
-/** The ambitions in your order (dragged, 0078); those not placed yet after, as they sit in the goals column. */
+/** Before 0081: the ambitions in your order (dragged, 0078); those not placed yet after, as they sit in the goals column. */
 export function ambitionsIn(nodes: PwNode[]): PwNode[] {
   const o = (n: PwNode) => n.ambition_order ?? Number.MAX_SAFE_INTEGER;
   return nodes.filter(isAmbition).sort((a, b) => o(a) - o(b) || a.lane_row - b.lane_row);
@@ -100,31 +103,22 @@ export function ambitionsIn(nodes: PwNode[]): PwNode[] {
 
 /**
  * The ambitions each item without ticks serves through its links alone, following the arrows
- * forward: an ambition reached, or an item with ticks (its ambitions), ends that path. A goal that
- * steps towards an ambition (ambition_id) serves that one.
+ * forward: an item with ticks (its ambitions) ends that path, and so, before 0081 (goalsAre), does
+ * an ambition reached. A goal that steps towards another (ambition_id, from before) goes there.
  */
-export function ambitionsVia(nodes: PwNode[], links: PwLink[], ticks: Map<string, string[]>): Map<string, string[]> {
+export function ambitionsVia(nodes: PwNode[], links: PwLink[], ticks: Map<string, string[]>, goalsAre = false): Map<string, string[]> {
   const byId = new Map(nodes.map((n) => [n.id, n]));
-  const top = (n: PwNode | undefined): string | null => {
-    for (let i = 0; n && i < 20; i++) {
-      if (isAmbition(n)) return n.id;
-      n = n.ambition_id ? byId.get(n.ambition_id) : undefined;
-    }
-    return null;
-  };
-  const own = (n: PwNode): string[] => {
-    if (isAmbition(n)) return [n.id];
-    if (n.kind === "goal" && n.ambition_id) { const t = top(n); return t ? [t] : []; }
-    return ticks.get(n.id) ?? [];
-  };
+  const amb = (n: PwNode) => goalsAre && isAmbition(n);
+  const own = (n: PwNode): string[] => (amb(n) ? [n.id] : ticks.get(n.id) ?? []);
   const next = new Map<string, string[]>();
   for (const l of links) next.set(l.from_id, [...(next.get(l.from_id) ?? []), l.to_id]);
+  const nextOf = (n: PwNode) => (n.kind === "goal" && n.ambition_id ? [n.ambition_id] : next.get(n.id) ?? []);
   const out = new Map<string, string[]>();
   for (const n of nodes) {
-    if (isAmbition(n) || ticks.get(n.id)?.length) continue;
-    const found = new Set<string>(n.kind === "goal" ? own(n) : []);
+    if (amb(n) || ticks.get(n.id)?.length) continue;
+    const found = new Set<string>();
     const seen = new Set([n.id]);
-    const queue = found.size ? [] : [...(next.get(n.id) ?? [])];
+    const queue = [...nextOf(n)];
     while (queue.length) {
       const id = queue.shift()!;
       if (seen.has(id)) continue;
@@ -133,7 +127,7 @@ export function ambitionsVia(nodes: PwNode[], links: PwLink[], ticks: Map<string
       if (!m) continue;
       const o = own(m);
       if (o.length) o.forEach((a) => found.add(a));
-      else queue.push(...(next.get(id) ?? []));
+      else queue.push(...nextOf(m));
     }
     if (found.size) out.set(n.id, [...found]);
   }
