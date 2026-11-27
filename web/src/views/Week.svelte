@@ -577,23 +577,10 @@
     return change(`${cancelled ? "Cancelled" : "Restored"} ${q(t)} on ${dayName(s.planned_on)} ${dayNum(s.planned_on)}`,
       () => saveSlot(s.id, { is_cancelled: cancelled, cancelled_by_sync: false })); // yours: the Outlook sync leaves it be
   }
-  /**
-   * A to-do on a milestone stands for it: done marks the milestone done as well, and
-   * reopening reopens a milestone that is done. (Undo takes back both as one.)
-   */
-  function milestoneFollows(t: Todo, done: boolean): string | null {
-    if (t.kind !== "task" || !t.milestone_id) return null;
-    const m = projects.flatMap((p) => p.milestone).find((x) => x.id === t.milestone_id);
-    if (!m) return done ? t.milestone_id : null; // not loaded here: done is still safe to set
-    return (done ? m.status !== "done" : m.status === "done") ? m.id : null;
-  }
+  /** Done or reopened: the to-do alone (its milestone and project are marked done on their own, in Planning). */
   function setDone(t: Todo, done: boolean) {
-    const ms = milestoneFollows(t, done);
-    const also = ms ? " and its milestone" : "";
-    return change(done ? `Marked ${q(t)}${also} done` : `Reopened ${q(t)}${also}`, async () => {
-      await saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null });
-      if (ms) await setMilestoneStatus(ms, done ? "done" : "active");
-    });
+    return change(done ? `Marked ${q(t)} done` : `Reopened ${q(t)}`,
+      () => saveTodo(t.id, { is_done: done, done_at: done ? new Date().toISOString() : null }));
   }
   function setMust(t: Todo) {
     const was = t.must_this_week;
@@ -1148,11 +1135,7 @@
       const day = f.started_at.slice(0, 10);
       if (p.slot) await saveSlot(p.slot.id, { entry_id: entryId, planned_on: day });
       else await saveSlot(null, { todo_id: p.todo.id, planned_on: day, entry_id: entryId });
-      if (markedDone) {
-        await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() });
-        const ms = milestoneFollows(p.todo, true);
-        if (ms) await setMilestoneStatus(ms, "done");
-      }
+      if (markedDone) await saveTodo(p.todo.id, { is_done: true, done_at: new Date().toISOString() });
       try { localStorage.setItem(LAST_CATEGORY, f.category_id); } catch {}
       remember(`Logged ${q(p.todo)}`);
     } catch (e) {

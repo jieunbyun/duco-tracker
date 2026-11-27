@@ -60,9 +60,8 @@
       move with it. To take one off that list without bringing it, <em>Mark done</em> it, or <em>Drop</em> it: it
       stays where it is, open — neither done nor cancelled — and is no longer offered, but is listed under
       <em>Dropped</em> at the foot of the list, where you can still tick it to bring it forward, or <em>Put back</em>
-      to have it offered again; moving it to another week offers it again too. A to-do made from a milestone (or
-      linked to one) stands for it: marking the to-do done marks the milestone done as well, and reopening the to-do
-      reopens the milestone; one Undo takes back both. Cancel keeps a to-do in the list, struck
+      to have it offered again; moving it to another week offers it again too. Marking a to-do done marks only the
+      to-do: a milestone or project it is linked to stays open until you mark it done itself. Cancel keeps a to-do in the list, struck
       through and restorable; Delete removes it. A red edge marks a planned day that has passed without being logged.
       <em>Small tasks / deadlines</em>, at the foot of each day, have no hours: type one into
       <em>+ task / deadline</em> and press Enter, tick it when it's done (it stays, struck through), and click or
